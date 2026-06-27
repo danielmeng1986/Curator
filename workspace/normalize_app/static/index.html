@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Curator Workspace Album Editor</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="bg-shape bg-shape-a"></div>
+    <div class="bg-shape bg-shape-b"></div>
+
+    <main class="app-shell">
+      <header class="app-header">
+        <h1>Curator Local Workspace Album Editor</h1>
+        <p>选择 Query 导入结果，直接编辑 workspace_album，并一次性提交到 Curator.db</p>
+      </header>
+
+      <section class="toolbar card">
+        <div class="query-controls">
+          <label for="querySelect">Query 文件</label>
+          <select id="querySelect"></select>
+          <button id="loadQueryBtn" class="btn btn-primary">导入 Query</button>
+          <button id="reloadBtn" class="btn btn-secondary">刷新当前 Query</button>
+        </div>
+
+        <div class="grid-controls">
+          <button id="toggleColumnsBtn" class="btn btn-secondary">显示/隐藏字段</button>
+          <button id="saveBtn" class="btn btn-accent" disabled>提交修改</button>
+        </div>
+      </section>
+
+      <section id="columnPanel" class="column-panel card hidden"></section>
+
+      <section class="status-row card">
+        <div><strong>状态:</strong> <span id="statusText">准备就绪</span></div>
+        <div><strong>数据行:</strong> <span id="rowCount">0</span></div>
+        <div><strong>待提交:</strong> <span id="dirtyCount">0</span></div>
+      </section>
+
+      <section class="table-card card">
+        <div class="table-wrap" id="tableWrap">
+          <table id="dataTable">
+            <colgroup id="tableColgroup"></colgroup>
+            <thead id="tableHead"></thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <div id="popup" class="popup hidden"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

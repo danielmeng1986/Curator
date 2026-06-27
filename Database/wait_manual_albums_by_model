@@ -1,0 +1,5 @@
+SELECT primary_model, COUNT(*) AS album_count
+FROM workspace_album
+WHERE status_id = 1
+GROUP BY primary_model
+ORDER BY primary_model;

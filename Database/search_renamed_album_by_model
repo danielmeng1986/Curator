@@ -1,0 +1,5 @@
+SELECT *
+FROM workspace_album
+WHERE status_id = 1
+AND primary_model = 'Abigale'
+ORDER BY album_name;
