@@ -3,3 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 .DS_Store
+database/*
+workspace/curator_base_app/backups/*
+workspace/curator_base_app/logs/*
+!workspace/curator_base_app/logs/.gitkeep
+!workspace/curator_base_app/backups/.gitkeep
+!database/.gitkeep

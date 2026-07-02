@@ -8,19 +8,37 @@ const state = {
   pendingChanges: new Map(),
   originalByPk: new Map(),
   lastEditedColumn: null,
+  selectedPkValues: new Set(),
+  selectionAnchorRowIndex: null,
 };
 
 const COLUMN_VISIBILITY_STORAGE_KEY = "normalize_app_workspace_album_column_visibility";
+const LAST_QUERY_STORAGE_KEY = "normalize_app_workspace_album_last_query";
+const APP_BASE_PATH = window.location.pathname.startsWith("/normalize") ? "/normalize" : "";
 
 const ui = {
   querySelect: document.getElementById("querySelect"),
   loadQueryBtn: document.getElementById("loadQueryBtn"),
   reloadBtn: document.getElementById("reloadBtn"),
   toggleColumnsBtn: document.getElementById("toggleColumnsBtn"),
+  bulkStatusInput: document.getElementById("bulkStatusInput"),
+  bulkApplyStatusBtn: document.getElementById("bulkApplyStatusBtn"),
+  bulkAlbumFindInput: document.getElementById("bulkAlbumFindInput"),
+  bulkAlbumReplaceInput: document.getElementById("bulkAlbumReplaceInput"),
+  bulkApplyAlbumReplaceBtn: document.getElementById("bulkApplyAlbumReplaceBtn"),
   saveBtn: document.getElementById("saveBtn"),
+  backupReasonInput: document.getElementById("backupReasonInput"),
+  backupTagInput: document.getElementById("backupTagInput"),
+  backupNowBtn: document.getElementById("backupNowBtn"),
+  cleanupBackupsBtn: document.getElementById("cleanupBackupsBtn"),
+  rollbackModeSelect: document.getElementById("rollbackModeSelect"),
+  rollbackTimestampInput: document.getElementById("rollbackTimestampInput"),
+  rollbackTagInput: document.getElementById("rollbackTagInput"),
+  rollbackNowBtn: document.getElementById("rollbackNowBtn"),
   columnPanel: document.getElementById("columnPanel"),
   statusText: document.getElementById("statusText"),
   rowCount: document.getElementById("rowCount"),
+  selectedCount: document.getElementById("selectedCount"),
   dirtyCount: document.getElementById("dirtyCount"),
   tableWrap: document.getElementById("tableWrap"),
   tableColgroup: document.getElementById("tableColgroup"),
@@ -47,6 +65,21 @@ async function fetchJson(url, options = {}) {
     throw new Error(data.error || "request failed");
   }
   return data;
+}
+
+function apiUrl(path) {
+  return `${APP_BASE_PATH}${path}`;
+}
+
+function toIsoFromDateTimeLocal(value) {
+  if (!value) {
+    return "";
+  }
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) {
+    return "";
+  }
+  return dt.toISOString();
 }
 
 function getPkColumnFromSchema(schema) {
@@ -94,6 +127,190 @@ function resetPendingChanges() {
   updateDirtyCounter();
 }
 
+function updateSelectionCounter() {
+  ui.selectedCount.textContent = String(state.selectedPkValues.size);
+  ui.bulkApplyStatusBtn.disabled = state.selectedPkValues.size === 0;
+  ui.bulkApplyAlbumReplaceBtn.disabled = state.selectedPkValues.size === 0;
+}
+
+function setRowSelected(tr, selected) {
+  const pkValue = Number(tr.dataset.pkValue);
+  if (!Number.isFinite(pkValue)) {
+    return;
+  }
+  if (selected) {
+    state.selectedPkValues.add(pkValue);
+  } else {
+    state.selectedPkValues.delete(pkValue);
+  }
+  tr.classList.toggle("row-selected", selected);
+}
+
+function clearRowSelection() {
+  state.selectedPkValues.clear();
+  state.selectionAnchorRowIndex = null;
+  ui.tableBody.querySelectorAll("tr.row-selected").forEach((tr) => {
+    tr.classList.remove("row-selected");
+  });
+  updateSelectionCounter();
+}
+
+function selectRowRange(startIndex, endIndex) {
+  const rows = ui.tableBody.querySelectorAll("tr");
+  const min = Math.min(startIndex, endIndex);
+  const max = Math.max(startIndex, endIndex);
+  clearRowSelection();
+  for (let i = min; i <= max; i += 1) {
+    const tr = rows[i];
+    if (tr) {
+      setRowSelected(tr, true);
+    }
+  }
+  updateSelectionCounter();
+}
+
+function onRowClick(event) {
+  const tr = event.currentTarget;
+  const rowIndex = Number(tr.dataset.rowIndex);
+  if (!Number.isFinite(rowIndex)) {
+    return;
+  }
+
+  if (event.shiftKey && Number.isFinite(state.selectionAnchorRowIndex)) {
+    selectRowRange(state.selectionAnchorRowIndex, rowIndex);
+    return;
+  }
+
+  if (event.metaKey || event.ctrlKey) {
+    setRowSelected(tr, !tr.classList.contains("row-selected"));
+    state.selectionAnchorRowIndex = rowIndex;
+    updateSelectionCounter();
+    return;
+  }
+
+  clearRowSelection();
+  setRowSelected(tr, true);
+  state.selectionAnchorRowIndex = rowIndex;
+  updateSelectionCounter();
+}
+
+function applyCellChange(pkValue, column, rawValue, cell = null) {
+  state.lastEditedColumn = column;
+  const originalRow = state.originalByPk.get(pkValue) || {};
+  const originalValue = normalizeCellValue(originalRow[column]);
+
+  if (rawValue === originalValue) {
+    const existing = state.pendingChanges.get(pkValue);
+    if (existing && column in existing) {
+      delete existing[column];
+      if (Object.keys(existing).length === 0) {
+        state.pendingChanges.delete(pkValue);
+      } else {
+        state.pendingChanges.set(pkValue, existing);
+      }
+    }
+    if (cell) {
+      cell.classList.remove("dirty-cell");
+    }
+    updateDirtyCounter();
+    return;
+  }
+
+  const rowChanges = state.pendingChanges.get(pkValue) || {};
+  rowChanges[column] = rawValue;
+  state.pendingChanges.set(pkValue, rowChanges);
+  if (cell) {
+    cell.classList.add("dirty-cell");
+  }
+  updateDirtyCounter();
+}
+
+function applyBulkStatusUpdate() {
+  if (state.selectedPkValues.size === 0) {
+    showPopup("请先选择至少一行", false);
+    return;
+  }
+
+  if (!state.columns.includes("status_id")) {
+    showPopup("当前结果不包含 status_id 列", false);
+    return;
+  }
+
+  const rawInput = (ui.bulkStatusInput.value || "").trim();
+  if (!rawInput) {
+    showPopup("请输入要批量设置的 status_id", false);
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = parseForCommit(rawInput, "status_id");
+  } catch (err) {
+    showPopup(err.message, false);
+    return;
+  }
+
+  const normalized = normalizeCellValue(parsed);
+  let applied = 0;
+  state.selectedPkValues.forEach((pkValue) => {
+    const cell = ui.tableBody.querySelector(`td[data-pk-value="${pkValue}"][data-column="status_id"]`);
+    if (!cell) {
+      return;
+    }
+    cell.textContent = normalized;
+    applyCellChange(pkValue, "status_id", normalized, cell);
+    applied += 1;
+  });
+
+  showPopup(`已将 ${applied} 行的 status_id 设为 ${normalized}`);
+}
+
+function applyBulkAlbumNameReplace() {
+  if (state.selectedPkValues.size === 0) {
+    showPopup("请先选择至少一行", false);
+    return;
+  }
+
+  if (!state.columns.includes("album_name")) {
+    showPopup("当前结果不包含 album_name 列", false);
+    return;
+  }
+
+  const findText = ui.bulkAlbumFindInput.value || "";
+  const replaceText = ui.bulkAlbumReplaceInput.value || "";
+  if (!findText) {
+    showPopup("请先输入要替换的文本", false);
+    return;
+  }
+
+  let touched = 0;
+  let replacedRows = 0;
+  state.selectedPkValues.forEach((pkValue) => {
+    const cell = ui.tableBody.querySelector(`td[data-pk-value="${pkValue}"][data-column="album_name"]`);
+    if (!cell) {
+      return;
+    }
+
+    const current = cell.textContent || "";
+    const next = current.split(findText).join(replaceText);
+    if (next === current) {
+      return;
+    }
+
+    cell.textContent = next;
+    applyCellChange(pkValue, "album_name", next, cell);
+    touched += 1;
+    replacedRows += 1;
+  });
+
+  if (touched === 0) {
+    showPopup("选中行中没有匹配到可替换内容", false);
+    return;
+  }
+
+  showPopup(`已替换 ${replacedRows} 行的 album_name`);
+}
+
 function getColumnWidth(column) {
   const current = state.columnState.get(column);
   if (current && current.width) {
@@ -130,6 +347,43 @@ function saveColumnVisibilityPrefs() {
   } catch {
     // Ignore storage write failures (e.g. private mode quota restrictions).
   }
+}
+
+function loadLastQueryPreference() {
+  try {
+    const raw = localStorage.getItem(LAST_QUERY_STORAGE_KEY);
+    return raw ? String(raw) : "";
+  } catch (err) {
+    console.warn("localStorage unavailable while loading last query", err);
+    return "";
+  }
+}
+
+function saveLastQueryPreference(queryName) {
+  if (!queryName) {
+    return;
+  }
+  try {
+    localStorage.setItem(LAST_QUERY_STORAGE_KEY, queryName);
+  } catch (err) {
+    console.warn("localStorage unavailable while saving last query", err);
+    setStatus("浏览器禁止 localStorage，无法记住上次 Query");
+  }
+}
+
+function normalizeQueryName(queryName) {
+  if (!queryName) {
+    return "";
+  }
+  return String(queryName).replace(/\\/g, "/").split("/").filter(Boolean).pop() || "";
+}
+
+function findMatchingQueryOption(queries, rawQueryName) {
+  const normalizedTarget = normalizeQueryName(rawQueryName);
+  if (!normalizedTarget) {
+    return null;
+  }
+  return queries.find((q) => normalizeQueryName(q.name) === normalizedTarget) || null;
 }
 
 function ensureColumnState() {
@@ -354,6 +608,9 @@ function buildTable() {
   state.rows.forEach((row) => {
     const tr = document.createElement("tr");
     const pkValue = row[state.pkColumn];
+    tr.dataset.pkValue = String(pkValue);
+    tr.dataset.rowIndex = String(ui.tableBody.children.length);
+    tr.addEventListener("click", onRowClick);
 
     state.columns.forEach((column, index) => {
       const td = document.createElement("td");
@@ -383,47 +640,25 @@ function buildTable() {
   });
 
   ui.rowCount.textContent = String(state.rows.length);
+  updateSelectionCounter();
 }
 
 function onCellBlur(event) {
   const cell = event.currentTarget;
   const pkValue = Number(cell.dataset.pkValue);
   const column = cell.dataset.column;
-  state.lastEditedColumn = column;
   const raw = cell.textContent ?? "";
-  const originalRow = state.originalByPk.get(pkValue) || {};
-  const originalValue = normalizeCellValue(originalRow[column]);
-
-  if (raw === originalValue) {
-    const existing = state.pendingChanges.get(pkValue);
-    if (existing && column in existing) {
-      delete existing[column];
-      if (Object.keys(existing).length === 0) {
-        state.pendingChanges.delete(pkValue);
-      } else {
-        state.pendingChanges.set(pkValue, existing);
-      }
-    }
-    cell.classList.remove("dirty-cell");
-    updateDirtyCounter();
-    return;
-  }
-
-  const rowChanges = state.pendingChanges.get(pkValue) || {};
-  rowChanges[column] = raw;
-  state.pendingChanges.set(pkValue, rowChanges);
-  cell.classList.add("dirty-cell");
-  updateDirtyCounter();
+  applyCellChange(pkValue, column, raw, cell);
 }
 
 async function loadSchema() {
-  const data = await fetchJson("/api/schema?table=workspace_album");
+  const data = await fetchJson(apiUrl("/api/schema?table=workspace_album"));
   state.schema = data.schema;
   state.pkColumn = getPkColumnFromSchema(state.schema);
 }
 
 async function loadQueries() {
-  const data = await fetchJson("/api/queries");
+  const data = await fetchJson(apiUrl("/api/queries"));
   ui.querySelect.innerHTML = "";
   data.queries.forEach((query) => {
     const option = document.createElement("option");
@@ -436,10 +671,23 @@ async function loadQueries() {
     throw new Error("database 目录中未找到可用 Query 文件");
   }
 
+  const savedQuery = loadLastQueryPreference();
+  const savedOption = findMatchingQueryOption(data.queries, savedQuery);
+  if (savedOption) {
+    ui.querySelect.value = savedOption.name;
+    saveLastQueryPreference(ui.querySelect.value);
+    return;
+  }
+
   const defaultOption = data.queries.find((q) => q.name === "need_confirm_album_wowgirls");
   if (defaultOption) {
     ui.querySelect.value = defaultOption.name;
+    saveLastQueryPreference(ui.querySelect.value);
+    return;
   }
+
+  ui.querySelect.value = data.queries[0].name;
+  saveLastQueryPreference(ui.querySelect.value);
 }
 
 function hydrateOriginalRows(rows) {
@@ -453,7 +701,7 @@ function hydrateOriginalRows(rows) {
 async function loadQueryData() {
   const queryName = ui.querySelect.value;
   setStatus(`正在加载 ${queryName} ...`);
-  const data = await fetchJson("/api/run-query", {
+  const data = await fetchJson(apiUrl("/api/run-query"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query_name: queryName }),
@@ -469,8 +717,11 @@ async function loadQueryData() {
 
   hydrateOriginalRows(state.rows);
   resetPendingChanges();
+  clearRowSelection();
   buildColumnPanel();
   buildTable();
+  saveLastQueryPreference(queryName);
+  saveLastQueryPreference(state.queryName);
   setStatus(`已加载 ${state.queryName}，共 ${data.row_count} 行`);
 }
 
@@ -496,7 +747,7 @@ async function submitChanges() {
   }
 
   setStatus("正在提交修改...");
-  const data = await fetchJson("/api/batch-update", {
+  const data = await fetchJson(apiUrl("/api/batch-update"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -515,7 +766,73 @@ async function submitChanges() {
   focusFirstRowOfColumn(targetColumn);
 }
 
+function syncRollbackModeUI() {
+  const mode = ui.rollbackModeSelect.value;
+  ui.rollbackTimestampInput.disabled = mode !== "timestamp";
+  ui.rollbackTagInput.disabled = mode !== "tag";
+}
+
+async function createManualBackup() {
+  const reason = (ui.backupReasonInput.value || "").trim();
+  const tag = (ui.backupTagInput.value || "").trim();
+  setStatus("正在创建手动快照...");
+  const data = await fetchJson(apiUrl("/api/backup-now"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason, tag }),
+  });
+  const tagText = data.tag ? `，Tag: ${data.tag}` : "";
+  showPopup(`快照已创建${tagText}`);
+  setStatus(`手动快照已创建: ${data.snapshot}`);
+}
+
+async function cleanupBackups() {
+  setStatus("正在清理过期快照...");
+  const data = await fetchJson(apiUrl("/api/backups/cleanup"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  showPopup(`清理完成，删除 ${data.deleted.length} 个过期快照`);
+  setStatus(`快照清理完成，删除 ${data.deleted.length} 个`);
+}
+
+async function rollbackNow() {
+  const mode = ui.rollbackModeSelect.value;
+  const payload = { mode };
+
+  if (mode === "timestamp") {
+    const isoTs = toIsoFromDateTimeLocal(ui.rollbackTimestampInput.value);
+    if (!isoTs) {
+      throw new Error("请选择有效的时间点");
+    }
+    payload.timestamp = isoTs;
+  }
+
+  if (mode === "tag") {
+    const tag = (ui.rollbackTagInput.value || "").trim();
+    if (!tag) {
+      throw new Error("请输入 Tag");
+    }
+    payload.tag = tag;
+  }
+
+  setStatus("正在执行回滚...");
+  const data = await fetchJson(apiUrl("/api/rollback"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  showPopup(`回滚完成，使用快照: ${data.selected_snapshot.filename}`);
+  await loadQueryData();
+  setStatus(`回滚完成: ${data.selected_snapshot.snapshot}`);
+}
+
 function bindEvents() {
+  ui.querySelect.addEventListener("change", () => {
+    saveLastQueryPreference(ui.querySelect.value);
+  });
+
   ui.loadQueryBtn.addEventListener("click", async () => {
     try {
       await loadQueryData();
@@ -546,11 +863,51 @@ function bindEvents() {
       showPopup(`提交失败: ${err.message}`, false);
     }
   });
+
+  ui.bulkApplyStatusBtn.addEventListener("click", () => {
+    applyBulkStatusUpdate();
+  });
+
+  ui.bulkApplyAlbumReplaceBtn.addEventListener("click", () => {
+    applyBulkAlbumNameReplace();
+  });
+
+  ui.backupNowBtn.addEventListener("click", async () => {
+    try {
+      await createManualBackup();
+    } catch (err) {
+      setStatus(`手动备份失败: ${err.message}`);
+      showPopup(`手动备份失败: ${err.message}`, false);
+    }
+  });
+
+  ui.cleanupBackupsBtn.addEventListener("click", async () => {
+    try {
+      await cleanupBackups();
+    } catch (err) {
+      setStatus(`清理失败: ${err.message}`);
+      showPopup(`清理失败: ${err.message}`, false);
+    }
+  });
+
+  ui.rollbackModeSelect.addEventListener("change", () => {
+    syncRollbackModeUI();
+  });
+
+  ui.rollbackNowBtn.addEventListener("click", async () => {
+    try {
+      await rollbackNow();
+    } catch (err) {
+      setStatus(`回滚失败: ${err.message}`);
+      showPopup(`回滚失败: ${err.message}`, false);
+    }
+  });
 }
 
 async function init() {
   bindEvents();
   try {
+    syncRollbackModeUI();
     await loadSchema();
     await loadQueries();
     await loadQueryData();

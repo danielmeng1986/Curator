@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Curator Workspace Album Editor</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="bg-shape bg-shape-a"></div>
+    <div class="bg-shape bg-shape-b"></div>
+
+    <main class="app-shell">
+      <header class="app-header">
+        <h1>Curator Local Workspace Album Editor</h1>
+        <p>选择 Query 导入结果，直接编辑 workspace_album，并一次性提交到 Curator.db</p>
+      </header>
+
+      <section class="toolbar card">
+        <div class="query-controls">
+          <label for="querySelect">Query 文件</label>
+          <select id="querySelect"></select>
+          <button id="loadQueryBtn" class="btn btn-primary">导入 Query</button>
+          <button id="reloadBtn" class="btn btn-secondary">刷新当前 Query</button>
+        </div>
+
+        <div class="grid-controls">
+          <button id="toggleColumnsBtn" class="btn btn-secondary">显示/隐藏字段</button>
+          <label for="bulkStatusInput" class="bulk-label">批量 status_id</label>
+          <input id="bulkStatusInput" class="bulk-status-input" type="number" step="1" placeholder="例如 2" />
+          <button id="bulkApplyStatusBtn" class="btn btn-secondary" disabled>应用到选中行</button>
+
+          <label for="bulkAlbumFindInput" class="bulk-label">批量替换 album_name</label>
+          <input id="bulkAlbumFindInput" class="bulk-text-input" type="text" placeholder="查找文本" />
+          <input id="bulkAlbumReplaceInput" class="bulk-text-input" type="text" placeholder="替换为（可留空）" />
+          <button id="bulkApplyAlbumReplaceBtn" class="btn btn-secondary" disabled>替换选中行</button>
+
+          <button id="saveBtn" class="btn btn-accent" disabled>提交修改</button>
+        </div>
+
+        <div class="grid-controls">
+          <label for="backupReasonInput" class="bulk-label">手动备份</label>
+          <input id="backupReasonInput" class="bulk-text-input" type="text" placeholder="reason（可选）" />
+          <input id="backupTagInput" class="bulk-text-input" type="text" placeholder="Tag（可选，带 Tag 不自动清理）" />
+          <button id="backupNowBtn" class="btn btn-secondary">立即备份</button>
+          <button id="cleanupBackupsBtn" class="btn btn-secondary">清理过期快照</button>
+        </div>
+
+        <div class="grid-controls">
+          <label for="rollbackModeSelect" class="bulk-label">一键回滚</label>
+          <select id="rollbackModeSelect" class="bulk-text-input">
+            <option value="before_last_operation">回滚到上一次操作前</option>
+            <option value="timestamp">回滚到某个时间点</option>
+            <option value="tag">回滚到某个 Tag 备份</option>
+          </select>
+          <input id="rollbackTimestampInput" class="bulk-text-input" type="datetime-local" />
+          <input id="rollbackTagInput" class="bulk-text-input" type="text" placeholder="Tag 名称" disabled />
+          <button id="rollbackNowBtn" class="btn btn-accent">执行回滚</button>
+        </div>
+      </section>
+
+      <section id="columnPanel" class="column-panel card hidden"></section>
+
+      <section class="status-row card">
+        <div><strong>状态:</strong> <span id="statusText">准备就绪</span></div>
+        <div><strong>数据行:</strong> <span id="rowCount">0</span></div>
+        <div><strong>选中行:</strong> <span id="selectedCount">0</span></div>
+        <div><strong>待提交:</strong> <span id="dirtyCount">0</span></div>
+      </section>
+
+      <section class="table-card card">
+        <div class="table-wrap" id="tableWrap">
+          <table id="dataTable">
+            <colgroup id="tableColgroup"></colgroup>
+            <thead id="tableHead"></thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <div id="popup" class="popup hidden"></div>
+
+    <script src="app.js?v=20260628-3"></script>
+  </body>
+</html>
