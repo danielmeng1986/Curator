@@ -369,12 +369,32 @@ def load_query_sql(query_name: str) -> str:
     return sql
 
 
-def query_rows(sql: str) -> tuple[list[str], list[dict]]:
+def query_rows(sql: str, params: tuple = ()) -> tuple[list[str], list[dict]]:
     with open_db() as conn:
-        cur = conn.execute(sql)
+        cur = conn.execute(sql, params)
         columns = [desc[0] for desc in (cur.description or [])]
         rows = [dict(row) for row in cur.fetchall()]
     return columns, rows
+
+
+def get_status_options() -> list[dict]:
+    with open_db() as conn:
+        cur = conn.execute("SELECT id, name, description FROM status ORDER BY id")
+        return [{"id": row["id"], "name": row["name"], "description": row["description"]} for row in cur.fetchall()]
+
+
+def get_studio_names() -> list[str]:
+    with open_db() as conn:
+        cur = conn.execute("SELECT name FROM studio ORDER BY name")
+        return [row["name"] for row in cur.fetchall()]
+
+
+def build_workspace_album_sql(status_id: int, studio_name: str) -> tuple[str, tuple]:
+    if studio_name:
+        sql = "SELECT * FROM workspace_album WHERE status_id = ? AND studio_name = ? ORDER BY id"
+        return sql, (status_id, studio_name)
+    sql = "SELECT * FROM workspace_album WHERE status_id = ? ORDER BY id"
+    return sql, (status_id,)
 
 
 def append_log(entry: dict) -> None:
@@ -451,6 +471,15 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_json(200, {"ok": True, "queries": list_query_files()})
             return
 
+        if api_path == "/api/options":
+            try:
+                statuses = get_status_options()
+                studios = get_studio_names()
+                self._send_json(200, {"ok": True, "statuses": statuses, "studios": studios})
+            except Exception as ex:
+                self._send_json(500, {"ok": False, "error": str(ex)})
+            return
+
         if api_path == "/api/schema":
             qs = parse_qs(parsed.query)
             table_name = (qs.get("table") or ["workspace_album"])[0]
@@ -487,15 +516,20 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         if api_path == "/api/run-query":
-            query_name = str(body.get("query_name", "")).strip()
             try:
-                sql = load_query_sql(query_name)
-                columns, rows = query_rows(sql)
+                raw_status_id = body.get("status_id")
+                if raw_status_id is None:
+                    raise ValueError("status_id is required")
+                status_id = int(raw_status_id)
+                studio_name = str(body.get("studio_name", "")).strip()
+                sql, params = build_workspace_album_sql(status_id, studio_name)
+                columns, rows = query_rows(sql, params)
                 self._send_json(
                     200,
                     {
                         "ok": True,
-                        "query_name": query_name,
+                        "status_id": status_id,
+                        "studio_name": studio_name,
                         "sql": sql,
                         "columns": columns,
                         "rows": rows,

@@ -13,11 +13,13 @@ const state = {
 };
 
 const COLUMN_VISIBILITY_STORAGE_KEY = "normalize_app_workspace_album_column_visibility";
-const LAST_QUERY_STORAGE_KEY = "normalize_app_workspace_album_last_query";
+const LAST_STATUS_ID_KEY = "normalize_app_workspace_album_last_status_id";
+const LAST_STUDIO_NAME_KEY = "normalize_app_workspace_album_last_studio_name";
 const APP_BASE_PATH = window.location.pathname.startsWith("/normalize") ? "/normalize" : "";
 
 const ui = {
-  querySelect: document.getElementById("querySelect"),
+  statusSelect: document.getElementById("statusSelect"),
+  studioSelect: document.getElementById("studioSelect"),
   loadQueryBtn: document.getElementById("loadQueryBtn"),
   reloadBtn: document.getElementById("reloadBtn"),
   toggleColumnsBtn: document.getElementById("toggleColumnsBtn"),
@@ -393,41 +395,34 @@ function saveColumnVisibilityPrefs() {
   }
 }
 
-function loadLastQueryPreference() {
+function loadLastStatusIdPreference() {
   try {
-    const raw = localStorage.getItem(LAST_QUERY_STORAGE_KEY);
-    return raw ? String(raw) : "";
+    const raw = localStorage.getItem(LAST_STATUS_ID_KEY);
+    return raw ? parseInt(raw, 10) : null;
   } catch (err) {
-    console.warn("localStorage unavailable while loading last query", err);
-    return "";
-  }
-}
-
-function saveLastQueryPreference(queryName) {
-  if (!queryName) {
-    return;
-  }
-  try {
-    localStorage.setItem(LAST_QUERY_STORAGE_KEY, queryName);
-  } catch (err) {
-    console.warn("localStorage unavailable while saving last query", err);
-    setStatus("浏览器禁止 localStorage，无法记住上次 Query");
-  }
-}
-
-function normalizeQueryName(queryName) {
-  if (!queryName) {
-    return "";
-  }
-  return String(queryName).replace(/\\/g, "/").split("/").filter(Boolean).pop() || "";
-}
-
-function findMatchingQueryOption(queries, rawQueryName) {
-  const normalizedTarget = normalizeQueryName(rawQueryName);
-  if (!normalizedTarget) {
+    console.warn("localStorage unavailable while loading last status_id", err);
     return null;
   }
-  return queries.find((q) => normalizeQueryName(q.name) === normalizedTarget) || null;
+}
+
+function loadLastStudioNamePreference() {
+  try {
+    const raw = localStorage.getItem(LAST_STUDIO_NAME_KEY);
+    return raw !== null ? String(raw) : null;
+  } catch (err) {
+    console.warn("localStorage unavailable while loading last studio_name", err);
+    return null;
+  }
+}
+
+function saveLastParamPreferences(statusId, studioName) {
+  try {
+    localStorage.setItem(LAST_STATUS_ID_KEY, String(statusId));
+    localStorage.setItem(LAST_STUDIO_NAME_KEY, studioName);
+  } catch (err) {
+    console.warn("localStorage unavailable while saving preferences", err);
+    setStatus("浏览器禁止 localStorage，无法记住上次查询参数");
+  }
 }
 
 function ensureColumnState() {
@@ -743,37 +738,46 @@ async function loadSchema() {
   state.pkColumn = getPkColumnFromSchema(state.schema);
 }
 
-async function loadQueries() {
-  const data = await fetchJson(apiUrl("/api/queries"));
-  ui.querySelect.innerHTML = "";
-  data.queries.forEach((query) => {
+async function loadOptions() {
+  const data = await fetchJson(apiUrl("/api/options"));
+
+  ui.statusSelect.innerHTML = "";
+  data.statuses.forEach((s) => {
     const option = document.createElement("option");
-    option.value = query.name;
-    option.textContent = query.name;
-    ui.querySelect.appendChild(option);
+    option.value = s.id;
+    option.textContent = `${s.id} – ${s.name}`;
+    option.title = s.description;
+    ui.statusSelect.appendChild(option);
   });
 
-  if (data.queries.length === 0) {
-    throw new Error("database 目录中未找到可用 Query 文件");
+  ui.studioSelect.innerHTML = "";
+  const allOption = document.createElement("option");
+  allOption.value = "";
+  allOption.textContent = "（全部 Studio）";
+  ui.studioSelect.appendChild(allOption);
+  data.studios.forEach((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    ui.studioSelect.appendChild(option);
+  });
+
+  if (data.statuses.length === 0) {
+    throw new Error("数据库中未找到 status 记录");
   }
 
-  const savedQuery = loadLastQueryPreference();
-  const savedOption = findMatchingQueryOption(data.queries, savedQuery);
-  if (savedOption) {
-    ui.querySelect.value = savedOption.name;
-    saveLastQueryPreference(ui.querySelect.value);
-    return;
+  const savedStatusId = loadLastStatusIdPreference();
+  if (savedStatusId !== null && data.statuses.some((s) => s.id === savedStatusId)) {
+    ui.statusSelect.value = String(savedStatusId);
   }
 
-  const defaultOption = data.queries.find((q) => q.name === "need_confirm_album_wowgirls");
-  if (defaultOption) {
-    ui.querySelect.value = defaultOption.name;
-    saveLastQueryPreference(ui.querySelect.value);
-    return;
+  const savedStudioName = loadLastStudioNamePreference();
+  if (savedStudioName !== null) {
+    const exists = savedStudioName === "" || data.studios.includes(savedStudioName);
+    if (exists) {
+      ui.studioSelect.value = savedStudioName;
+    }
   }
-
-  ui.querySelect.value = data.queries[0].name;
-  saveLastQueryPreference(ui.querySelect.value);
 }
 
 function hydrateOriginalRows(rows) {
@@ -785,15 +789,17 @@ function hydrateOriginalRows(rows) {
 }
 
 async function loadQueryData() {
-  const queryName = ui.querySelect.value;
-  setStatus(`正在加载 ${queryName} ...`);
+  const statusId = parseInt(ui.statusSelect.value, 10);
+  const studioName = ui.studioSelect.value;
+  const label = studioName ? `status=${statusId}, studio=${studioName}` : `status=${statusId}, 全部 Studio`;
+  setStatus(`正在加载 ${label} ...`);
   const data = await fetchJson(apiUrl("/api/run-query"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query_name: queryName }),
+    body: JSON.stringify({ status_id: statusId, studio_name: studioName }),
   });
 
-  state.queryName = data.query_name;
+  state.queryName = studioName ? `status_${statusId}_${studioName}` : `status_${statusId}`;
   state.columns = data.columns;
   state.rows = data.rows;
 
@@ -806,9 +812,8 @@ async function loadQueryData() {
   clearRowSelection();
   buildColumnPanel();
   buildTable();
-  saveLastQueryPreference(queryName);
-  saveLastQueryPreference(state.queryName);
-  setStatus(`已加载 ${state.queryName}，共 ${data.row_count} 行`);
+  saveLastParamPreferences(statusId, studioName);
+  setStatus(`已加载 ${label}，共 ${data.row_count} 行`);
 }
 
 async function submitChanges() {
@@ -917,10 +922,6 @@ async function rollbackNow() {
 function bindEvents() {
   document.addEventListener("keydown", onGlobalKeyDown);
 
-  ui.querySelect.addEventListener("change", () => {
-    saveLastQueryPreference(ui.querySelect.value);
-  });
-
   ui.loadQueryBtn.addEventListener("click", async () => {
     try {
       await loadQueryData();
@@ -1009,7 +1010,7 @@ async function init() {
   try {
     syncRollbackModeUI();
     await loadSchema();
-    await loadQueries();
+    await loadOptions();
     await loadQueryData();
   } catch (err) {
     setStatus(`初始化失败: ${err.message}`);
