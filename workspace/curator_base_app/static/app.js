@@ -27,6 +27,8 @@ const ui = {
   bulkAlbumReplaceInput: document.getElementById("bulkAlbumReplaceInput"),
   bulkApplyAlbumReplaceBtn: document.getElementById("bulkApplyAlbumReplaceBtn"),
   saveBtn: document.getElementById("saveBtn"),
+  focusIdInput: document.getElementById("focusIdInput"),
+  focusIdBtn: document.getElementById("focusIdBtn"),
   backupReasonInput: document.getElementById("backupReasonInput"),
   backupTagInput: document.getElementById("backupTagInput"),
   backupNowBtn: document.getElementById("backupNowBtn"),
@@ -167,6 +169,48 @@ function selectRowRange(startIndex, endIndex) {
     }
   }
   updateSelectionCounter();
+}
+
+function selectAllRows() {
+  const rows = ui.tableBody.querySelectorAll("tr");
+  if (rows.length === 0) {
+    return;
+  }
+
+  clearRowSelection();
+  rows.forEach((tr) => setRowSelected(tr, true));
+  state.selectionAnchorRowIndex = 0;
+  updateSelectionCounter();
+}
+
+function shouldHandleTableSelectAll(event) {
+  if (event.key.toLowerCase() !== "a" || (!event.metaKey && !event.ctrlKey)) {
+    return false;
+  }
+
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+    return false;
+  }
+
+  if (target.isContentEditable) {
+    return ui.tableWrap.contains(target);
+  }
+
+  return ui.tableWrap.contains(target) || ui.tableWrap.contains(document.activeElement);
+}
+
+function onGlobalKeyDown(event) {
+  if (!shouldHandleTableSelectAll(event)) {
+    return;
+  }
+
+  event.preventDefault();
+  selectAllRows();
 }
 
 function onRowClick(event) {
@@ -567,6 +611,48 @@ function focusFirstRowOfColumn(column) {
   moveCaretOrSelectCell(targetCell);
 }
 
+function focusRowByWorkspaceAlbumId() {
+  const raw = (ui.focusIdInput.value || "").trim();
+  if (!raw) {
+    showPopup("请输入要定位的 id", false);
+    return;
+  }
+
+  const targetId = Number(raw);
+  if (!Number.isInteger(targetId) || targetId <= 0) {
+    showPopup("id 必须是正整数", false);
+    return;
+  }
+
+  const targetRow = ui.tableBody.querySelector(`tr[data-pk-value="${targetId}"]`);
+  if (!targetRow) {
+    showPopup("id 不存在，未跳转", false);
+    return;
+  }
+
+  targetRow.scrollIntoView({ block: "center", inline: "nearest" });
+  clearRowSelection();
+  setRowSelected(targetRow, true);
+
+  const rowIndex = Number(targetRow.dataset.rowIndex);
+  state.selectionAnchorRowIndex = Number.isFinite(rowIndex) ? rowIndex : null;
+  updateSelectionCounter();
+
+  const editableColumn = state.lastEditedColumn && isEditableColumn(state.lastEditedColumn)
+    ? state.lastEditedColumn
+    : state.columns.find((col) => isEditableColumn(col));
+
+  if (!editableColumn) {
+    return;
+  }
+
+  const targetCell = targetRow.querySelector(`td[data-column="${editableColumn}"]`);
+  if (!targetCell || targetCell.contentEditable !== "true") {
+    return;
+  }
+  moveCaretOrSelectCell(targetCell);
+}
+
 function buildTable() {
   ui.tableColgroup.innerHTML = "";
   ui.tableHead.innerHTML = "";
@@ -829,6 +915,8 @@ async function rollbackNow() {
 }
 
 function bindEvents() {
+  document.addEventListener("keydown", onGlobalKeyDown);
+
   ui.querySelect.addEventListener("change", () => {
     saveLastQueryPreference(ui.querySelect.value);
   });
@@ -870,6 +958,18 @@ function bindEvents() {
 
   ui.bulkApplyAlbumReplaceBtn.addEventListener("click", () => {
     applyBulkAlbumNameReplace();
+  });
+
+  ui.focusIdBtn.addEventListener("click", () => {
+    focusRowByWorkspaceAlbumId();
+  });
+
+  ui.focusIdInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    focusRowByWorkspaceAlbumId();
   });
 
   ui.backupNowBtn.addEventListener("click", async () => {

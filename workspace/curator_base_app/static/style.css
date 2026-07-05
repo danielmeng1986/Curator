@@ -139,6 +139,16 @@ select {
   font-size: 0.92rem;
 }
 
+.locate-id-input {
+  width: 140px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
 .btn {
   border: none;
   border-radius: 999px;
