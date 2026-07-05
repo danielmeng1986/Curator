@@ -385,7 +385,9 @@ def get_status_options() -> list[dict]:
 
 def get_studio_names() -> list[str]:
     with open_db() as conn:
-        cur = conn.execute("SELECT name FROM studio ORDER BY name")
+        cur = conn.execute(
+            "SELECT name FROM studio WHERE media_scope IN ('p', 'p+v') ORDER BY name"
+        )
         return [row["name"] for row in cur.fetchall()]
 
 
