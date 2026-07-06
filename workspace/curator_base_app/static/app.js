@@ -18,9 +18,10 @@ const LAST_STUDIO_NAME_KEY = "normalize_app_workspace_album_last_studio_name";
 const APP_BASE_PATH = window.location.pathname.startsWith("/normalize") ? "/normalize" : "";
 
 const ui = {
+  appShell: document.querySelector(".app-shell"),
+  tableCard: document.querySelector(".table-card"),
   statusSelect: document.getElementById("statusSelect"),
   studioSelect: document.getElementById("studioSelect"),
-  loadQueryBtn: document.getElementById("loadQueryBtn"),
   reloadBtn: document.getElementById("reloadBtn"),
   toggleColumnsBtn: document.getElementById("toggleColumnsBtn"),
   bulkStatusInput: document.getElementById("bulkStatusInput"),
@@ -50,6 +51,66 @@ const ui = {
   tableBody: document.getElementById("tableBody"),
   popup: document.getElementById("popup"),
 };
+
+let layoutRafId = null;
+const TABLE_MAX_VISIBLE_ROWS = 15;
+const STATUS_SAFE_GAP_PX = 24;
+
+function getPx(cssValue) {
+  const n = parseFloat(cssValue);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function updateTableWrapHeight() {
+  if (!ui.appShell || !ui.tableCard || !ui.tableWrap) {
+    return;
+  }
+
+  const shellStyle = window.getComputedStyle(ui.appShell);
+  const shellPaddingTop = getPx(shellStyle.paddingTop);
+  const shellPaddingBottom = getPx(shellStyle.paddingBottom);
+  const shellGap = getPx(shellStyle.rowGap || shellStyle.gap);
+
+  const visibleSections = Array.from(ui.appShell.children).filter(
+    (el) => el instanceof HTMLElement && !el.classList.contains("hidden"),
+  );
+
+  const nonTableHeight = visibleSections
+    .filter((el) => el !== ui.tableCard)
+    .reduce((sum, el) => sum + el.offsetHeight, 0);
+
+  const totalGap = shellGap * Math.max(visibleSections.length - 1, 0);
+
+  const cardStyle = window.getComputedStyle(ui.tableCard);
+  const cardChrome =
+    getPx(cardStyle.borderTopWidth) +
+    getPx(cardStyle.borderBottomWidth) +
+    getPx(cardStyle.paddingTop) +
+    getPx(cardStyle.paddingBottom);
+
+  const shellInnerHeight = ui.appShell.clientHeight - shellPaddingTop - shellPaddingBottom;
+  const available = shellInnerHeight - nonTableHeight - totalGap - cardChrome - STATUS_SAFE_GAP_PX;
+
+  const tableHeadRow = ui.tableHead.querySelector("tr");
+  const firstBodyRow = ui.tableBody.querySelector("tr");
+  const headerHeight = tableHeadRow ? tableHeadRow.getBoundingClientRect().height : 36;
+  const rowHeight = firstBodyRow ? firstBodyRow.getBoundingClientRect().height : 34;
+  const maxRowsHeight = Math.ceil(headerHeight + rowHeight * TABLE_MAX_VISIBLE_ROWS + 2);
+
+  // Allow table area to shrink aggressively so the bottom status bar remains visible.
+  const nextHeight = Math.max(60, Math.floor(Math.min(available, maxRowsHeight)));
+  ui.tableWrap.style.height = `${nextHeight}px`;
+}
+
+function scheduleTableWrapHeightUpdate() {
+  if (layoutRafId !== null) {
+    cancelAnimationFrame(layoutRafId);
+  }
+  layoutRafId = requestAnimationFrame(() => {
+    layoutRafId = null;
+    updateTableWrapHeight();
+  });
+}
 
 function setStatus(text) {
   ui.statusText.textContent = text;
@@ -722,6 +783,7 @@ function buildTable() {
 
   ui.rowCount.textContent = String(state.rows.length);
   updateSelectionCounter();
+  scheduleTableWrapHeightUpdate();
 }
 
 function onCellBlur(event) {
@@ -814,6 +876,7 @@ async function loadQueryData() {
   buildTable();
   saveLastParamPreferences(statusId, studioName);
   setStatus(`已加载 ${label}，共 ${data.row_count} 行`);
+  scheduleTableWrapHeightUpdate();
 }
 
 async function submitChanges() {
@@ -922,15 +985,6 @@ async function rollbackNow() {
 function bindEvents() {
   document.addEventListener("keydown", onGlobalKeyDown);
 
-  ui.loadQueryBtn.addEventListener("click", async () => {
-    try {
-      await loadQueryData();
-    } catch (err) {
-      setStatus(`加载失败: ${err.message}`);
-      showPopup(`加载失败: ${err.message}`, false);
-    }
-  });
-
   ui.reloadBtn.addEventListener("click", async () => {
     try {
       await loadQueryData();
@@ -942,6 +996,7 @@ function bindEvents() {
 
   ui.toggleColumnsBtn.addEventListener("click", () => {
     ui.columnPanel.classList.toggle("hidden");
+    scheduleTableWrapHeightUpdate();
   });
 
   ui.saveBtn.addEventListener("click", async () => {
@@ -1003,6 +1058,10 @@ function bindEvents() {
       showPopup(`回滚失败: ${err.message}`, false);
     }
   });
+
+  window.addEventListener("resize", () => {
+    scheduleTableWrapHeightUpdate();
+  });
 }
 
 async function init() {
@@ -1012,6 +1071,7 @@ async function init() {
     await loadSchema();
     await loadOptions();
     await loadQueryData();
+    scheduleTableWrapHeightUpdate();
   } catch (err) {
     setStatus(`初始化失败: ${err.message}`);
     showPopup(`初始化失败: ${err.message}`, false);
