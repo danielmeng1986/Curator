@@ -208,7 +208,7 @@ select {
   gap: 18px;
   flex-wrap: wrap;
   padding: 10px 14px;
-  min-height: 16px;
+  height: 16px;
   font-size: 0.95rem;
   position: sticky;
   bottom: 0;
