@@ -14,6 +14,7 @@ Steps:
 Usage:
     python merge_models.py --source "Blake Bartelli" --target "Blake Eden"
     python merge_models.py --source "Blake Bartelli" --target "Blake Eden" --apply
+    python merge_models.py --source 123 --target 456 --apply
 """
 
 from __future__ import annotations
@@ -22,8 +23,10 @@ import argparse
 import shutil
 import sqlite3
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
+
+from entity_ref_resolver import resolve_entity_ref
 
 DEFAULT_DB = Path("/Volumes/NAS-RAID5/RAID/Curator/database/Curator.db")
 DEFAULT_ARCHIVE = Path("/Volumes/NAS-RAID5/RAID/Prime_Media/Archive")
@@ -145,6 +148,7 @@ def print_plan(plan: list[AlbumMigration], source_model: str, target_model: str)
 def apply_db_changes(
     conn: sqlite3.Connection,
     plan: list[AlbumMigration],
+    source_model_id: int,
     source_model: str,
     target_model: str,
 ) -> None:
@@ -176,14 +180,12 @@ def apply_db_changes(
         return
 
     # Delete source model
-    row = conn.execute(
-        "SELECT id FROM model WHERE name = ?", (source_model,)
-    ).fetchone()
+    row = conn.execute("SELECT id FROM model WHERE id = ?", (source_model_id,)).fetchone()
     if row:
-        conn.execute("DELETE FROM model WHERE id = ?", (row[0],))
-        print(f"\n  Model deleted: id={row[0]} '{source_model}'")
+        conn.execute("DELETE FROM model WHERE id = ?", (source_model_id,))
+        print(f"\n  Model deleted: id={source_model_id} '{source_model}'")
     else:
-        print(f"\n  Model '{source_model}' not found in model table (already removed?).")
+        print(f"\n  Model id={source_model_id} ('{source_model}') not found in model table (already removed?).")
 
     conn.commit()
     print("  Database changes committed.")
@@ -253,8 +255,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Merge a source model into a target model (DB + filesystem)."
     )
-    parser.add_argument("--source", required=True, help="Model name to merge FROM (will be deleted)")
-    parser.add_argument("--target", required=True, help="Model name to merge INTO (kept)")
+    parser.add_argument("--source", required=True, help="Model name/id to merge FROM (will be deleted)")
+    parser.add_argument("--target", required=True, help="Model name/id to merge INTO (kept)")
     parser.add_argument(
         "--db",
         type=Path,
@@ -280,22 +282,39 @@ def main() -> None:
 
     conn = sqlite3.connect(str(args.db))
 
-    # Validate both models exist
-    for name in (args.source, args.target):
-        row = conn.execute("SELECT id FROM model WHERE name = ?", (name,)).fetchone()
-        if not row:
-            print(f"ERROR: Model '{name}' not found in model table.", file=sys.stderr)
-            conn.close()
-            sys.exit(1)
+    source_ref = resolve_entity_ref(conn, "model", args.source)
+    target_ref = resolve_entity_ref(conn, "model", args.target)
+    if not source_ref:
+        print(f"ERROR: Source model '{args.source}' not found by id or name.", file=sys.stderr)
+        conn.close()
+        sys.exit(1)
+    if not target_ref:
+        print(f"ERROR: Target model '{args.target}' not found by id or name.", file=sys.stderr)
+        conn.close()
+        sys.exit(1)
+    if source_ref.row_id == target_ref.row_id:
+        print("ERROR: Source and target resolve to the same model.", file=sys.stderr)
+        conn.close()
+        sys.exit(1)
 
-    plan = build_migration_plan(conn, args.source, args.target, args.archive)
+    source_model_id = source_ref.row_id
+    target_model_id = target_ref.row_id
+    source_model = source_ref.name
+    target_model = target_ref.name
+
+    if args.source.strip() != source_model:
+        print(f"Resolved source '{args.source}' -> id={source_model_id}, name='{source_model}'")
+    if args.target.strip() != target_model:
+        print(f"Resolved target '{args.target}' -> id={target_model_id}, name='{target_model}'")
+
+    plan = build_migration_plan(conn, source_model, target_model, args.archive)
 
     if not plan:
-        print(f"No albums found for model '{args.source}'. Nothing to do.")
+        print(f"No albums found for model '{source_model}'. Nothing to do.")
         conn.close()
         return
 
-    print_plan(plan, args.source, args.target)
+    print_plan(plan, source_model, target_model)
 
     if not args.apply:
         print("Dry-run complete. Add --apply to execute the plan.")
@@ -303,8 +322,8 @@ def main() -> None:
         return
 
     print("--- Applying database changes ---")
-    apply_db_changes(conn, plan, args.source, args.target)
-    apply_filesystem_moves(plan, args.archive, args.source)
+    apply_db_changes(conn, plan, source_model_id, source_model, target_model)
+    apply_filesystem_moves(plan, args.archive, source_model)
 
     conn.close()
 
