@@ -89,12 +89,13 @@ body {
 .toolbar {
   padding: 12px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
 .query-controls,
-.grid-controls {
+.grid-controls,
+.import-controls {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -154,6 +155,53 @@ select {
   background: #fff;
   color: var(--ink);
   font-size: 0.92rem;
+}
+
+.path-input {
+  width: min(100%, 420px);
+  flex: 1 1 260px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.folder-picker-label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #21454f;
+  white-space: nowrap;
+}
+
+.import-group {
+  grid-column: span 2;
+}
+
+.import-preview {
+  margin-top: 8px;
+  min-height: 20px;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.import-preview-error {
+  color: var(--error);
+  font-weight: 700;
 }
 
 .locate-id-input {

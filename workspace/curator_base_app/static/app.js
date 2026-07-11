@@ -10,6 +10,7 @@ const state = {
   lastEditedColumn: null,
   selectedPkValues: new Set(),
   selectionAnchorRowIndex: null,
+  importPreview: null,
 };
 
 const COLUMN_VISIBILITY_STORAGE_KEY = "normalize_app_workspace_album_column_visibility";
@@ -40,6 +41,14 @@ const ui = {
   rollbackTimestampInput: document.getElementById("rollbackTimestampInput"),
   rollbackTagInput: document.getElementById("rollbackTagInput"),
   rollbackNowBtn: document.getElementById("rollbackNowBtn"),
+  importSourcePathInput: document.getElementById("importSourcePathInput"),
+  importFolderPicker: document.getElementById("importFolderPicker"),
+  importStudioInput: document.getElementById("importStudioInput"),
+  studioDatalist: document.getElementById("studioDatalist"),
+  keepSourceCheckbox: document.getElementById("keepSourceCheckbox"),
+  previewImportBtn: document.getElementById("previewImportBtn"),
+  importAlbumBtn: document.getElementById("importAlbumBtn"),
+  importPreview: document.getElementById("importPreview"),
   columnPanel: document.getElementById("columnPanel"),
   statusText: document.getElementById("statusText"),
   rowCount: document.getElementById("rowCount"),
@@ -121,6 +130,11 @@ function showPopup(message, ok = true) {
   ui.popup.className = `popup ${ok ? "ok" : "error"}`;
   ui.popup.classList.remove("hidden");
   setTimeout(() => ui.popup.classList.add("hidden"), 3200);
+}
+
+function setImportPreviewText(message, ok = true) {
+  ui.importPreview.textContent = message;
+  ui.importPreview.classList.toggle("import-preview-error", !ok);
 }
 
 async function fetchJson(url, options = {}) {
@@ -824,6 +838,17 @@ async function loadOptions() {
     ui.studioSelect.appendChild(option);
   });
 
+  ui.studioDatalist.innerHTML = "";
+  data.studios.forEach((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    ui.studioDatalist.appendChild(option);
+  });
+
+  if (!ui.importStudioInput.value) {
+    ui.importStudioInput.value = data.default_import_studio || "MetArt";
+  }
+
   if (data.statuses.length === 0) {
     throw new Error("数据库中未找到 status 记录");
   }
@@ -840,6 +865,100 @@ async function loadOptions() {
       ui.studioSelect.value = savedStudioName;
     }
   }
+}
+
+function firstSelectedFolderName() {
+  const files = Array.from(ui.importFolderPicker.files || []);
+  if (files.length === 0) {
+    return "";
+  }
+
+  const relativePath = files[0].webkitRelativePath || files[0].name || "";
+  return relativePath.split("/")[0] || "";
+}
+
+function importPayload({ requireSourcePath = false } = {}) {
+  const sourcePath = (ui.importSourcePathInput.value || "").trim();
+  const folderName = firstSelectedFolderName();
+  const studioName = (ui.importStudioInput.value || "").trim() || "MetArt";
+
+  if (requireSourcePath && !sourcePath) {
+    throw new Error("请输入源文件夹完整路径");
+  }
+
+  return {
+    source_path: sourcePath,
+    folder_name: folderName,
+    studio_name: studioName,
+    keep_source: ui.keepSourceCheckbox.checked,
+  };
+}
+
+function renderImportPreview(preview) {
+  const flags = [];
+  flags.push(preview.model_exists ? "Model 已存在" : "将新建 Model");
+  flags.push(preview.studio_exists ? "Studio 已存在" : "将新建 Studio，media_scope=p");
+  if (preview.destination_exists) {
+    flags.push("目标文件夹已存在");
+  }
+  if (preview.workspace_album_exists) {
+    flags.push(`workspace_album 已存在 id=${preview.workspace_album_id}`);
+  }
+
+  const ok = !preview.destination_exists && !preview.workspace_album_exists;
+  setImportPreviewText(
+    [
+      `Model: ${preview.model_name}`,
+      `Album: ${preview.album_name}`,
+      `Studio: ${preview.studio_name}`,
+      `expected_path: ${preview.expected_path}`,
+      flags.join("；"),
+    ].join(" | "),
+    ok,
+  );
+  ui.importAlbumBtn.disabled = !ok;
+}
+
+async function previewImportAlbum() {
+  setStatus("正在解析待导入影集...");
+  ui.importAlbumBtn.disabled = true;
+  const data = await fetchJson(apiUrl("/api/import-album/preview"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(importPayload()),
+  });
+
+  state.importPreview = data.preview;
+  renderImportPreview(data.preview);
+  setStatus("导入预览已生成");
+}
+
+async function importAlbum() {
+  if (!state.importPreview) {
+    throw new Error("请先预览影集");
+  }
+
+  const payload = importPayload({ requireSourcePath: true });
+  const action = payload.keep_source ? "复制" : "移动";
+  if (!window.confirm(`确认${action}该影集到 Archive，并写入 workspace_album？`)) {
+    return;
+  }
+
+  setStatus("正在导入影集...");
+  ui.importAlbumBtn.disabled = true;
+  const data = await fetchJson(apiUrl("/api/import-album"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const result = data.result;
+  showPopup(`导入完成，workspace_album id=${result.workspace_album_id}`);
+  setImportPreviewText(`已导入: ${result.expected_path}`);
+  state.importPreview = null;
+  await loadOptions();
+  await loadQueryData();
+  setStatus(`导入完成: ${result.destination_path}`);
 }
 
 function hydrateOriginalRows(rows) {
@@ -1056,6 +1175,52 @@ function bindEvents() {
     } catch (err) {
       setStatus(`回滚失败: ${err.message}`);
       showPopup(`回滚失败: ${err.message}`, false);
+    }
+  });
+
+  ui.importFolderPicker.addEventListener("change", async () => {
+    const folderName = firstSelectedFolderName();
+    if (!folderName) {
+      return;
+    }
+    setImportPreviewText(`已解析名称: ${folderName}。浏览器不会提供完整路径，执行导入前仍需粘贴源文件夹完整路径。`);
+    try {
+      await previewImportAlbum();
+    } catch (err) {
+      ui.importAlbumBtn.disabled = true;
+      setImportPreviewText(`解析失败: ${err.message}`, false);
+      showPopup(`解析失败: ${err.message}`, false);
+    }
+  });
+
+  ui.importSourcePathInput.addEventListener("input", () => {
+    state.importPreview = null;
+    ui.importAlbumBtn.disabled = true;
+  });
+
+  ui.importStudioInput.addEventListener("input", () => {
+    state.importPreview = null;
+    ui.importAlbumBtn.disabled = true;
+  });
+
+  ui.previewImportBtn.addEventListener("click", async () => {
+    try {
+      await previewImportAlbum();
+    } catch (err) {
+      ui.importAlbumBtn.disabled = true;
+      setStatus(`导入预览失败: ${err.message}`);
+      setImportPreviewText(`导入预览失败: ${err.message}`, false);
+      showPopup(`导入预览失败: ${err.message}`, false);
+    }
+  });
+
+  ui.importAlbumBtn.addEventListener("click", async () => {
+    try {
+      await importAlbum();
+    } catch (err) {
+      ui.importAlbumBtn.disabled = false;
+      setStatus(`导入失败: ${err.message}`);
+      showPopup(`导入失败: ${err.message}`, false);
     }
   });
 

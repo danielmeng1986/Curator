@@ -47,6 +47,24 @@
           </div>
         </div>
 
+        <div class="tool-group import-group">
+          <div class="tool-group-title">导入影集</div>
+          <div class="import-controls">
+            <input id="importSourcePathInput" class="path-input" type="text" placeholder="必须粘贴源文件夹完整路径" />
+            <label class="folder-picker-label btn btn-secondary" for="importFolderPicker">辅助解析名称</label>
+            <input id="importFolderPicker" class="hidden-file-input" type="file" webkitdirectory directory multiple />
+            <input id="importStudioInput" class="bulk-text-input" type="text" list="studioDatalist" placeholder="Studio，默认 MetArt" />
+            <datalist id="studioDatalist"></datalist>
+            <label class="check-label">
+              <input id="keepSourceCheckbox" type="checkbox" />
+              保留源文件
+            </label>
+            <button id="previewImportBtn" class="btn btn-secondary">预览</button>
+            <button id="importAlbumBtn" class="btn btn-accent" disabled>导入</button>
+          </div>
+          <div id="importPreview" class="import-preview">等待输入源路径。辅助解析名称不会自动取得完整路径。</div>
+        </div>
+
         <div class="tool-group">
           <div class="tool-group-title">备份类</div>
           <div class="grid-controls">
@@ -92,6 +110,6 @@
 
     <div id="popup" class="popup hidden"></div>
 
-    <script src="app.js?v=20260705-1"></script>
+    <script src="app.js?v=20260711-1"></script>
   </body>
 </html>

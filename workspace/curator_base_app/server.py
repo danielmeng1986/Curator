@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import re
+import shutil
 import sqlite3
 import socket
 import threading
@@ -14,6 +15,7 @@ REPO_ROOT = BASE_DIR.parent.parent
 STATIC_DIR = BASE_DIR / "static"
 DATABASE_PATH = REPO_ROOT / "database" / "Curator.db"
 QUERY_DIR = REPO_ROOT / "database"
+ARCHIVE_ROOT = Path("/Volumes/NAS-RAID5/RAID/Prime_Media/Archive")
 LOG_PATH = BASE_DIR / "logs" / "changes.log"
 BACKUP_DIR = BASE_DIR / "backups"
 BACKUP_LOG_PATH = BASE_DIR / "logs" / "backup.log"
@@ -26,9 +28,13 @@ STOP_EVENT = threading.Event()
 
 RETENTION_DAYS = 15
 BACKUP_NAME_RE = re.compile(r"^Curator_(\d{8}_\d{6})_(.+)\.db$")
+ALBUM_FOLDER_RE = re.compile(r"^(.+?)\s+in\s+(.+)$", re.IGNORECASE)
 
 ALLOWED_TABLES = {"workspace_album"}
 EXCLUDED_QUERY_FILES = {"Curator.db"}
+DEFAULT_IMPORT_STUDIO = "MetArt"
+STATUS_RENAMED = 3
+STATUS_IMPORTED = 4
 
 
 def utc_now_iso() -> str:
@@ -391,6 +397,290 @@ def get_studio_names() -> list[str]:
         return [row["name"] for row in cur.fetchall()]
 
 
+def parse_album_folder_name(folder_name: str) -> tuple[str, str]:
+    cleaned = " ".join(str(folder_name or "").strip().split())
+    matched = ALBUM_FOLDER_RE.match(cleaned)
+    if not matched:
+        raise ValueError("folder name must use '{model_name} in {album_name}' format")
+
+    model_name = matched.group(1).strip()
+    album_name = matched.group(2).strip()
+    if not model_name or not album_name:
+        raise ValueError("model_name and album_name are required")
+    return model_name, album_name
+
+
+def alphabet_for_model(model_name: str) -> str:
+    for char in model_name.strip():
+        if char.isalpha():
+            return char.upper()
+        if char.isdigit():
+            return "0-9"
+    return "_"
+
+
+def build_album_expected_path(model_name: str, studio_name: str, album_name: str) -> str:
+    return f"{alphabet_for_model(model_name)}/{model_name}/p/{studio_name}/{album_name}"
+
+
+def folder_name_from_payload(body: dict) -> str:
+    source_path = str(body.get("source_path") or "").strip()
+    folder_name = str(body.get("folder_name") or "").strip()
+    if source_path:
+        return Path(source_path).name
+    if folder_name:
+        return folder_name
+    raise ValueError("source_path or folder_name is required")
+
+
+def get_import_preview(body: dict) -> dict:
+    model_name, album_name = parse_album_folder_name(folder_name_from_payload(body))
+    studio_name = str(body.get("studio_name") or DEFAULT_IMPORT_STUDIO).strip() or DEFAULT_IMPORT_STUDIO
+    expected_path = build_album_expected_path(model_name, studio_name, album_name)
+
+    with open_db() as conn:
+        model_row = conn.execute(
+            "SELECT id, name FROM model WHERE lower(name) = lower(?) ORDER BY id LIMIT 1",
+            (model_name,),
+        ).fetchone()
+        studio_row = conn.execute(
+            "SELECT id, name, media_scope FROM studio WHERE lower(name) = lower(?) ORDER BY id LIMIT 1",
+            (studio_name,),
+        ).fetchone()
+        existing_workspace = conn.execute(
+            """
+            SELECT id FROM workspace_album
+            WHERE lower(current_path) = lower(?) OR lower(COALESCE(expected_path, '')) = lower(?)
+            ORDER BY id LIMIT 1
+            """,
+            (expected_path, expected_path),
+        ).fetchone()
+
+    destination = (ARCHIVE_ROOT / expected_path).resolve()
+    return {
+        "source_path": str(body.get("source_path") or "").strip(),
+        "folder_name": folder_name_from_payload(body),
+        "model_name": model_name,
+        "album_name": album_name,
+        "studio_name": studio_row["name"] if studio_row else studio_name,
+        "model_exists": model_row is not None,
+        "model_id": model_row["id"] if model_row else None,
+        "studio_exists": studio_row is not None,
+        "studio_id": studio_row["id"] if studio_row else None,
+        "studio_media_scope": studio_row["media_scope"] if studio_row else "p",
+        "expected_path": expected_path,
+        "destination_path": str(destination),
+        "destination_exists": destination.exists(),
+        "workspace_album_exists": existing_workspace is not None,
+        "workspace_album_id": existing_workspace["id"] if existing_workspace else None,
+        "default_studio": DEFAULT_IMPORT_STUDIO,
+        "archive_root": str(ARCHIVE_ROOT),
+    }
+
+
+def ensure_casefold_entity(conn: sqlite3.Connection, table: str, name: str, extra: dict | None = None) -> tuple[int, bool]:
+    if table not in {"model", "studio"}:
+        raise ValueError("unsupported entity table")
+    row = conn.execute(
+        f"SELECT id FROM {table} WHERE lower(name) = lower(?) ORDER BY id LIMIT 1",
+        (name,),
+    ).fetchone()
+    if row is not None:
+        return int(row["id"]), False
+
+    if table == "studio":
+        media_scope = str((extra or {}).get("media_scope") or "p").strip() or "p"
+        cur = conn.execute("INSERT INTO studio (name, media_scope) VALUES (?, ?)", (name, media_scope))
+    else:
+        cur = conn.execute("INSERT INTO model (name) VALUES (?)", (name,))
+    return int(cur.lastrowid), True
+
+
+def ensure_destination_is_safe(source_path: Path, destination_path: Path) -> None:
+    source_resolved = source_path.resolve()
+    destination_resolved = destination_path.resolve()
+    archive_resolved = ARCHIVE_ROOT.resolve()
+
+    if not source_resolved.exists() or not source_resolved.is_dir():
+        raise FileNotFoundError(f"source folder not found: {source_resolved}")
+    if destination_resolved.exists():
+        raise FileExistsError(f"destination already exists: {destination_resolved}")
+    if archive_resolved not in destination_resolved.parents:
+        raise ValueError("destination must be inside Archive")
+    if source_resolved == destination_resolved:
+        raise ValueError("source and destination are the same folder")
+    if source_resolved in destination_resolved.parents:
+        raise ValueError("destination cannot be inside source folder")
+
+
+def import_single_album(body: dict) -> dict:
+    preview = get_import_preview(body)
+    source_raw = str(body.get("source_path") or "").strip()
+    if not source_raw:
+        raise ValueError("source_path is required for import")
+
+    model_name = str(body.get("model_name") or preview["model_name"]).strip()
+    album_name = str(body.get("album_name") or preview["album_name"]).strip()
+    studio_name = str(body.get("studio_name") or preview["studio_name"] or DEFAULT_IMPORT_STUDIO).strip()
+    keep_source = bool(body.get("keep_source"))
+
+    if not model_name or not album_name or not studio_name:
+        raise ValueError("model_name, album_name and studio_name are required")
+
+    expected_path = build_album_expected_path(model_name, studio_name, album_name)
+    source_path = Path(source_raw).expanduser()
+    destination_path = ARCHIVE_ROOT / expected_path
+    ensure_destination_is_safe(source_path, destination_path)
+
+    pre_update_snapshot = ""
+    try:
+        snapshot = create_db_snapshot(reason="pre_album_import")
+        pre_update_snapshot = str(snapshot)
+        append_backup_log(
+            {
+                "timestamp": utc_now_iso(),
+                "reason": "pre_album_import",
+                "ok": True,
+                "snapshot": pre_update_snapshot,
+                "tag": "",
+            }
+        )
+    except Exception as ex:
+        raise RuntimeError(f"failed to create pre-import snapshot: {ex}") from ex
+
+    workspace_album_id = None
+    created_model = False
+    created_studio = False
+    try:
+        with open_db() as conn:
+            conn.execute("BEGIN")
+            model_id, created_model = ensure_casefold_entity(conn, "model", model_name)
+            studio_id, created_studio = ensure_casefold_entity(
+                conn,
+                "studio",
+                studio_name,
+                {"media_scope": "p"},
+            )
+
+            existing = conn.execute(
+                """
+                SELECT id FROM workspace_album
+                WHERE lower(current_path) = lower(?) OR lower(COALESCE(expected_path, '')) = lower(?)
+                ORDER BY id LIMIT 1
+                """,
+                (expected_path, expected_path),
+            ).fetchone()
+            if existing is not None:
+                raise ValueError(f"workspace_album already has this path: id={existing['id']}")
+
+            cur = conn.execute(
+                """
+                INSERT INTO workspace_album (
+                    current_path,
+                    expected_path,
+                    primary_model,
+                    studio_name,
+                    album_name,
+                    additional_models,
+                    status_id,
+                    remark
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    expected_path,
+                    expected_path,
+                    model_name,
+                    studio_name,
+                    album_name,
+                    None,
+                    STATUS_RENAMED,
+                    f"Imported from {source_path.resolve()}",
+                ),
+            )
+            workspace_album_id = int(cur.lastrowid)
+            conn.commit()
+
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        if keep_source:
+            shutil.copytree(source_path, destination_path)
+        else:
+            shutil.move(str(source_path), str(destination_path))
+
+        with open_db() as conn:
+            conn.execute(
+                "UPDATE workspace_album SET status_id = ? WHERE id = ?",
+                (STATUS_IMPORTED, workspace_album_id),
+            )
+            conn.commit()
+
+        result = {
+            "timestamp": utc_now_iso(),
+            "operation": "import_single_album",
+            "success": True,
+            "workspace_album_id": workspace_album_id,
+            "source_path": str(source_path.resolve()),
+            "destination_path": str(destination_path.resolve()),
+            "expected_path": expected_path,
+            "model_name": model_name,
+            "model_id": model_id,
+            "created_model": created_model,
+            "studio_name": studio_name,
+            "studio_id": studio_id,
+            "created_studio": created_studio,
+            "keep_source": keep_source,
+            "pre_operation_snapshot": pre_update_snapshot,
+            "rollback_sql": [
+                f"DELETE FROM workspace_album WHERE id = {workspace_album_id}",
+            ],
+        }
+        append_log(result)
+        return result
+    except Exception as ex:
+        destination_exists_after_failure = destination_path.exists()
+        cleanup_result = "not_needed"
+        if workspace_album_id is not None:
+            try:
+                with open_db() as conn:
+                    if destination_exists_after_failure:
+                        conn.execute(
+                            """
+                            UPDATE workspace_album
+                            SET status_id = ?, remark = ?
+                            WHERE id = ?
+                            """,
+                            (
+                                1,
+                                f"Import failed after filesystem operation: {ex}",
+                                workspace_album_id,
+                            ),
+                        )
+                        cleanup_result = "marked_wait_manual"
+                    else:
+                        conn.execute(
+                            "DELETE FROM workspace_album WHERE id = ? AND status_id = ?",
+                            (workspace_album_id, STATUS_RENAMED),
+                        )
+                        cleanup_result = "deleted_incomplete_workspace_row"
+                    conn.commit()
+            except Exception as cleanup_ex:
+                cleanup_result = f"cleanup_failed: {cleanup_ex}"
+
+        failure = {
+            "timestamp": utc_now_iso(),
+            "operation": "import_single_album",
+            "success": False,
+            "workspace_album_id": workspace_album_id,
+            "source_path": source_raw,
+            "expected_path": expected_path,
+            "error": str(ex),
+            "destination_exists_after_failure": destination_exists_after_failure,
+            "cleanup_result": cleanup_result,
+            "pre_operation_snapshot": pre_update_snapshot,
+        }
+        append_log(failure)
+        raise
+
+
 def build_workspace_album_sql(status_id: int, studio_name: str) -> tuple[str, tuple]:
     if studio_name:
         sql = "SELECT * FROM workspace_album WHERE status_id = ? AND studio_name = ? ORDER BY id"
@@ -465,6 +755,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                     "retention_days": RETENTION_DAYS,
                     "backup_count": len(backup_catalog),
                     "protected_backup_count": len([x for x in backup_catalog if x["protected"]]),
+                    "archive_root": str(ARCHIVE_ROOT),
                 },
             )
             return
@@ -477,7 +768,15 @@ class AppHandler(SimpleHTTPRequestHandler):
             try:
                 statuses = get_status_options()
                 studios = get_studio_names()
-                self._send_json(200, {"ok": True, "statuses": statuses, "studios": studios})
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "statuses": statuses,
+                        "studios": studios,
+                        "default_import_studio": DEFAULT_IMPORT_STUDIO,
+                    },
+                )
             except Exception as ex:
                 self._send_json(500, {"ok": False, "error": str(ex)})
             return
@@ -538,6 +837,22 @@ class AppHandler(SimpleHTTPRequestHandler):
                         "row_count": len(rows),
                     },
                 )
+            except Exception as ex:
+                self._send_json(400, {"ok": False, "error": str(ex)})
+            return
+
+        if api_path == "/api/import-album/preview":
+            try:
+                preview = get_import_preview(body)
+                self._send_json(200, {"ok": True, "preview": preview})
+            except Exception as ex:
+                self._send_json(400, {"ok": False, "error": str(ex)})
+            return
+
+        if api_path == "/api/import-album":
+            try:
+                result = import_single_album(body)
+                self._send_json(200, {"ok": True, "result": result})
             except Exception as ex:
                 self._send_json(400, {"ok": False, "error": str(ex)})
             return
