@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Curator Albums</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="bg-shape bg-shape-a"></div>
+    <div class="bg-shape bg-shape-b"></div>
+
+    <main class="app-shell import-shell">
+      <header class="app-header">
+        <div class="page-nav">
+          <a class="nav-link" href="/normalize/">Normalize</a>
+          <a class="nav-link" href="/import/">Import</a>
+          <a class="nav-link nav-link-active" href="/albums/">Albums</a>
+        </div>
+        <h1>Curator Albums Browser</h1>
+        <p>按 Studio、Primary Model、状态、名称关键字和导入状态浏览 workspace_album。</p>
+      </header>
+
+      <section class="toolbar card import-toolbar">
+        <div class="tool-group import-group-full">
+          <div class="tool-group-title">筛选与搜索</div>
+          <div class="query-controls">
+            <label for="studioSelect">Studio</label>
+            <select id="studioSelect">
+              <option value="">全部</option>
+            </select>
+
+            <label for="modelSelect">Primary Model</label>
+            <select id="modelSelect">
+              <option value="">全部</option>
+            </select>
+
+            <label for="statusSelect">状态</label>
+            <select id="statusSelect">
+              <option value="">全部</option>
+            </select>
+
+            <label for="importStatusSelect">导入状态</label>
+            <select id="importStatusSelect">
+              <option value="all">全部</option>
+              <option value="imported">已导入</option>
+              <option value="not_imported">未导入</option>
+            </select>
+
+            <label for="keywordInput">名称/路径</label>
+            <input id="keywordInput" class="bulk-text-input" type="text" placeholder="搜索 album/model/studio/path" />
+
+            <button id="searchBtn" class="btn btn-primary">查询</button>
+            <button id="resetBtn" class="btn btn-secondary">重置</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="table-card card import-table-card">
+        <div class="table-wrap import-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>current_path</th>
+                <th>primary_model</th>
+                <th>studio_name</th>
+                <th>album_name</th>
+                <th>additional_models</th>
+                <th>status</th>
+                <th>导入状态</th>
+              </tr>
+            </thead>
+            <tbody id="albumsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="status-row card import-status-row">
+        <div><strong>状态:</strong> <span id="statusText">准备就绪</span></div>
+        <div><strong>当前页行数:</strong> <span id="rowCount">0</span></div>
+        <div><strong>总行数:</strong> <span id="totalCount">0</span></div>
+        <div><strong>分页:</strong> <span id="pageText">1 / 1</span></div>
+        <button id="prevPageBtn" class="btn btn-secondary">上一页</button>
+        <button id="nextPageBtn" class="btn btn-secondary">下一页</button>
+      </section>
+    </main>
+
+    <div id="popup" class="popup hidden"></div>
+
+    <script src="albums.js?v=20260712-1"></script>
+  </body>
+</html>

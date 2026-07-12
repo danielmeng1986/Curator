@@ -55,6 +55,7 @@ ROLLBACK_LOG_PATH = BASE_DIR / "logs" / "rollback.log"
 
 NORMALIZE_BASE_PATH = "/normalize"
 IMPORT_BASE_PATH = "/import"
+ALBUMS_BASE_PATH = "/albums"
 API_PREFIX = "/api"
 
 STOP_EVENT = threading.Event()
@@ -336,7 +337,7 @@ def next_backup_time_iso() -> str:
 def normalize_api_path(path: str) -> str:
     if path == API_PREFIX:
         return API_PREFIX
-    for base_path in (NORMALIZE_BASE_PATH, IMPORT_BASE_PATH):
+    for base_path in (NORMALIZE_BASE_PATH, IMPORT_BASE_PATH, ALBUMS_BASE_PATH):
         if path.startswith(base_path + API_PREFIX + "/"):
             return path[len(base_path) :]
     return path
@@ -347,6 +348,8 @@ def static_path_for_base(base_path: str) -> str | None:
         return "/normalize.html"
     if base_path == IMPORT_BASE_PATH:
         return "/import.html"
+    if base_path == ALBUMS_BASE_PATH:
+        return "/albums.html"
     return None
 
 
@@ -847,6 +850,120 @@ def build_workspace_album_sql(status_id: int, studio_name: str) -> tuple[str, tu
     return sql, (status_id,)
 
 
+def get_workspace_album_primary_models() -> list[str]:
+    with open_db() as conn:
+        cur = conn.execute(
+            """
+            SELECT DISTINCT primary_model
+            FROM workspace_album
+            WHERE COALESCE(primary_model, '') != ''
+            ORDER BY primary_model COLLATE NOCASE
+            """
+        )
+        return [row["primary_model"] for row in cur.fetchall()]
+
+
+def search_workspace_albums(body: dict) -> dict:
+    studio_name = str(body.get("studio_name") or "").strip()
+    primary_model = str(body.get("primary_model") or "").strip()
+    keyword = str(body.get("keyword") or "").strip()
+    import_status = str(body.get("import_status") or "all").strip().lower()
+
+    raw_status_id = body.get("status_id")
+    status_id: int | None = None
+    if raw_status_id not in (None, ""):
+        status_id = int(raw_status_id)
+
+    raw_limit = body.get("limit", 200)
+    raw_offset = body.get("offset", 0)
+    limit = max(1, min(int(raw_limit), 1000))
+    offset = max(0, int(raw_offset))
+
+    where_clauses: list[str] = []
+    params: list = []
+
+    if studio_name:
+        where_clauses.append("wa.studio_name = ?")
+        params.append(studio_name)
+
+    if primary_model:
+        where_clauses.append("wa.primary_model = ?")
+        params.append(primary_model)
+
+    if status_id is not None:
+        where_clauses.append("wa.status_id = ?")
+        params.append(status_id)
+
+    if keyword:
+        where_clauses.append(
+            "(" 
+            "wa.album_name LIKE ? OR "
+            "wa.primary_model LIKE ? OR "
+            "wa.studio_name LIKE ? OR "
+            "wa.current_path LIKE ?"
+            ")"
+        )
+        like = f"%{keyword}%"
+        params.extend([like, like, like, like])
+
+    if import_status == "imported":
+        where_clauses.append("wa.status_id = ?")
+        params.append(STATUS_IMPORTED)
+    elif import_status == "not_imported":
+        where_clauses.append("wa.status_id != ?")
+        params.append(STATUS_IMPORTED)
+    elif import_status != "all":
+        raise ValueError("import_status must be one of: all, imported, not_imported")
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    count_sql = f"""
+        SELECT COUNT(1) AS total
+        FROM workspace_album wa
+        {where_sql}
+    """
+    data_sql = f"""
+        SELECT
+            wa.id,
+            wa.current_path,
+            wa.primary_model,
+            wa.studio_name,
+            wa.album_name,
+            wa.additional_models,
+            wa.status_id,
+            s.name AS status_name,
+            s.description AS status_description
+        FROM workspace_album wa
+        LEFT JOIN status s ON s.id = wa.status_id
+        {where_sql}
+        ORDER BY wa.id DESC
+        LIMIT ? OFFSET ?
+    """
+
+    with open_db() as conn:
+        total = int(conn.execute(count_sql, tuple(params)).fetchone()["total"])
+        rows = [dict(row) for row in conn.execute(data_sql, tuple(params + [limit, offset])).fetchall()]
+
+    for row in rows:
+        row["import_status"] = "imported" if int(row.get("status_id") or 0) == STATUS_IMPORTED else "not_imported"
+
+    return {
+        "filters": {
+            "studio_name": studio_name,
+            "primary_model": primary_model,
+            "status_id": status_id,
+            "keyword": keyword,
+            "import_status": import_status,
+            "limit": limit,
+            "offset": offset,
+        },
+        "total": total,
+        "rows": rows,
+    }
+
+
 def append_log(entry: dict) -> None:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LOG_PATH.open("a", encoding="utf-8") as f:
@@ -888,7 +1005,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             return
 
-        for base_path in (NORMALIZE_BASE_PATH, IMPORT_BASE_PATH):
+        for base_path in (NORMALIZE_BASE_PATH, IMPORT_BASE_PATH, ALBUMS_BASE_PATH):
             if parsed.path == base_path:
                 self.send_response(301)
                 self.send_header("Location", base_path + "/")
@@ -951,6 +1068,26 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._send_json(500, {"ok": False, "error": str(ex)})
             return
 
+        if api_path == "/api/albums/options":
+            try:
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "statuses": get_status_options(),
+                        "studios": get_studio_names(),
+                        "primary_models": get_workspace_album_primary_models(),
+                        "import_statuses": [
+                            {"value": "all", "label": "全部"},
+                            {"value": "imported", "label": "已导入"},
+                            {"value": "not_imported", "label": "未导入"},
+                        ],
+                    },
+                )
+            except Exception as ex:
+                self._send_json(500, {"ok": False, "error": str(ex)})
+            return
+
         if api_path == "/api/schema":
             qs = parse_qs(parsed.query)
             table_name = (qs.get("table") or ["workspace_album"])[0]
@@ -1007,6 +1144,14 @@ class AppHandler(SimpleHTTPRequestHandler):
                         "row_count": len(rows),
                     },
                 )
+            except Exception as ex:
+                self._send_json(400, {"ok": False, "error": str(ex)})
+            return
+
+        if api_path == "/api/albums/search":
+            try:
+                result = search_workspace_albums(body)
+                self._send_json(200, {"ok": True, **result})
             except Exception as ex:
                 self._send_json(400, {"ok": False, "error": str(ex)})
             return
@@ -1453,6 +1598,7 @@ def main() -> None:
     server = ThreadingHTTPServer((host, port), AppHandler)
     print(f"Curator Normalize App running at http://{host}:{port}{NORMALIZE_BASE_PATH}")
     print(f"Curator Import App running at http://{host}:{port}{IMPORT_BASE_PATH}")
+    print(f"Curator Albums App running at http://{host}:{port}{ALBUMS_BASE_PATH}")
     print(f"Database: {DATABASE_PATH}")
     print(f"Logs: {LOG_PATH}")
     print(f"Backups: {BACKUP_DIR}")

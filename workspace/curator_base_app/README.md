@@ -1,4 +1,4 @@
-# Curator Normalize / Import App
+# Curator Normalize / Import / Albums App
 
 本地浏览器可用的 `workspace_album` 编辑器，默认连接：
 
@@ -38,11 +38,13 @@
 
 - Normalize 页面：`/normalize`
 - Import 页面：`/import`
+- Albums 页面：`/albums`
 
 其中：
 
 - `/normalize` 只负责查询、编辑、备份、回滚 `workspace_album`
 - `/import` 负责单个与批量影集导入
+- `/albums` 负责按筛选条件浏览与搜索 `workspace_album`（不展示 `expected_path`、`remark`、`belongs_to_album_id`）
 
 ## Import 页面
 
@@ -91,6 +93,7 @@ CURATOR_APP_PORT=8790 python3 workspace/curator_base_app/server.py
 ```text
 http://127.0.0.1:8787/normalize
 http://127.0.0.1:8787/import
+http://127.0.0.1:8787/albums
 ```
 
 ## 注意事项
@@ -98,5 +101,5 @@ http://127.0.0.1:8787/import
 - 目前只允许更新 `workspace_album` 表。
 - 提交接口是参数化 SQL，会拒绝主键和非法列更新。
 - Query 文件必须是 `SELECT` 语句。
-- API 支持三种前缀：`/api/*`、`/normalize/api/*`、`/import/api/*`。
+- API 支持四种前缀：`/api/*`、`/normalize/api/*`、`/import/api/*`、`/albums/api/*`。
 - 可用接口：`/api/backup-now`、`/api/backups`、`/api/backups/cleanup`、`/api/backups/delete`、`/api/rollback`。
