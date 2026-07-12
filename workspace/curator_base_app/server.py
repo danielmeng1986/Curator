@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -15,13 +16,45 @@ REPO_ROOT = BASE_DIR.parent.parent
 STATIC_DIR = BASE_DIR / "static"
 DATABASE_PATH = REPO_ROOT / "database" / "Curator.db"
 QUERY_DIR = REPO_ROOT / "database"
-ARCHIVE_ROOT = Path("/Volumes/NAS-RAID5/RAID/Prime_Media/Archive")
+CONFIG_PATH = BASE_DIR / "app_config.json"
+
+DEFAULT_APP_CONFIG = {
+    "import_source_root": "/Volumes/NAS-RAID5/RAID/Prime_Media/[Temp]/p",
+    "archive_root": "/Volumes/NAS-RAID5/RAID/Prime_Media/Archive",
+    "default_import_studio": "MetArt",
+}
+
+
+def load_app_config() -> dict:
+    if not CONFIG_PATH.exists():
+        return dict(DEFAULT_APP_CONFIG)
+
+    try:
+        parsed = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return dict(DEFAULT_APP_CONFIG)
+
+    if not isinstance(parsed, dict):
+        return dict(DEFAULT_APP_CONFIG)
+
+    config = dict(DEFAULT_APP_CONFIG)
+    for key in ("import_source_root", "archive_root", "default_import_studio"):
+        value = parsed.get(key)
+        if isinstance(value, str) and value.strip():
+            config[key] = value.strip()
+    return config
+
+
+APP_CONFIG = load_app_config()
+IMPORT_SOURCE_ROOT = Path(APP_CONFIG["import_source_root"])
+ARCHIVE_ROOT = Path(APP_CONFIG["archive_root"])
 LOG_PATH = BASE_DIR / "logs" / "changes.log"
 BACKUP_DIR = BASE_DIR / "backups"
 BACKUP_LOG_PATH = BASE_DIR / "logs" / "backup.log"
 ROLLBACK_LOG_PATH = BASE_DIR / "logs" / "rollback.log"
 
-APP_BASE_PATH = "/normalize"
+NORMALIZE_BASE_PATH = "/normalize"
+IMPORT_BASE_PATH = "/import"
 API_PREFIX = "/api"
 
 STOP_EVENT = threading.Event()
@@ -32,7 +65,7 @@ ALBUM_FOLDER_RE = re.compile(r"^(.+?)\s+in\s+(.+)$", re.IGNORECASE)
 
 ALLOWED_TABLES = {"workspace_album"}
 EXCLUDED_QUERY_FILES = {"Curator.db"}
-DEFAULT_IMPORT_STUDIO = "MetArt"
+DEFAULT_IMPORT_STUDIO = APP_CONFIG["default_import_studio"]
 STATUS_RENAMED = 3
 STATUS_IMPORTED = 4
 
@@ -303,9 +336,18 @@ def next_backup_time_iso() -> str:
 def normalize_api_path(path: str) -> str:
     if path == API_PREFIX:
         return API_PREFIX
-    if path.startswith(APP_BASE_PATH + API_PREFIX + "/"):
-        return path[len(APP_BASE_PATH) :]
+    for base_path in (NORMALIZE_BASE_PATH, IMPORT_BASE_PATH):
+        if path.startswith(base_path + API_PREFIX + "/"):
+            return path[len(base_path) :]
     return path
+
+
+def static_path_for_base(base_path: str) -> str | None:
+    if base_path == NORMALIZE_BASE_PATH:
+        return "/normalize.html"
+    if base_path == IMPORT_BASE_PATH:
+        return "/import.html"
+    return None
 
 
 def build_rollback_sql(table_name: str, pk_column: str, pk_value, changed_fields: dict) -> str:
@@ -423,10 +465,16 @@ def build_album_expected_path(model_name: str, studio_name: str, album_name: str
     return f"{alphabet_for_model(model_name)}/{model_name}/p/{studio_name}/{album_name}"
 
 
+def source_path_from_payload(body: dict) -> str:
+    # Keep trailing spaces because they can be part of an actual folder name.
+    raw = str(body.get("source_path") or "")
+    return raw.rstrip("\r\n")
+
+
 def folder_name_from_payload(body: dict) -> str:
-    source_path = str(body.get("source_path") or "").strip()
+    source_path = source_path_from_payload(body)
     folder_name = str(body.get("folder_name") or "").strip()
-    if source_path:
+    if source_path.strip():
         return Path(source_path).name
     if folder_name:
         return folder_name
@@ -458,7 +506,7 @@ def get_import_preview(body: dict) -> dict:
 
     destination = (ARCHIVE_ROOT / expected_path).resolve()
     return {
-        "source_path": str(body.get("source_path") or "").strip(),
+        "source_path": source_path_from_payload(body),
         "folder_name": folder_name_from_payload(body),
         "model_name": model_name,
         "album_name": album_name,
@@ -473,8 +521,70 @@ def get_import_preview(body: dict) -> dict:
         "destination_exists": destination.exists(),
         "workspace_album_exists": existing_workspace is not None,
         "workspace_album_id": existing_workspace["id"] if existing_workspace else None,
+        "can_import": not destination.exists() and existing_workspace is None,
         "default_studio": DEFAULT_IMPORT_STUDIO,
+        "import_source_root": str(IMPORT_SOURCE_ROOT),
         "archive_root": str(ARCHIVE_ROOT),
+    }
+
+
+def collect_batch_import_previews(body: dict) -> dict:
+    items = body.get("items")
+    if not isinstance(items, list) or not items:
+        raise ValueError("items must be a non-empty list")
+
+    previews: list[dict] = []
+    ok_count = 0
+    error_count = 0
+    new_model_count = 0
+    new_studio_count = 0
+
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            previews.append(
+                {
+                    "index": index,
+                    "ok": False,
+                    "error": "item must be an object",
+                }
+            )
+            error_count += 1
+            continue
+
+        try:
+            preview = get_import_preview(item)
+            preview["index"] = index
+            preview["ok"] = True
+            preview["will_create_model"] = not preview["model_exists"]
+            preview["will_create_studio"] = not preview["studio_exists"]
+            previews.append(preview)
+            ok_count += 1
+            if preview["will_create_model"]:
+                new_model_count += 1
+            if preview["will_create_studio"]:
+                new_studio_count += 1
+        except Exception as ex:
+            previews.append(
+                {
+                    "index": index,
+                    "ok": False,
+                    "source_path": source_path_from_payload(item),
+                    "folder_name": str(item.get("folder_name") or "").strip(),
+                    "studio_name": str(item.get("studio_name") or DEFAULT_IMPORT_STUDIO).strip() or DEFAULT_IMPORT_STUDIO,
+                    "error": str(ex),
+                }
+            )
+            error_count += 1
+
+    return {
+        "items": previews,
+        "summary": {
+            "total": len(previews),
+            "ok": ok_count,
+            "errors": error_count,
+            "will_create_models": new_model_count,
+            "will_create_studios": new_studio_count,
+        },
     }
 
 
@@ -515,8 +625,8 @@ def ensure_destination_is_safe(source_path: Path, destination_path: Path) -> Non
 
 def import_single_album(body: dict) -> dict:
     preview = get_import_preview(body)
-    source_raw = str(body.get("source_path") or "").strip()
-    if not source_raw:
+    source_raw = source_path_from_payload(body)
+    if not source_raw.strip():
         raise ValueError("source_path is required for import")
 
     model_name = str(body.get("model_name") or preview["model_name"]).strip()
@@ -681,6 +791,54 @@ def import_single_album(body: dict) -> dict:
         raise
 
 
+def import_album_batch(body: dict) -> dict:
+    items = body.get("items")
+    if not isinstance(items, list) or not items:
+        raise ValueError("items must be a non-empty list")
+
+    results: list[dict] = []
+    success_count = 0
+    failure_count = 0
+
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            results.append({"index": index, "success": False, "error": "item must be an object"})
+            failure_count += 1
+            continue
+
+        try:
+            result = import_single_album(item)
+            result["index"] = index
+            results.append(result)
+            success_count += 1
+        except Exception as ex:
+            results.append(
+                {
+                    "index": index,
+                    "success": False,
+                    "source_path": source_path_from_payload(item),
+                    "folder_name": str(item.get("folder_name") or "").strip(),
+                    "studio_name": str(item.get("studio_name") or DEFAULT_IMPORT_STUDIO).strip() or DEFAULT_IMPORT_STUDIO,
+                    "error": str(ex),
+                }
+            )
+            failure_count += 1
+
+    batch_result = {
+        "timestamp": utc_now_iso(),
+        "operation": "import_album_batch",
+        "success": failure_count == 0,
+        "items": results,
+        "summary": {
+            "total": len(results),
+            "success": success_count,
+            "failed": failure_count,
+        },
+    }
+    append_log(batch_result)
+    return batch_result
+
+
 def build_workspace_album_sql(status_id: int, studio_name: str) -> tuple[str, tuple]:
     if studio_name:
         sql = "SELECT * FROM workspace_album WHERE status_id = ? AND studio_name = ? ORDER BY id"
@@ -724,21 +882,31 @@ class AppHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         api_path = normalize_api_path(parsed.path)
 
-        if parsed.path == APP_BASE_PATH:
+        if parsed.path == "/":
             self.send_response(301)
-            self.send_header("Location", APP_BASE_PATH + "/")
+            self.send_header("Location", NORMALIZE_BASE_PATH + "/")
             self.end_headers()
             return
 
-        if parsed.path in {"/", APP_BASE_PATH + "/"}:
-            self.path = "/index.html"
-            return super().do_GET()
+        for base_path in (NORMALIZE_BASE_PATH, IMPORT_BASE_PATH):
+            if parsed.path == base_path:
+                self.send_response(301)
+                self.send_header("Location", base_path + "/")
+                self.end_headers()
+                return
 
-        if parsed.path.startswith(APP_BASE_PATH + "/") and not parsed.path.startswith(APP_BASE_PATH + API_PREFIX + "/"):
-            self.path = parsed.path[len(APP_BASE_PATH) :]
-            if parsed.query:
-                self.path += "?" + parsed.query
-            return super().do_GET()
+            if parsed.path == base_path + "/":
+                static_path = static_path_for_base(base_path)
+                if static_path is None:
+                    break
+                self.path = static_path
+                return super().do_GET()
+
+            if parsed.path.startswith(base_path + "/") and not parsed.path.startswith(base_path + API_PREFIX + "/"):
+                self.path = parsed.path[len(base_path) :]
+                if parsed.query:
+                    self.path += "?" + parsed.query
+                return super().do_GET()
 
         if api_path == "/api/health":
             backup_catalog = build_backup_catalog()
@@ -775,6 +943,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                         "statuses": statuses,
                         "studios": studios,
                         "default_import_studio": DEFAULT_IMPORT_STUDIO,
+                        "import_source_root": str(IMPORT_SOURCE_ROOT),
+                        "archive_root": str(ARCHIVE_ROOT),
                     },
                 )
             except Exception as ex:
@@ -849,9 +1019,25 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "error": str(ex)})
             return
 
+        if api_path == "/api/import-albums/preview":
+            try:
+                preview = collect_batch_import_previews(body)
+                self._send_json(200, {"ok": True, "preview": preview})
+            except Exception as ex:
+                self._send_json(400, {"ok": False, "error": str(ex)})
+            return
+
         if api_path == "/api/import-album":
             try:
                 result = import_single_album(body)
+                self._send_json(200, {"ok": True, "result": result})
+            except Exception as ex:
+                self._send_json(400, {"ok": False, "error": str(ex)})
+            return
+
+        if api_path == "/api/import-albums":
+            try:
+                result = import_album_batch(body)
                 self._send_json(200, {"ok": True, "result": result})
             except Exception as ex:
                 self._send_json(400, {"ok": False, "error": str(ex)})
@@ -1236,7 +1422,7 @@ def main() -> None:
         raise FileNotFoundError(f"Static directory not found: {STATIC_DIR}")
 
     host = "127.0.0.1"
-    port = 8787
+    port = int(os.environ.get("CURATOR_APP_PORT", "8787"))
     backup_thread = threading.Thread(target=run_daily_backup, name="daily-backup", daemon=True)
     backup_thread.start()
 
@@ -1265,7 +1451,8 @@ def main() -> None:
     cleanup_expired_snapshots(RETENTION_DAYS)
 
     server = ThreadingHTTPServer((host, port), AppHandler)
-    print(f"Curator Base App running at http://{host}:{port}{APP_BASE_PATH}")
+    print(f"Curator Normalize App running at http://{host}:{port}{NORMALIZE_BASE_PATH}")
+    print(f"Curator Import App running at http://{host}:{port}{IMPORT_BASE_PATH}")
     print(f"Database: {DATABASE_PATH}")
     print(f"Logs: {LOG_PATH}")
     print(f"Backups: {BACKUP_DIR}")

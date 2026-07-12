@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Curator Workspace Album Editor</title>
+    <title>Curator Normalize</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -12,6 +12,10 @@
 
     <main class="app-shell">
       <header class="app-header">
+        <div class="page-nav">
+          <a class="nav-link nav-link-active" href="/normalize/">Normalize</a>
+          <a class="nav-link" href="/import/">Import</a>
+        </div>
         <h1>Curator Local Workspace Album Editor</h1>
         <p>按 Status 和 Studio 查询 workspace_album，直接编辑并一次性提交到 Curator.db</p>
       </header>
@@ -45,24 +49,6 @@
             <input id="focusIdInput" class="locate-id-input" type="number" min="1" step="1" placeholder="workspace_album id" />
             <button id="focusIdBtn" class="btn btn-secondary">跳转到该行</button>
           </div>
-        </div>
-
-        <div class="tool-group import-group">
-          <div class="tool-group-title">导入影集</div>
-          <div class="import-controls">
-            <input id="importSourcePathInput" class="path-input" type="text" placeholder="可选：手动填写源路径（留空则按配置自动拼接）" />
-            <label class="folder-picker-label btn btn-secondary" for="importFolderPicker">辅助解析名称</label>
-            <input id="importFolderPicker" class="hidden-file-input" type="file" webkitdirectory directory multiple />
-            <input id="importStudioInput" class="bulk-text-input" type="text" list="studioDatalist" placeholder="Studio，默认 MetArt" />
-            <datalist id="studioDatalist"></datalist>
-            <label class="check-label">
-              <input id="keepSourceCheckbox" type="checkbox" />
-              保留源文件
-            </label>
-            <button id="previewImportBtn" class="btn btn-secondary">预览</button>
-            <button id="importAlbumBtn" class="btn btn-accent" disabled>导入</button>
-          </div>
-          <div id="importPreview" class="import-preview">等待选择文件夹。可由配置自动拼接完整源路径。</div>
         </div>
 
         <div class="tool-group">
@@ -110,6 +96,6 @@
 
     <div id="popup" class="popup hidden"></div>
 
-    <script src="app.js?v=20260711-1"></script>
+    <script src="app.js?v=20260712-1"></script>
   </body>
 </html>

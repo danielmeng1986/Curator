@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Curator Import</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="bg-shape bg-shape-a"></div>
+    <div class="bg-shape bg-shape-b"></div>
+
+    <main class="app-shell import-shell">
+      <header class="app-header">
+        <div class="page-nav">
+          <a class="nav-link" href="/normalize/">Normalize</a>
+          <a class="nav-link nav-link-active" href="/import/">Import</a>
+        </div>
+        <h1>Curator Album Import</h1>
+        <p>从导入根目录选择一个或多个影集，批量解析并导入到 Archive。</p>
+      </header>
+
+      <section class="toolbar card import-toolbar">
+        <div class="tool-group import-group import-group-full">
+          <div class="tool-group-title">选择影集</div>
+          <div class="import-controls">
+            <label class="folder-picker-label btn btn-secondary" for="batchFolderPicker">选择目录</label>
+            <input id="batchFolderPicker" class="hidden-file-input" type="file" webkitdirectory directory multiple />
+            <input id="globalStudioInput" class="bulk-text-input" type="text" list="studioDatalist" placeholder="默认 Studio" />
+            <datalist id="studioDatalist"></datalist>
+            <button id="applyStudioBtn" class="btn btn-secondary">应用 Studio 到选中项</button>
+            <label class="check-label">
+              <input id="keepSourceCheckbox" type="checkbox" />
+              保留源文件
+            </label>
+            <button id="selectAllBtn" class="btn btn-secondary">全选</button>
+            <button id="clearSelectionBtn" class="btn btn-secondary">清空选择</button>
+            <button id="previewBatchBtn" class="btn btn-primary">预览选中项</button>
+            <button id="importBatchBtn" class="btn btn-accent" disabled>导入选中项</button>
+          </div>
+          <div class="import-meta">
+            <div><strong>导入根目录:</strong> <span id="importRootText">加载中...</span></div>
+            <div><strong>Archive 根目录:</strong> <span id="archiveRootText">加载中...</span></div>
+          </div>
+          <div id="batchImportPreview" class="import-preview">等待选择目录。建议选择导入根目录，然后在下方勾选要导入的影集。</div>
+        </div>
+      </section>
+
+      <section class="table-card card import-table-card">
+        <div class="table-wrap import-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>选择</th>
+                <th>文件夹名</th>
+                <th>源路径</th>
+                <th>Studio</th>
+                <th>Model</th>
+                <th>Album</th>
+                <th>expected_path</th>
+                <th>标记</th>
+                <th>结果</th>
+              </tr>
+            </thead>
+            <tbody id="batchRowsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="status-row card import-status-row">
+        <div><strong>状态:</strong> <span id="statusText">准备就绪</span></div>
+        <div><strong>已解析:</strong> <span id="parsedCount">0</span></div>
+        <div><strong>已选中:</strong> <span id="selectedCount">0</span></div>
+        <div><strong>可导入:</strong> <span id="importableCount">0</span></div>
+      </section>
+    </main>
+
+    <div id="popup" class="popup hidden"></div>
+
+    <script src="import.js?v=20260712-1"></script>
+  </body>
+</html>

@@ -11,6 +11,8 @@ const state = {
   selectedPkValues: new Set(),
   selectionAnchorRowIndex: null,
   importPreview: null,
+  importSourceRoot: "",
+  archiveRoot: "",
 };
 
 const COLUMN_VISIBILITY_STORAGE_KEY = "normalize_app_workspace_album_column_visibility";
@@ -133,8 +135,23 @@ function showPopup(message, ok = true) {
 }
 
 function setImportPreviewText(message, ok = true) {
+  if (!ui.importPreview) {
+    return;
+  }
   ui.importPreview.textContent = message;
   ui.importPreview.classList.toggle("import-preview-error", !ok);
+}
+
+function joinPosixPath(basePath, leafName) {
+  const base = String(basePath || "").trim().replace(/\/+$/, "");
+  const leaf = String(leafName || "").trim().replace(/^\/+/, "");
+  if (!base) {
+    return leaf;
+  }
+  if (!leaf) {
+    return base;
+  }
+  return `${base}/${leaf}`;
 }
 
 async function fetchJson(url, options = {}) {
@@ -838,15 +855,23 @@ async function loadOptions() {
     ui.studioSelect.appendChild(option);
   });
 
-  ui.studioDatalist.innerHTML = "";
-  data.studios.forEach((name) => {
-    const option = document.createElement("option");
-    option.value = name;
-    ui.studioDatalist.appendChild(option);
-  });
+  if (ui.studioDatalist) {
+    ui.studioDatalist.innerHTML = "";
+    data.studios.forEach((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      ui.studioDatalist.appendChild(option);
+    });
+  }
 
-  if (!ui.importStudioInput.value) {
+  if (ui.importStudioInput && !ui.importStudioInput.value) {
     ui.importStudioInput.value = data.default_import_studio || "MetArt";
+  }
+
+  state.importSourceRoot = (data.import_source_root || "").trim();
+  state.archiveRoot = (data.archive_root || "").trim();
+  if (ui.importSourcePathInput && state.importSourceRoot && !ui.importSourcePathInput.value.trim()) {
+    ui.importSourcePathInput.placeholder = `默认自动拼接: ${state.importSourceRoot}/<影集文件夹名>`;
   }
 
   if (data.statuses.length === 0) {
@@ -878,8 +903,9 @@ function firstSelectedFolderName() {
 }
 
 function importPayload({ requireSourcePath = false } = {}) {
-  const sourcePath = (ui.importSourcePathInput.value || "").trim();
+  const manualSourcePath = (ui.importSourcePathInput.value || "").trim();
   const folderName = firstSelectedFolderName();
+  const sourcePath = manualSourcePath || joinPosixPath(state.importSourceRoot, folderName);
   const studioName = (ui.importStudioInput.value || "").trim() || "MetArt";
 
   if (requireSourcePath && !sourcePath) {
@@ -1178,51 +1204,57 @@ function bindEvents() {
     }
   });
 
-  ui.importFolderPicker.addEventListener("change", async () => {
-    const folderName = firstSelectedFolderName();
-    if (!folderName) {
-      return;
-    }
-    setImportPreviewText(`已解析名称: ${folderName}。浏览器不会提供完整路径，执行导入前仍需粘贴源文件夹完整路径。`);
-    try {
-      await previewImportAlbum();
-    } catch (err) {
+  if (ui.importFolderPicker && ui.importSourcePathInput && ui.importStudioInput && ui.previewImportBtn && ui.importAlbumBtn) {
+    ui.importFolderPicker.addEventListener("change", async () => {
+      const folderName = firstSelectedFolderName();
+      if (!folderName) {
+        return;
+      }
+      if (!ui.importSourcePathInput.value.trim() && state.importSourceRoot) {
+        ui.importSourcePathInput.value = joinPosixPath(state.importSourceRoot, folderName);
+      }
+      const effectiveSourcePath = (ui.importSourcePathInput.value || "").trim();
+      setImportPreviewText(`已解析名称: ${folderName}；源路径: ${effectiveSourcePath || "(未生成)"}`);
+      try {
+        await previewImportAlbum();
+      } catch (err) {
+        ui.importAlbumBtn.disabled = true;
+        setImportPreviewText(`解析失败: ${err.message}`, false);
+        showPopup(`解析失败: ${err.message}`, false);
+      }
+    });
+
+    ui.importSourcePathInput.addEventListener("input", () => {
+      state.importPreview = null;
       ui.importAlbumBtn.disabled = true;
-      setImportPreviewText(`解析失败: ${err.message}`, false);
-      showPopup(`解析失败: ${err.message}`, false);
-    }
-  });
+    });
 
-  ui.importSourcePathInput.addEventListener("input", () => {
-    state.importPreview = null;
-    ui.importAlbumBtn.disabled = true;
-  });
-
-  ui.importStudioInput.addEventListener("input", () => {
-    state.importPreview = null;
-    ui.importAlbumBtn.disabled = true;
-  });
-
-  ui.previewImportBtn.addEventListener("click", async () => {
-    try {
-      await previewImportAlbum();
-    } catch (err) {
+    ui.importStudioInput.addEventListener("input", () => {
+      state.importPreview = null;
       ui.importAlbumBtn.disabled = true;
-      setStatus(`导入预览失败: ${err.message}`);
-      setImportPreviewText(`导入预览失败: ${err.message}`, false);
-      showPopup(`导入预览失败: ${err.message}`, false);
-    }
-  });
+    });
 
-  ui.importAlbumBtn.addEventListener("click", async () => {
-    try {
-      await importAlbum();
-    } catch (err) {
-      ui.importAlbumBtn.disabled = false;
-      setStatus(`导入失败: ${err.message}`);
-      showPopup(`导入失败: ${err.message}`, false);
-    }
-  });
+    ui.previewImportBtn.addEventListener("click", async () => {
+      try {
+        await previewImportAlbum();
+      } catch (err) {
+        ui.importAlbumBtn.disabled = true;
+        setStatus(`导入预览失败: ${err.message}`);
+        setImportPreviewText(`导入预览失败: ${err.message}`, false);
+        showPopup(`导入预览失败: ${err.message}`, false);
+      }
+    });
+
+    ui.importAlbumBtn.addEventListener("click", async () => {
+      try {
+        await importAlbum();
+      } catch (err) {
+        ui.importAlbumBtn.disabled = false;
+        setStatus(`导入失败: ${err.message}`);
+        showPopup(`导入失败: ${err.message}`, false);
+      }
+    });
+  }
 
   window.addEventListener("resize", () => {
     scheduleTableWrapHeightUpdate();
