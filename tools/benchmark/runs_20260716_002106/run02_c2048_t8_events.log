@@ -1,0 +1,33 @@
+# Memory pressure and VM events
+# Generated at 2026-07-16 00:21:39
+
+2026-07-16 00:21:42
+Pageouts increased by 13 pages
+
+2026-07-16 00:21:42
+Free memory below 500 MB (current: 113.47 MB)
+
+2026-07-16 00:21:43
+Pageouts increased by 5 pages
+
+2026-07-16 00:21:45
+Memory pressure exceeded 80% (current: 83.00%)
+
+2026-07-16 00:21:45
+Pageouts increased by 5 pages
+
+2026-07-16 00:21:47
+Pageouts increased by 5 pages
+
+2026-07-16 00:21:52
+Pageouts increased by 3 pages
+
+2026-07-16 00:22:00
+Pageouts increased by 19 pages
+
+2026-07-16 00:22:02
+Pageouts increased by 10 pages
+
+2026-07-16 00:22:03
+Pageouts increased by 3 pages
+

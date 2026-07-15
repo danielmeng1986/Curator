@@ -112,6 +112,24 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print sampled image details to stderr",
     )
+    parser.add_argument(
+        "--ctx-size",
+        type=int,
+        default=None,
+        help="Optional llama.cpp context size (-c)",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        help="Optional llama.cpp CPU threads (-t)",
+    )
+    parser.add_argument(
+        "--gpu-layers",
+        type=int,
+        default=None,
+        help="Optional llama.cpp GPU layers (--n-gpu-layers)",
+    )
     return parser.parse_args()
 
 
@@ -403,6 +421,9 @@ def run_llama(
     max_tokens: int,
     temperature: float,
     image_max_tokens: int,
+    ctx_size: int | None,
+    threads: int | None,
+    gpu_layers: int | None,
 ) -> dict:
     prompt = build_prompt(album)
     cmd = [
@@ -423,6 +444,14 @@ def run_llama(
         "-p",
         prompt,
     ]
+
+    if ctx_size is not None:
+        cmd.extend(["-c", str(ctx_size)])
+    if threads is not None:
+        cmd.extend(["-t", str(threads)])
+    if gpu_layers is not None:
+        cmd.extend(["--n-gpu-layers", str(gpu_layers)])
+
     for image_path in sample_images:
         cmd.extend(["--image", str(image_path)])
 
@@ -486,6 +515,12 @@ def main() -> int:
         raise ValueError("sample_count must be >= 1")
     if args.size_outlier_threshold < 0:
         raise ValueError("--size-outlier-threshold must be >= 0")
+    if args.ctx_size is not None and args.ctx_size <= 0:
+        raise ValueError("--ctx-size must be > 0")
+    if args.threads is not None and args.threads <= 0:
+        raise ValueError("--threads must be > 0")
+    if args.gpu_layers is not None and args.gpu_layers < 0:
+        raise ValueError("--gpu-layers must be >= 0")
 
     archive_root = args.archive_root
     if archive_root is None:
@@ -517,6 +552,9 @@ def main() -> int:
         max_tokens=args.max_tokens,
         temperature=args.temperature,
         image_max_tokens=args.image_max_tokens,
+        ctx_size=args.ctx_size,
+        threads=args.threads,
+        gpu_layers=args.gpu_layers,
     )
     result = validate_output_schema(result)
     print(json.dumps(result, ensure_ascii=False, indent=2))
