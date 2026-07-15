@@ -1,0 +1,5 @@
+[llama]
+
+cli = "/Volumes/4TB-SSD/AI_Project/llama-b9534/llama-cli"
+model = "/Volumes/4TB-SSD/AI_Project/llama-b9534/models/Qwen2.5-VL-7B-Instruct-BF16.gguf"
+mmproj = "/Volumes/4TB-SSD/AI_Project/llama-b9534/models/mmproj-BF16.gguf"
