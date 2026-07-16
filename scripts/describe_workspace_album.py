@@ -60,8 +60,16 @@ class AlbumRow:
 @dataclass(frozen=True)
 class LlamaConfig:
     cli: Path
-    model: Path
-    mmproj: Path
+    model: Path | None
+    mmproj: Path | None
+    hf_repo: str | None
+    hf_file: str | None
+
+
+@dataclass(frozen=True)
+class DescribeConfig:
+    default_sample_count: int
+    prompt_template: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -69,7 +77,13 @@ def parse_args() -> argparse.Namespace:
         description="Sample album images by workspace_album id and generate structured JSON with llama.cpp."
     )
     parser.add_argument("album_id", type=int, help="workspace_album.id")
-    parser.add_argument("sample_count", type=int, help="Requested sample image count")
+    parser.add_argument(
+        "sample_count",
+        nargs="?",
+        type=int,
+        default=None,
+        help="Requested sample image count. Default: [describe_album].default_sample_count in ai.toml",
+    )
     parser.add_argument("--db", type=Path, default=DEFAULT_DB, help=f"SQLite DB path (default: {DEFAULT_DB})")
     parser.add_argument(
         "--ai-config",
@@ -163,11 +177,63 @@ def load_llama_config(ai_config_path: Path) -> LlamaConfig:
             raise ValueError(f"Missing [llama].{key} in {ai_config_path}")
         return Path(value.strip())
 
-    cfg = LlamaConfig(cli=as_path("cli"), model=as_path("model"), mmproj=as_path("mmproj"))
+    def optional_path(key: str) -> Path | None:
+        value = section.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return Path(value.strip())
+
+    def optional_str(key: str) -> str | None:
+        value = section.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip()
+
+    cfg = LlamaConfig(
+        cli=as_path("cli"),
+        model=optional_path("model"),
+        mmproj=optional_path("mmproj"),
+        hf_repo=optional_str("hf_repo"),
+        hf_file=optional_str("hf_file"),
+    )
+
+    if (cfg.hf_repo is None) != (cfg.hf_file is None):
+        raise ValueError(
+            f"[llama].hf_repo and [llama].hf_file must both be set together in {ai_config_path}"
+        )
+
+    if cfg.hf_repo is None and cfg.model is None:
+        raise ValueError(
+            f"Either [llama].model or [llama].hf_repo + [llama].hf_file must be configured in {ai_config_path}"
+        )
+
     for label, path in (("cli", cfg.cli), ("model", cfg.model), ("mmproj", cfg.mmproj)):
+        if path is None:
+            continue
         if not path.exists():
             raise FileNotFoundError(f"Configured {label} path does not exist: {path}")
     return cfg
+
+
+def load_describe_config(ai_config_path: Path) -> DescribeConfig:
+    parsed = tomllib.loads(ai_config_path.read_text(encoding="utf-8"))
+    section = parsed.get("describe_album")
+    if not isinstance(section, dict):
+        raise ValueError(f"[describe_album] section missing in {ai_config_path}")
+
+    sample_count = section.get("default_sample_count")
+    if not isinstance(sample_count, int) or sample_count <= 0:
+        raise ValueError(f"[describe_album].default_sample_count must be a positive integer in {ai_config_path}")
+
+    prompt_template = section.get("prompt_template")
+    if not isinstance(prompt_template, str) or not prompt_template.strip():
+        raise ValueError(f"[describe_album].prompt_template must be a non-empty string in {ai_config_path}")
+
+    return DescribeConfig(default_sample_count=sample_count, prompt_template=prompt_template.strip())
 
 
 def load_album_row(conn: sqlite3.Connection, album_id: int) -> AlbumRow:
@@ -337,7 +403,7 @@ def pick_with_resample(
     return [image_paths[i] for i in chosen]
 
 
-def build_prompt(album: AlbumRow) -> str:
+def build_prompt(album: AlbumRow, template: str) -> str:
     schema = {
         "album_summary": "...",
         "tags": ["...", "..."],
@@ -346,21 +412,13 @@ def build_prompt(album: AlbumRow) -> str:
         "mood": "...",
         "suggested_names": ["...", "...", "..."],
     }
-    return (
-        "You are a vision assistant for photo album curation. "
-        "Analyze all provided images as one album and output ONLY one JSON object.\n\n"
-        f"Album metadata:\n- album_id: {album.album_id}\n"
-        f"- studio_name: {album.studio_name}\n"
-        f"- primary_model: {album.primary_model}\n"
-        f"- album_name: {album.album_name}\n\n"
-        "Output requirements:\n"
-        "1) Return strict JSON only (no markdown, no prose).\n"
-        "2) Keep tags concise and visual.\n"
-        "3) suggested_names should be 3 to 6 options.\n"
-        "4) Do not include unknown personal identities.\n"
-        "5) Use English for JSON values.\n\n"
-        f"Schema example:\n{json.dumps(schema, ensure_ascii=True)}"
-    )
+    rendered = template
+    rendered = rendered.replace("__ALBUM_ID__", str(album.album_id))
+    rendered = rendered.replace("__STUDIO_NAME__", album.studio_name)
+    rendered = rendered.replace("__PRIMARY_MODEL__", album.primary_model)
+    rendered = rendered.replace("__ALBUM_NAME__", album.album_name)
+    rendered = rendered.replace("__SCHEMA_EXAMPLE__", json.dumps(schema, ensure_ascii=True))
+    return rendered
 
 
 def extract_json_object(text: str) -> dict:
@@ -416,6 +474,7 @@ def extract_json_object(text: str) -> dict:
 
 def run_llama(
     llama: LlamaConfig,
+    prompt_template: str,
     album: AlbumRow,
     sample_images: list[Path],
     max_tokens: int,
@@ -425,25 +484,33 @@ def run_llama(
     threads: int | None,
     gpu_layers: int | None,
 ) -> dict:
-    prompt = build_prompt(album)
-    cmd = [
-        str(llama.cli),
-        "-m",
-        str(llama.model),
-        "--mmproj",
-        str(llama.mmproj),
-        "--temp",
-        str(temperature),
-        "-n",
-        str(max_tokens),
-        "--image-max-tokens",
-        str(image_max_tokens),
-        "--conversation",
-        "--single-turn",
-        "--simple-io",
-        "-p",
-        prompt,
-    ]
+    prompt = build_prompt(album, prompt_template)
+    cmd = [str(llama.cli)]
+    if llama.hf_repo and llama.hf_file:
+        cmd.extend(["--hf-repo", llama.hf_repo, "--hf-file", llama.hf_file])
+    elif llama.model is not None:
+        cmd.extend(["-m", str(llama.model)])
+    else:
+        raise ValueError("Invalid llama config: missing both local model and hf repo/file")
+
+    if llama.mmproj is not None:
+        cmd.extend(["--mmproj", str(llama.mmproj)])
+
+    cmd.extend(
+        [
+            "--temp",
+            str(temperature),
+            "-n",
+            str(max_tokens),
+            "--image-max-tokens",
+            str(image_max_tokens),
+            "--conversation",
+            "--single-turn",
+            "--simple-io",
+            "-p",
+            prompt,
+        ]
+    )
 
     if ctx_size is not None:
         cmd.extend(["-c", str(ctx_size)])
@@ -511,8 +578,6 @@ def validate_output_schema(data: dict) -> dict:
 
 def main() -> int:
     args = parse_args()
-    if args.sample_count <= 0:
-        raise ValueError("sample_count must be >= 1")
     if args.size_outlier_threshold < 0:
         raise ValueError("--size-outlier-threshold must be >= 0")
     if args.ctx_size is not None and args.ctx_size <= 0:
@@ -527,13 +592,18 @@ def main() -> int:
         archive_root = read_archive_root(DEFAULT_APP_CONFIG)
 
     llama_cfg = load_llama_config(args.ai_config)
+    describe_cfg = load_describe_config(args.ai_config)
+
+    sample_count = args.sample_count if args.sample_count is not None else describe_cfg.default_sample_count
+    if sample_count <= 0:
+        raise ValueError("sample_count must be >= 1")
 
     with sqlite3.connect(args.db) as conn:
         album = load_album_row(conn, args.album_id)
 
     album_dir = resolve_album_dir(album.current_path, album.expected_path, archive_root)
     images = list_images(album_dir)
-    sampled = pick_with_resample(images, args.sample_count, args.size_outlier_threshold)
+    sampled = pick_with_resample(images, sample_count, args.size_outlier_threshold)
 
     if args.verbose:
         avg_size = sum(p.stat().st_size for p in images) / len(images)
@@ -547,6 +617,7 @@ def main() -> int:
 
     result = run_llama(
         llama=llama_cfg,
+        prompt_template=describe_cfg.prompt_template,
         album=album,
         sample_images=sampled,
         max_tokens=args.max_tokens,

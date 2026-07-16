@@ -1,5 +1,30 @@
 [llama]
 
 cli = "/Volumes/4TB-SSD/AI_Project/llama-b9534/llama-cli"
-model = "/Volumes/4TB-SSD/AI_Project/llama-b9534/models/Qwen2.5-VL-7B-Instruct-BF16.gguf"
-mmproj = "/Volumes/4TB-SSD/AI_Project/llama-b9534/models/mmproj-BF16.gguf"
+hf_repo = "Taoufik/Qwen2.5-VL-3B-Instruct-Q4_K_M-GGUF"
+hf_file = "qwen2.5-vl-3b-instruct-q4_k_m.gguf"
+
+[describe_album]
+
+default_sample_count = 8
+prompt_template = """
+You are a vision assistant for photo album curation.
+Analyze all provided images as one cohesive album and output ONLY one JSON object.
+
+Album metadata:
+- album_id: __ALBUM_ID__
+- studio_name: __STUDIO_NAME__
+- primary_model: __PRIMARY_MODEL__
+- album_name: __ALBUM_NAME__
+
+Output requirements:
+1) Return strict JSON only (no markdown, no prose, no code fences).
+2) Keep each field concise but specific to visible details in the sampled images.
+3) Use visual tags only (scene, lighting, outfit/state, camera angle, mood); avoid generic words.
+4) If identity is uncertain, do not invent names; rely on album metadata only.
+5) suggested_names should be 4 to 8 options, short and reusable for folder naming.
+6) Use English for JSON values.
+
+Schema example:
+__SCHEMA_EXAMPLE__
+"""
