@@ -1,30 +1,122 @@
 [llama]
 
 cli = "/Volumes/4TB-SSD/AI_Project/llama-b9534/llama-cli"
-hf_repo = "Taoufik/Qwen2.5-VL-3B-Instruct-Q4_K_M-GGUF"
-hf_file = "qwen2.5-vl-3b-instruct-q4_k_m.gguf"
+hf_repo = "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF"
+hf_file = "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
 
 [describe_album]
 
 default_sample_count = 8
+
+[vision]
+
 prompt_template = """
-You are a vision assistant for photo album curation.
-Analyze all provided images as one cohesive album and output ONLY one JSON object.
+You are Vision stage for album analysis.
+
+Analyze all provided images as ONE cohesive album.
+Do NOT describe each image individually.
+Return ONLY one valid JSON object.
 
 Album metadata:
 - album_id: __ALBUM_ID__
 - studio_name: __STUDIO_NAME__
 - primary_model: __PRIMARY_MODEL__
+- additional_models: __ADDITIONAL_MODELS__
 - album_name: __ALBUM_NAME__
 
-Output requirements:
-1) Return strict JSON only (no markdown, no prose, no code fences).
-2) Keep each field concise but specific to visible details in the sampled images.
-3) Use visual tags only (scene, lighting, outfit/state, camera angle, mood); avoid generic words.
-4) If identity is uncertain, do not invent names; rely on album metadata only.
-5) suggested_names should be 4 to 8 options, short and reusable for folder naming.
-6) Use English for JSON values.
+Rules:
+1. JSON only, no markdown, no explanations.
+2. Use English only.
+3. Be factual and observable.
+4. Do not guess hidden information.
+5. `subjects`, `objects`, `actions` must be JSON arrays.
+6. `confidence` must be a number between 0 and 1.
 
-Schema example:
+Output schema:
+__SCHEMA_EXAMPLE__
+"""
+
+[writer]
+
+prompt_template = """
+You are Writer stage for album copywriting.
+
+You will receive trusted Vision output plus album metadata.
+Use Vision output as primary visual evidence.
+
+Album metadata:
+- album_id: __ALBUM_ID__
+- studio_name: __STUDIO_NAME__
+- primary_model: __PRIMARY_MODEL__
+- additional_models: __ADDITIONAL_MODELS__
+- album_name: __ALBUM_NAME__
+
+Vision output JSON:
+__VISION_JSON__
+
+Write only these fields:
+- album_summary
+- description
+- suggested_names
+
+Rules:
+1. Return ONLY one valid JSON object.
+2. No markdown, no explanations.
+3. `album_summary` must be concise and must NOT include person names.
+4. `description` must include the model names from metadata.
+5. `description` should read like a gallery intro, factual and smooth.
+6. `suggested_names` must be an array of exactly 6 unique names.
+7. `suggested_names` format: words separated by spaces, each word capitalized.
+8. Each `suggested_name` must contain 2-5 words.
+9. A `suggested_name` may contain the primary model first name, or full name as part of a longer phrase.
+10. The primary model full name alone MUST NOT be used as a `suggested_name`.
+11. Avoid using words: Photo, Photos, Collection, Session, Gallery.
+
+==========================
+
+description
+
+Required.
+
+Write a gallery-style album description.
+
+Purpose:
+
+This text is intended to appear on a photography gallery page rather than in a database.
+
+Requirements:
+
+- Write 2 concise, natural sentences.
+- Target length: 35-60 words.
+- Read like an introduction to a professional photography album.
+- Mention the primary model naturally.
+- Mention additional models if provided.
+- Use the provided metadata as authoritative information.
+- Describe the recurring environment, posing style, and overall visual theme.
+- Mention only actions that are clearly supported by the sampled images.
+- Write smooth, flowing prose instead of keyword-style writing.
+- Keep the tone elegant, natural, and descriptive.
+- Avoid repetitive wording.
+
+Do NOT:
+
+- narrate individual images
+- invent a story or sequence of events
+- describe explicit anatomy
+- exaggerate emotions
+- use marketing language
+- conflict with visible content
+
+Style reference:
+
+Write as if introducing the album on a professional photography website.
+
+Good example:
+
+"Adel Morel is featured in a modern bathroom-themed photoshoot set within a minimalist black-tiled interior. The series combines relaxed posing, clean architectural surroundings, and a calm intimate atmosphere to create a cohesive indoor collection."
+
+==========================
+
+Output schema:
 __SCHEMA_EXAMPLE__
 """
