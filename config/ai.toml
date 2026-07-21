@@ -17,13 +17,6 @@ Analyze all provided images as ONE cohesive album.
 Do NOT describe each image individually.
 Return ONLY one valid JSON object.
 
-Album metadata:
-- album_id: __ALBUM_ID__
-- studio_name: __STUDIO_NAME__
-- primary_model: __PRIMARY_MODEL__
-- additional_models: __ADDITIONAL_MODELS__
-- album_name: __ALBUM_NAME__
-
 Rules:
 1. JSON only, no markdown, no explanations.
 2. Use English only.

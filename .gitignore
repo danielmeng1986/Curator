@@ -9,3 +9,5 @@ workspace/curator_base_app/logs/*
 !workspace/curator_base_app/logs/.gitkeep
 !workspace/curator_base_app/backups/.gitkeep
 !database/.gitkeep
+!database/DomainModel
+!database/DatabaseModel
