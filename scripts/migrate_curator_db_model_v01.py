@@ -114,8 +114,7 @@ def create_album_table(conn: sqlite3.Connection, table_name: str = "album") -> N
             capture_date DATETIME,
             publish_date DATETIME,
             rating INTEGER,
-            current_path TEXT,
-            expected_path TEXT,
+            path TEXT,
             created_at DATETIME,
             updated_at DATETIME
         )
@@ -322,13 +321,16 @@ def migrate_album(conn: sqlite3.Connection, stats: MigrationStats, now_text: str
         created_at = col(row, "created_at") or now_text
         updated_at = col(row, "updated_at") or now_text
 
+        # Resolve canonical path: prefer current_path, fall back to expected_path.
+        path = col(row, "current_path") or col(row, "expected_path") or col(row, "path")
+
         conn.execute(
             """
             INSERT INTO album_new (
                 id, uuid, studio_id, status_id, title, description, scene, location,
-                capture_date, publish_date, rating, current_path, expected_path,
+                capture_date, publish_date, rating, path,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 col(row, "id"),
@@ -342,8 +344,7 @@ def migrate_album(conn: sqlite3.Connection, stats: MigrationStats, now_text: str
                 col(row, "capture_date"),
                 col(row, "publish_date"),
                 col(row, "rating"),
-                col(row, "current_path"),
-                col(row, "expected_path"),
+                path,
                 created_at,
                 updated_at,
             ),
@@ -355,7 +356,7 @@ def migrate_album(conn: sqlite3.Connection, stats: MigrationStats, now_text: str
 
 def summarize(conn: sqlite3.Connection) -> str:
     lines: list[str] = []
-    for table in ("model", "studio", "status", "album", "photo", "album_model"):
+    for table in ("model", "studio", "status", "album", "photo", "album_model", "album_relation"):
         if not table_exists(conn, table):
             lines.append(f"- {table}: <missing>")
             continue

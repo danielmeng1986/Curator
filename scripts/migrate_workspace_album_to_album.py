@@ -78,6 +78,10 @@ def migrate_rows(conn: sqlite3.Connection, stats: Stats) -> None:
     workspace_cols = table_columns(conn, "workspace_album")
     album_cols = table_columns(conn, "album")
 
+    # Exclude path-related columns from the automatic same-name field copy; path
+    # is resolved explicitly below using workspace_album.current_path /
+    # expected_path.  Also exclude the old column names that no longer exist in
+    # the v0.2 album table.
     same_name_fields = sorted(
         (workspace_cols & album_cols)
         - {
@@ -85,6 +89,9 @@ def migrate_rows(conn: sqlite3.Connection, stats: Stats) -> None:
             "uuid",
             "studio_id",
             "title",
+            "path",
+            "current_path",
+            "expected_path",
         }
     )
 
@@ -121,16 +128,26 @@ def migrate_rows(conn: sqlite3.Connection, stats: Stats) -> None:
         row_uuid = str(uuid.uuid4())
         now_text = now_iso()
 
+        # Resolve canonical path from workspace fields.
+        # current_path and expected_path should be equal once a workspace album
+        # has been committed; use current_path as the primary value.
+        ws_current_path = row[4]
+        ws_expected_path = row[5]
+        canonical_path = ws_current_path or ws_expected_path
+
         insert_cols = ["uuid", "studio_id", "title"]
         insert_vals: list[object] = [row_uuid, studio_id, album_name]
+
+        # Write canonical path into album.path if the column exists.
+        if "path" in album_cols and canonical_path is not None:
+            insert_cols.append("path")
+            insert_vals.append(canonical_path)
 
         row_dict = {
             "id": wa_id,
             "studio_name": studio_name,
             "album_name": album_name,
             "status_id": row[3],
-            "current_path": row[4],
-            "expected_path": row[5],
             "album_id": row[6],
         }
 
