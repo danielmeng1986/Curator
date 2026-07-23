@@ -8,4 +8,8 @@ workspace/curator_base_app/backups/*
 workspace/curator_base_app/logs/*
 !workspace/curator_base_app/logs/.gitkeep
 !workspace/curator_base_app/backups/.gitkeep
+tools/web_ui/backups/*
+tools/web_ui/logs/*
+!tools/web_ui/logs/.gitkeep
+!tools/web_ui/backups/.gitkeep
 !database/.gitkeep

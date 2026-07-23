@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Curator</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <nav class="left-rail">
+    <div class="rail-logo">Curator</div>
+    <ul class="rail-nav">
+      <li><a class="rail-link" href="#/" data-route="dashboard">
+        <span class="rail-icon">⊞</span> Dashboard
+      </a></li>
+      <li><a class="rail-link" href="#/albums" data-route="albums">
+        <span class="rail-icon">⊟</span> Albums
+      </a></li>
+      <li><a class="rail-link" href="#/models" data-route="models">
+        <span class="rail-icon">◎</span> Models
+      </a></li>
+      <li><a class="rail-link" href="#/studios" data-route="studios">
+        <span class="rail-icon">◈</span> Studios
+      </a></li>
+      <li><a class="rail-link" href="#/workspace/albums" data-route="workspace">
+        <span class="rail-icon">◳</span> Workspace
+      </a></li>
+      <li><a class="rail-link" href="#/import/albums" data-route="import">
+        <span class="rail-icon">↧</span> Import
+      </a></li>
+      <li><a class="rail-link" href="#/statuses" data-route="statuses">
+        <span class="rail-icon">◐</span> Statuses
+      </a></li>
+    </ul>
+  </nav>
+  <div class="main-wrapper">
+    <header class="top-bar">
+      <span class="app-name">Curator</span>
+      <input class="global-search" type="search" placeholder="Global search…" id="globalSearch">
+      <div class="db-health" id="dbHealth">
+        <span class="health-dot" id="healthDot"></span>
+        <span id="healthText">Loading…</span>
+      </div>
+      <button class="btn btn-primary page-action hidden" id="pageActionBtn"></button>
+    </header>
+    <main id="page-content"></main>
+  </div>
+</div>
+
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div id="modal-box" class="modal-box"></div>
+</div>
+<div id="toast-container"></div>
+
+<script src="pages/dashboard.js"></script>
+<script src="pages/albums.js"></script>
+<script src="pages/models.js"></script>
+<script src="pages/studios.js"></script>
+<script src="pages/statuses.js"></script>
+<script src="pages/workspace.js"></script>
+<script src="pages/import.js"></script>
+<script src="api.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
