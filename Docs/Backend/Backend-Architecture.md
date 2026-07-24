@@ -37,7 +37,7 @@ Docs/
 
 This document defines the overall Backend boundaries and principles. An ADR records a specific decision, its context, alternatives, and consequences after that decision is made. ADRs should be added before implementation when a change affects these boundaries or establishes a durable rule.
 
-Likely ADR topics include Backend database ownership, the Repository pattern, REST as the write entry point for external clients, retaining SQLite as the current implementation, and the eventual PostgreSQL migration approach. ADRs do not replace this Architecture document; they preserve the reasoning behind important decisions over time.
+Likely ADR topics include Backend database ownership, the Repository pattern, REST as the write entry point for external clients, retaining SQLite as the current implementation, the Workspace lifecycle, risk-based snapshots, repair and canonical-path safety, device-token approval, and the eventual PostgreSQL migration approach. ADRs do not replace this Architecture document; they preserve the reasoning behind important decisions over time.
 
 ## 3. Current Architecture
 
@@ -140,6 +140,34 @@ Services enforce rules such as:
 
 Services never execute SQL or inspect `sqlite3` objects. They request persistence through repositories and group database changes through a unit-of-work/transaction abstraction supplied by the database layer.
 
+### Workspace Lifecycle
+
+Workspace tables, including the existing `workspace_album` and possible future working datasets such as `workspace_photo` or AI-related workspace records, are temporary project workspaces rather than permanent business entities. They share one generic lifecycle so future workspace tables follow the same ownership and access rules:
+
+- **Active:** full CRUD, AI processing, and user editing are allowed.
+- **Review:** data is read and validated; only controlled modifications needed for review and approval are allowed.
+- **Closed:** the workspace is read-only for business changes and remains available for reference, audit, and migration.
+- **Archived / Retired:** the workspace is long-term historical storage and excluded from normal workflows.
+
+Services enforce lifecycle permissions and transitions; repositories persist the lifecycle state; Controllers only expose the permitted operation. This keeps workspaces disposable and prevents temporary processing data from silently becoming permanent domain data. Exact transition rules belong in a Workspace Lifecycle Specification.
+
+### Future Import Workflows
+
+Future large imports, including photo imports, follow the same layered Backend design and must not grow into standalone scripts that bypass Services or repositories. The architectural workflow is:
+
+```text
+Filesystem scan
+  -> metadata extraction
+  -> normalization
+  -> workspace import
+  -> validation / cleaning
+  -> promotion into production tables
+  -> operation logging
+  -> snapshot, when required by risk
+```
+
+A future `workspace_photo` may use this pattern just as `workspace_album` does today. The Architecture establishes the stages and ownership; import commands, extraction rules, validation details, and promotion criteria belong in future Specifications.
+
 ### API Versioning and Device Access
 
 All external Backend routes use the `/api/v1` prefix. This is the stable API boundary for the Web UI, the Windows AI Worker, CLI tools, and any future out-of-process client. REST is the only supported write entry point for those clients.
@@ -152,7 +180,9 @@ The `auth_token` table stores token hashes only, never plaintext tokens. Each to
 - `writer` performs authorized data writes but cannot perform administrative operations.
 - `reader` performs read-only queries.
 
-The AI Worker normally receives only a `writer` token. New tokens are issued only through a local administrator command or a management endpoint bound to loopback; LAN clients cannot self-register or issue tokens. The Backend binds to `127.0.0.1` by default. A LAN bind address is an explicit configuration choice for the Windows AI Worker and should be paired with firewall rules limited to that host.
+The AI Worker normally receives only a `writer` token. Device tokens use an explicit approval workflow rather than automatic issuance: a device submits a registration request, the request becomes a reviewable Backend event or Issue, and an administrator approves it through the server-side Web UI before a token is issued and stored as a hash. LAN clients cannot self-register, self-approve, or issue tokens. Automatic approval is not part of the current development phase.
+
+New tokens are issued only through this approved server-side workflow, a local administrator command, or a management endpoint bound to loopback. The Backend binds to `127.0.0.1` by default. A LAN bind address is an explicit configuration choice for the Windows AI Worker and should be paired with firewall rules limited to that host. The detailed registration, approval, renewal, and revocation behavior belongs in the Authentication Specification.
 
 ### Repository Layer
 
@@ -172,7 +202,7 @@ Repositories should be concrete and focused. A repository can expose purpose-spe
 
 Read models are Repository result structures prepared for display or API consumption. They are not a requirement to adopt CQRS or a particular Web UI framework. When a real query needs joins, aggregation, filtering, pagination, or statistics, a Repository may return a dedicated read model directly; simple lookup data such as a Status dropdown does not need one.
 
-Examples include an Album list combining Album, Studio, Status, Model count, and Photo count; an Album detail combining the Album, Models, related Albums, and Photos; a Workspace list combining Workspace Album, linked permanent Album, and import state; and an Operations view of recent, failed, and pending-repair operations. Do not design all read models in advance—add them only when an actual UI or API query needs them.
+Likely early candidates are an Album list, Workspace review, Import preview, Repair result view, Studio overview, and Validation dashboard. Examples include an Album list combining Album, Studio, Status, Model count, and Photo count; an Album detail combining the Album, Models, related Albums, and Photos; a Workspace list combining Workspace Album, linked permanent Album, and import state; and an Operations view of recent, failed, and pending-repair operations. Simple CRUD repositories continue to return domain entities. Do not design all read models in advance—add them only when an actual UI or API query needs them.
 
 ### Database Layer
 
@@ -194,23 +224,33 @@ Curator uses a lightweight **database-first, JSONL-secondary** audit strategy. I
 
 An operation records a stable operation UUID, type, initiator (Web UI, AI Worker, or CLI), start and end timestamps, status, related entity UUIDs, summary, error details, repair state, and the recovery context needed for the operation. It records actions that occurred; it is not an authorization table and does not replace device access tokens.
 
-Snapshots are reserved for data migrations, bulk writes, restores, and other high-impact or hard-to-reverse operations. Ordinary single writes normally create an audit record according to policy but do not create a snapshot. The Service layer decides this policy; the database-specific snapshot mechanism remains infrastructure.
+Snapshot policy is based primarily on operation risk, not only on the number of changed rows. Candidates include bulk imports or deletes, bulk filesystem renames, Workspace-to-production promotion, cross-table relationship rebuilds, restores, data migrations, and any other hard-to-reverse operation. Ordinary single-entity CRUD normally creates an Operation record without a snapshot. The Service layer applies this policy; the database-specific snapshot mechanism remains infrastructure. Categories, retention, cleanup, restore steps, and snapshot metadata belong in the Snapshot Specification.
 
 ### Filesystem Consistency and Repair
 
-Filesystem operations cannot share a single atomic transaction with database persistence. If persistence succeeds but a copy, move, or rename fails, the Backend does not automatically delete the database data. Instead, it records the operation as `needs_repair`, including the expected canonical path, completed stages, failure reason, and available repair choices.
+Filesystem repair is a first-class Backend workflow. Filesystem operations cannot share a single atomic transaction with database persistence. If persistence succeeds but a copy, move, or rename fails, the Backend does not automatically delete the database data. Instead, it records the operation as `needs_repair`, including the expected canonical path, completed stages, failure reason, and available repair choices.
 
-Repair is user-selectable and safe. Depending on the verified state, the Backend can offer to retry the original copy or move; safely rename the real folder to the canonical database path; move a conflicting directory to quarantine before retrying; update the database path to a verified real folder after explicit confirmation; or allow manual repair followed by consistency validation. It must never silently overwrite or delete user data.
+Repair work follows a visible lifecycle: `NeedsRepair`, `Repairing`, `PendingVerification`, `Resolved`, `ManualConflict`, or `Ignored`. The exact state-transition rules belong in the Repair Specification, but the lifecycle ensures that unresolved filesystem/database disagreement remains visible and auditable.
+
+Repair is user-selectable and safe. Automatic repairs are limited to deterministic, project-rule-preserving corrections such as removing trailing spaces, collapsing multiple spaces, or normalizing case; they create Operation and audit records and notify the user. Assisted repairs—for example a missing folder, possible fuzzy path match, Studio-name mismatch, or Album rename suggestion—provide a suggestion and require the user to decide. Conflicting folders that cannot be resolved automatically remain Manual Conflicts until the user confirms a resolution.
+
+Depending on the verified state, the Backend can offer to retry the original copy or move; safely rename the real folder to the canonical database path; move a conflicting directory to quarantine before retrying; update the database path to a verified real folder after explicit confirmation; or allow manual repair followed by consistency validation. It must never silently overwrite or delete user data.
 
 The canonical path stored in the database is the intended source of truth. When a real directory differs because of trailing spaces or a comparable naming defect, repair should prefer safely renaming the real directory. After repair, the Backend validates agreement between database and filesystem, at minimum covering canonical paths, directory existence, case conflicts, trailing whitespace, and Unicode-normalization conflicts. File manifests, sizes, and hashes may be added later if a concrete validation need justifies them.
 
-One Service-layer path-normalization policy applies to all path creation, import, comparison, and repair. It trims leading and trailing whitespace from every component, normalizes Unicode, detects case-insensitive collisions, and computes an explicit comparison key. If later imports collide after normalization, Services choose deterministic, readable suffixes such as `Name (2)` and `Name (3)`.
+One Service-layer path-normalization policy applies to all path creation, import, comparison, and repair. It trims leading and trailing whitespace from every component, normalizes Unicode, detects case-insensitive collisions, and computes an explicit comparison key. If later imports collide after normalization, Services choose deterministic, readable suffixes such as `Name (2)` and `Name (3)`. Exact canonicalization rules, including separators and duplicate detection, belong in the Canonical Path Rules Specification.
 
 ### Identity and Constraint Responsibilities
 
 The database enforces hard integrity constraints: UUID uniqueness, foreign keys, required values, join-table uniqueness, and other invariants that must never be violated. Except for small stable lookup tables such as `status`, which may retain integer IDs, business entities use UUIDs as their unique and externally stable identity. APIs, Services, and future clients must not depend on integer IDs for general business entities.
 
-Services own business semantics: path normalization, case-equivalence rules, collision naming, human-readable errors, and repair guidance. Services compute path uniqueness, while the database persists a `canonical_path_key` with a unique constraint as the final safety net against concurrent writes from the Web UI and AI Worker. Database constraints do not replace Service rules; they prevent race conditions from bypassing them.
+Services own business semantics: path normalization, case-equivalence rules, collision naming, human-readable errors, and repair guidance. Services compute path uniqueness, while the database persists a `canonical_path_key` with a unique constraint as the final safety net against concurrent writes from the Web UI and AI Worker. This unique constraint provides concurrent-write protection and final consistency protection; it does not replace Service-layer collision detection or business validation. The exact canonicalization rules are intentionally deferred to Specification.
+
+### Filesystem Health and Issues
+
+Curator has a long-term Filesystem Health workflow. Manual or scheduled scans compare the filesystem with the database and detect missing folders, duplicate or orphan directories, unexpected folders, incorrect capitalization, and path mismatches. Scans do not modify data merely because they find a discrepancy.
+
+Detected problems create reviewable Issues. An Issue records the problem and remains open until verification confirms that repair succeeded; it is the shared cross-cutting mechanism for filesystem, validation, import, repair, AI-processing, security, and device-registration concerns. The Issue model, category set, and lifecycle are Specification work. Filesystem Health forms the basis of future Archive Health monitoring.
 
 ## 6. Request Flow
 
@@ -353,20 +393,29 @@ At every step, maintain a working application, retain database backups before ma
 
 ## 11. Open Questions
 
-The following decisions should be resolved before their corresponding implementation step:
+The confirmed workspace, repair, snapshot, path-safety, token, read-model, and filesystem-health decisions are recorded above. The following remain genuine architectural questions:
 
-- What exact request and error-response envelope should `/api/v1` use, including validation-error and conflict representations?
-- Which specific operations meet the high-impact or hard-to-reverse threshold for snapshots, and what retention schedule applies to each category?
-- What repair-state values and confirmation screens are needed to make filesystem repair clear without overwhelming the local Web UI?
-- What is the quarantine location, retention policy, and recovery procedure for conflicting directories?
-- Which path components are subject to canonical-path uniqueness, and how should existing data be assessed before the unique `canonical_path_key` safety net is introduced?
-- Which entity UUIDs must be included in operation records for each workflow, and what summary/error data remains safe and useful to retain?
-- What secure local configuration mechanism should each client use to store its one-time-issued device token?
-- Which firewall, TLS, and network-binding guidance is appropriate if the Windows AI Worker access moves from a trusted LAN to a less controlled environment?
-- Which concrete UI/API queries first justify a dedicated Repository read model?
-- What PostgreSQL data-transfer validation, rollback rehearsal, and old-ID-to-UUID mapping-report format are required when migration becomes an active project?
+- What change in deployment scope would require the current trusted-LAN access model to be reconsidered, including stronger network protections?
+- What retention and retirement expectations should govern Closed and Archived Workspaces over the long term?
+- What practical scale, reliability, or integration threshold would justify beginning the future PostgreSQL migration?
+- When should Filesystem Health grow from a manually invoked workflow into scheduled Archive Health monitoring?
 
-## 12. Architecture, Specification, and Implementation
+## 12. Next Specification Boundaries
+
+The following are no longer Architecture questions. They should be defined in focused Specifications before implementation begins:
+
+- **API Specification:** the `/api/v1` success and error envelopes, conflict and repair responses, operation identifiers, pagination, and metadata.
+- **Canonical Path Rules Specification:** canonical path creation, case, whitespace, Unicode and separator normalization, and duplicate detection.
+- **Snapshot Specification:** risk categories, retention, cleanup, restore procedure, and snapshot metadata.
+- **Repair Specification:** repair strategies for duplicates, missing folders, fuzzy matches, rename suggestions, capitalization fixes, conflicts, confirmations, and repair-state transitions.
+- **Operation Record Specification:** required UUID references, statuses, error codes, summaries, retained diagnostics, and the relationship with JSONL.
+- **Issue Management Specification:** the Issue model, categories, lifecycle, ownership, and use across validation, filesystem health, import, repair, AI processing, security, and device registration.
+- **Authentication Specification:** device registration, administrator approval, token lifecycle, renewal, revocation, and trusted-device management.
+- **PostgreSQL Migration Specification:** migration validation, rollback verification, UUID mapping report, data consistency checks, and migration checkpoints.
+
+These Specifications refine the Architecture without redefining it. They should add behavior, contracts, validation rules, and state transitions only within the boundaries established above.
+
+## 13. Architecture, Specification, and Implementation
 
 Curator development follows this documentation hierarchy:
 
