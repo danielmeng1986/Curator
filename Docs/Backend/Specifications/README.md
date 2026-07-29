@@ -31,6 +31,7 @@ Specifications define observable behavior, valid and invalid states, responsibil
 | Document | Behavioral boundary |
 | --- | --- |
 | [API Specification](API-Specification.md) | `/api/v1` client contract, request handling, responses, errors, and pagination. |
+| [API Contract](API-Contract.md) | Shared `/api/v1` envelopes, errors, status mapping, access policy, collections, and workflow outcomes. |
 | [Repository Specification](Repository-Specification.md) | Persistence contracts, entities, and read models. |
 | [Workspace Workflow](Workspace-Workflow.md) | Temporary workspace lifecycle and controlled promotion. |
 | [Import Workflow](Import-Workflow.md) | Import preview, validation, persistence, filesystem work, and repair hand-off. |

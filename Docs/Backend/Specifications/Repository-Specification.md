@@ -2,7 +2,9 @@
 
 ## Purpose and scope
 
-This Specification defines the persistence boundary used by Backend Services. A Repository expresses Curator persistence intent and returns domain entities or query-specific read models. It hides SQL, database connections, database row formats, and engine-specific behavior.
+This Specification defines the persistence boundary used by Backend Services. A Repository expresses Curator persistence intent in support of business workflows and returns domain entities or workflow-specific read models. It hides SQL, database connections, database row formats, and engine-specific behavior.
+
+Repository contracts are organized around business capabilities and workflow operations, not individual database tables. They support such operations as Import Preview, AI Review, Validation, Repair, and Promotion rather than exposing generic CRUD methods for every table.
 
 It does not prescribe repository classes, interfaces, ORM usage, SQL, schema syntax, or database libraries.
 
@@ -11,27 +13,50 @@ It does not prescribe repository classes, interfaces, ORM usage, SQL, schema syn
 | Layer | Responsibility |
 | --- | --- |
 | Service | Business validation, transaction intent, lifecycle permissions, and workflow decisions. |
-| Repository contract | Domain-oriented persistence operations required by Services. |
+| Repository contract | Workflow-oriented persistence operations and Read Models required by Services. |
 | SQLite implementation | Current implementation of the contract against SQLite. |
 | Future PostgreSQL implementation | Later implementation of the same needed contract against PostgreSQL. |
 
-Services depend on repository contracts, never a SQLite or PostgreSQL implementation. Repositories do not decide business rules, authorize clients, or interpret HTTP requests.
+Services depend on repository contracts, never a SQLite or PostgreSQL implementation. Repositories do not decide business rules, authorize clients, interpret HTTP requests, or define lifecycle policy.
+
+The Workspace Workflow Specification defines lifecycle states and permitted workflow actions. Repository contracts support those actions: for example, an AI Review contract must respect the Review-stage editing contract, and a Promotion contract must support the validation and closure rules owned by the Service.
 
 ## Required repository behaviors
 
-- Retrieve and persist permanent entities, workspace data, status lookups, Operation history, and Issues only through Backend-owned contracts.
+- Retrieve and persist permanent entities, workspace data, status lookups, Operation history, and Issues only through Backend-owned contracts when required by a business capability.
 - Participate in a Service-defined transaction boundary.
 - Preserve hard database constraints and report persistence conflicts to Services in a form that does not leak engine-specific details to clients.
-- Return domain entities for ordinary CRUD needs.
-- Return a dedicated read model only when a query naturally needs aggregation, joins, filtering, pagination, statistics, or presentation-oriented fields.
+- Provide write and lookup operations that a Service needs to perform a defined workflow operation; do not expose table CRUD merely because a table exists.
+- Return domain entities for bounded domain operations where the workflow does not require a projection.
+- Return a dedicated Read Model for workflow screens and API use cases that need aggregation, joins, filtering, pagination, statistics, or presentation-oriented fields.
 
-## Read-model contract
+## Workflow-oriented Read Models
 
-Read models are Repository result structures for API/display consumption; they are not a separate CQRS architecture.
+Read Models are Repository result structures for API/display consumption; they are not a separate CQRS architecture. They are workflow-oriented projections, not entity projections or representations of individual database tables. Every major workflow must define the Read Model or Read Models needed by its screens and API use cases.
 
-Likely early read models are Album List, Workspace Review, Import Preview, Repair Result View, Studio Overview, and Validation Dashboard. Simple lookups, such as a Status dropdown, should return only the data needed by that lookup.
+Representative workflow-owned Read Models include:
 
-Each read model must specify its source entities, included derived values, filtering/sorting inputs, pagination behavior where applicable, and freshness/consistency expectations in the owning workflow or API Specification.
+| Read Model | Intended workflow or UI | Typical source entities | Typical derived fields |
+| --- | --- | --- | --- |
+| `AlbumImportPreviewReadModel` | Import Preview | imported album workspace records, import batch/context, validation outcomes | preview summary, duplicate/conflict indicators, validation counts |
+| `AlbumListReadModel` | Album List | albums, status lookups, relevant aggregate relationships | display status, aggregate counts, sortable display values |
+| `ValidationIssueReadModel` | Validation | workspace or production records, Issues, validation outcomes | severity summary, affected-record context, resolution state |
+| `AiAlbumReviewReadModel` | AI Review | AI album workspace records, raw AI output, reviewer selections, validation outcomes | selected candidate values, review readiness, approval state |
+| `RepairCandidateReadModel` | Repair | candidate records, detected conflicts or Issues, repair analysis | repair rationale, confidence or risk indicators, proposed action |
+
+The listed source entities and derived fields are representative, not a schema commitment. The owning workflow specification must define the actual contract.
+
+Each Read Model must be documented in its owning workflow or API Specification with:
+
+- source entities;
+- derived fields;
+- filtering inputs;
+- sorting behavior;
+- pagination behavior;
+- consistency expectations; and
+- intended workflow or UI.
+
+Simple lookups, such as a Status dropdown, should return only the data needed by that workflow.
 
 ## Validity and error handling
 
@@ -50,9 +75,9 @@ The database is the final enforcer of UUID, foreign-key, required-value, join-un
 
 ## Open Questions
 
-- Which exact query inputs and result fields belong to each first read model?
-- Which Repository contract is responsible for each cross-entity promotion and repair query?
-- How should query consistency be expressed for long-running scans and paginated results?
+- Which Read Models, including their inputs, fields, sorting, pagination, and consistency expectations, are required by each workflow?
+- Which workflow-oriented Repository contracts are required for Import Preview, AI Review, Validation, Repair, Promotion, and other cross-entity operations?
+- How should each workflow express consistency expectations for long-running scans and paginated Read Models?
 
 ## Future extensions
 

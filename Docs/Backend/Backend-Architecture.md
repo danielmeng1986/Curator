@@ -432,3 +432,72 @@ Implementation
 Architecture defines enduring responsibilities, boundaries, principles, and the reasons for them. Specifications follow the Architecture: they define the module contracts, rules, and implementation requirements needed for a bounded change. Implementation follows approved Specifications and contains executable code only.
 
 A lower layer must not redefine a concept or decision made by a higher layer. Implementation must not invent new architecture. If implementation exposes the need for a new architectural decision, update this Architecture document or add the appropriate ADR before implementation proceeds.
+
+## 14. Future Architecture Direction: Decouple Storage from Presentation
+
+> **Status: future architectural direction only.** This section preserves a long-term design direction. It is not part of the current roadmap, does not schedule implementation work, and does not change any existing Backend specification.
+
+### Motivation
+
+The current canonical Archive layout intentionally mirrors the user's browsing experience: the physical directory hierarchy is also the presentation hierarchy. For example:
+
+```text
+Studio/
+  Album/
+    Photos/
+```
+
+This design works well because users can browse the Archive directly in Finder. It also couples storage with presentation.
+
+As Curator expands to Archives with different organizational conventions, maintaining one canonical directory structure becomes increasingly difficult. Some Archives contain additional nested folders such as `VIP`, `Plus`, `Bonus`, `Premium`, or `Behind the Scenes`. Their meanings differ between Studios and cannot always be normalized into one directory hierarchy without Archive-specific rules.
+
+### Long-term direction
+
+Curator may eventually evolve toward three independent layers:
+
+- **Storage Layer**
+- **Metadata Layer**
+- **Presentation Layer**
+
+#### Storage Layer
+
+The Storage Layer would be responsible only for durable file storage. Files would use implementation-oriented identifiers—for example, UUID-based object identifiers or content-addressable identifiers—rather than human-readable Album paths. Its layout would be optimized for scalability, consistency, and filesystem performance, not for human navigation.
+
+Physical storage would no longer encode Studio, Album, or other domain concepts.
+
+#### Metadata Layer
+
+SQLite, or a future replacement, would become the source of truth for relationships between Albums, Photos, Models, Studios, Tags, Collections, and future semantic relationships. No user-facing organization would depend on a physical file location.
+
+#### Presentation Layer
+
+All user-visible organization would be generated dynamically from metadata. Independent presentation models could coexist, including:
+
+- Studio view
+- Model view
+- Album view
+- Tag view
+- Collection view
+- Search results
+- Future custom virtual folders
+
+The presentation hierarchy would therefore be independent of physical storage.
+
+### Expected benefits
+
+- Storage would become independent of Archive-specific folder conventions.
+- Multiple Archives with different historical layouts could coexist.
+- Physical file organization would no longer constrain the domain model.
+- Future metadata improvements would automatically improve every presentation view.
+- Storage optimization could evolve without affecting user workflows.
+- The architecture would move closer to the separation of concerns used by mature digital asset management systems, such as Apple Photos.
+
+### Important design principle
+
+This is **not** an attempt to copy Apple Photos. The inspiration is the architectural separation of Storage, Metadata, and Presentation—not a particular implementation. Curator must continue to prioritize openness, portability, and user ownership of data.
+
+### Current status
+
+The current version of Curator will continue using the existing canonical Archive layout because Finder-based browsing remains an important user workflow, the current Backend specifications rely on canonical paths, and introducing a storage abstraction now would significantly increase implementation complexity.
+
+This direction should be reconsidered only after the Mac-native photo browser and the current Backend architecture have reached maturity. Until then, this section is design documentation that preserves the long-term vision rather than a plan for immediate implementation.

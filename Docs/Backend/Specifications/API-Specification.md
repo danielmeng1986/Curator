@@ -4,7 +4,7 @@
 
 This Specification defines the external HTTP contract for Curator Backend application capabilities. It applies to the Web UI, Windows AI Worker, CLI tools, and future out-of-process clients.
 
-It does not define route-by-route resources, payload fields, HTTP-library behavior, or framework implementation. Those additions require a compatible extension to this Specification.
+It does not define route-by-route resources, payload fields, HTTP-library behavior, or framework implementation. Those additions require a compatible extension to this Specification. The shared response envelope, error mapping, pagination, filtering, sorting, metadata, and authentication policy are authoritative in [API Contract](API-Contract.md).
 
 ## Architectural decisions inherited
 
@@ -36,9 +36,7 @@ The API adapter validates JSON syntax, route/query types, pagination bounds, and
 
 ## Response and error contract
 
-Every response must communicate whether the requested operation succeeded, failed validation, conflicted with current state, was unauthorized, or requires a user decision. A response for a material write must make its Operation identifier available when an Operation record is required.
-
-The exact envelope field names, status-code mapping, metadata shape, pagination token/offset format, validation-error structure, conflict structure, and repair-response structure are unresolved and must be defined before implementation in this document.
+Every response must communicate whether the requested operation succeeded, failed validation, conflicted with current state, was unauthorized, or requires a user decision. A response for a material write must make its Operation identifier available when an Operation record is required. [API Contract](API-Contract.md) defines the canonical response and error envelopes, error codes, status mapping, confirmation and repair outcomes, and the placement of operation and snapshot metadata.
 
 ## Request flow
 
@@ -74,18 +72,11 @@ sequenceDiagram
 
 ## Pagination and read models
 
-Collection responses that require filtering, sorting, aggregation, or pagination may return Repository read models. The API exposes such models as stable display/query results, not as a promise that clients may infer underlying tables.
+Collection responses that require filtering, sorting, aggregation, or pagination may return Repository read models. The API exposes such models as stable display/query results, not as a promise that clients may infer underlying tables. [API Contract](API-Contract.md) defines cursor pagination, list metadata, and filtering/sorting syntax.
 
 ## Operation and snapshot requirements
 
 The API adapter does not independently decide snapshots. It exposes the Service outcome, including any Operation identifier, snapshot reference, pending repair, or required confirmation. Services apply the policies in the Operation Logging, Snapshot, Repair, and Import Specifications.
-
-## Open Questions
-
-- What is the exact standard success envelope and error envelope?
-- Which HTTP status codes represent validation failure, conflict, authorization failure, `needs_repair`, and confirmation-required outcomes?
-- How are filtering, sorting, pagination, and metadata represented consistently across list endpoints?
-- Which routes, if any, are permitted without a bearer token while the Backend is bound only to loopback?
 
 ## Future extensions
 

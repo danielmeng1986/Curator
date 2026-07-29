@@ -2,68 +2,102 @@
 
 ## Purpose and scope
 
-This Specification defines the behavior of large Curator imports, including the current Album import and future Photo import. Import is a Backend workflow, not a script that accesses the database directly.
+This Specification defines Curator import behavior from source discovery through durable outcome recording. Import is a Backend workflow, not a script that accesses the database directly. Source-specific metadata extraction and permanent-entity field definitions are separate Specifications.
 
-It covers the workflow boundary from source discovery through durable outcome recording. Source-specific metadata extraction and permanent-entity field definitions are separate Specifications.
+Album import is the primary production import workflow. It supports both onboarding a completely new Archive into Curator and importing additional Albums into an existing Archive. The initial scan that discovers and persists production Albums uses this same workflow against an empty production database; it is not a special case. This permits Curator to manage multiple independent Archives in the future.
+
+Photo import is a future Album-scoped workflow. A Photo must not become a production entity unless it belongs to an Album.
 
 ## Responsibilities
 
 | Actor | Responsibility |
 | --- | --- |
-| Client | Submits source selection and confirms an import only after reviewing the preview. |
-| Import Service | Coordinates stages, business validation, persistence, filesystem work, operation state, and repair hand-off. |
-| Repositories | Retrieve/create permitted entities and persist workflow outcomes. |
-| Filesystem adapter | Performs only the requested copy, move, rename, or scan action. |
+| Client | Selects the source and Import Action, reviews the preview, and confirms the production identity before execution. |
+| Import Service | Coordinates stages, derives and validates production identity, duplicate checks, production persistence, filesystem execution, Operation state, and repair hand-off. |
+| Domain Services | Apply entity and relationship business rules used by the Import Service. |
+| Repositories | Retrieve/create permitted entities and persist confirmed production and Workspace outcomes. |
+| Filesystem adapter | Performs only the filesystem action requested by the Import Service. |
 | Repair workflow | Resolves a database/filesystem inconsistency after a failed filesystem stage. |
 
-## Workflow
+## Staged workflow
 
 ```mermaid
 flowchart TD
-    A[Filesystem scan] --> B[Metadata extraction]
-    B --> C[Normalization]
-    C --> D[Workspace import or import draft]
-    D --> E[Validation and cleaning]
-    E --> F{Client confirms valid preview?}
-    F -- No --> G[No production write]
-    F -- Yes --> H[Promotion into production tables]
-    H --> I[Filesystem action if required]
-    I --> J[Operation outcome]
-    J --> K[Snapshot if risk requires]
-    I -->|Failure after persistence| L[NeedsRepair]
+    A[Source discovery] --> B[Transient import draft or Workspace record]
+    B --> C[Preview]
+    C --> D{User confirms production identity?}
+    D -- No --> E[No production persistence]
+    D -- Yes --> F[Production persistence]
+    F --> G{Import Action requires filesystem work?}
+    G -- No: DATABASE_ONLY --> H[Operation outcome]
+    G -- Yes: COPY or MOVE --> I[Filesystem execution]
+    I --> H
+    I -->|Failure after persistence| J[NeedsRepair]
+    H --> K[Snapshot if risk requires]
 ```
 
-## Inputs and outputs
+The stages are distinct. The Workflow coordinates them; Domain Services own entity rules; Repositories own persistence; and the Filesystem adapter owns requested filesystem operations only.
 
-Inputs must identify the source, proposed import action, selected metadata/relationships where required, and the client confirmation. A preview must expose normalized proposed data, validation errors, detected collisions, entity reuse/creation implications, filesystem implications, and whether the item is eligible for execution.
+## Album preview and confirmation
 
-Outputs identify each item as completed, rejected, skipped, failed, or requiring repair. Material outcomes expose the related Operation identifier. A successful result must not be returned for an item whose required filesystem action failed.
+The Album preview must provide enough information for the user to confirm the proposed production identity before persistence. At minimum, it includes:
 
-## Validation rules
+- `primary_model`
+- `additional_models`
+- `studio_name`
+- `album_name`
+- whether the source will create a new Album or be associated with an existing Album
 
-- Normalize and compare paths using the Canonical Path Rules before persistence or filesystem mutation.
-- Reject items with unresolved validation errors, path collisions, relationship violations, or lifecycle violations.
-- Do not silently overwrite a destination or conflicting directory.
-- Require explicit client confirmation after preview for execution.
-- Reuse or create related permanent entities only through Backend business rules; no client may issue direct persistence instructions.
+The preview also exposes the proposed canonical path, validation errors, canonical-path collisions, entity reuse/creation implications, the selected or automatic Import Action, filesystem implications, and eligibility for execution. Production persistence must not occur until the Album identity has been confirmed.
+
+## Import drafts and Workspaces
+
+A transient import draft exists only for the current import session. It is temporary, is neither production data nor a persisted Workspace record, and cannot be reopened after the session.
+
+A Workspace record is persisted, can be reopened later, and supports long-running or recoverable import work under the Workspace Workflow. Future clients may expose persisted Workspace import as an advanced option. Transient drafts remain the default workflow.
+
+## Import Action and filesystem behavior
+
+Filesystem behavior is determined exclusively by the selected Import Action, not by the type of production entity. Production entities, including Album, Photo, Model, and Studio, must not implicitly determine filesystem behavior.
+
+| Import Action | Required behavior |
+| --- | --- |
+| `DATABASE_ONLY` | Persist confirmed production metadata only; perform no filesystem operation. |
+| `COPY` | Persist confirmed production metadata and copy the source to the validated canonical destination. User-selectable. |
+| `MOVE` | Persist confirmed production metadata and move the source to the validated canonical destination. Default action. |
+
+If a source Album is already located at its canonical destination, the workflow must automatically use `DATABASE_ONLY` and update production metadata without filesystem work. The Filesystem adapter receives only the action selected by this policy; it does not infer policy from an entity type.
+
+## Validation and duplicate detection
+
+The Import Service must normalize and compare paths using the Canonical Path Rules before production persistence or filesystem mutation. It rejects unresolved validation errors, canonical-path collisions, relationship violations, and lifecycle violations. It must not silently overwrite a destination or conflicting directory.
+
+Until a dedicated merge workflow exists, duplicate detection is intentionally conservative: production entities are duplicates only when they resolve to the same canonical path. Import does not perform semantic duplicate detection. Identity reconciliation, aliases, duplicate Model records, and face-recognition-assisted repair belong to future Repair/Merge workflows.
+
+## Photo import
+
+Future Photo import follows this order:
+
+1. import and persist the Album;
+2. import Photos into that Album.
+
+Photo import primarily confirms the destination Album rather than individual Photos. Future image-metadata extraction is expected. Detailed face recognition, person tagging, and `photo_model` maintenance are outside this Specification.
 
 ## Error handling and repair
 
-Database and filesystem cannot share one atomic transaction. If persistence succeeds but filesystem work fails, the Backend retains the persisted context, records `NeedsRepair`, and hands the case to the Repair Workflow. It does not automatically delete business data to simulate rollback.
+Database and filesystem work cannot share one atomic transaction. If production persistence succeeds but required filesystem execution fails, the Backend retains the persisted context, records `NeedsRepair`, and hands the case to the Repair Workflow. It does not automatically delete business data to simulate rollback.
 
 If failure occurs before a durable business change, the item is unsuccessful and no successful import is reported. Per-item results must allow a batch to report mixed outcomes without hiding failures.
 
 ## Operation and snapshot requirements
 
-Every import execution produces Operation records sufficient to identify the initiator, affected entities, stages, failures, and repair state. Bulk imports and other high-risk imports are snapshot candidates; the Service applies the Snapshot Specification. Preview alone does not create a production import Operation or snapshot.
+Every import execution produces Operation records sufficient to identify the initiator, affected entities, stages, selected Import Action, failures, and repair state. Bulk imports and other high-risk imports are snapshot candidates; the Import Service applies the Snapshot Specification. Preview alone does not create a production import Operation or snapshot.
 
 ## Open Questions
 
-- What preview fields and confirmation representation are required for Album import versus future Photo import?
-- When does a source discovery result become a persisted Workspace record rather than a transient import draft?
-- Which import actions are copy-only, move-only, or user-selectable?
-- What counts as a duplicate for each production entity before an explicit merge workflow exists?
+- Which source-specific metadata fields and validation rules are required for future Photo import?
+- What user-confirmation and conflict-resolution interaction is required when a source maps to an existing Album?
 
 ## Future extensions
 
-Photo import may introduce `workspace_photo` and follows this same staged workflow. File manifests, sizes, and hashes can become validation inputs when a defined use case requires them.
+File manifests, sizes, and hashes can become validation inputs when a defined use case requires them. Repair/Merge workflows may later introduce semantic identity reconciliation without changing the conservative duplicate rule of Import.
