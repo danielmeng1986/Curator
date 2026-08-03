@@ -13,6 +13,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import api_contract
+
 # ---------------------------------------------------------------------------
 # Path constants
 # ---------------------------------------------------------------------------
@@ -378,6 +380,7 @@ def build_archive_path(model_name: str, studio_name: str, album_name: str) -> st
 
 class AppHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
+        self._request_id = api_contract.generate_request_id()
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
     def log_message(self, format, *args):
@@ -403,6 +406,73 @@ class AppHandler(SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, socket.error):
             return
 
+    def _send_success(self, status: int, data, *, meta_extras: dict | None = None) -> None:
+        """Send a contract success envelope with the given data payload."""
+        self._send_json(
+            status,
+            api_contract.success_response(
+                data, request_id=self._request_id, meta_extras=meta_extras
+            ),
+        )
+
+    def _send_error(
+        self,
+        status: int,
+        code: str,
+        message: str,
+        *,
+        details: dict | None = None,
+        fields: dict | None = None,
+        meta_extras: dict | None = None,
+    ) -> None:
+        """Send a contract error envelope."""
+        self._send_json(
+            status,
+            api_contract.error_response(
+                code,
+                message,
+                request_id=self._request_id,
+                details=details,
+                fields=fields,
+                meta_extras=meta_extras,
+            ),
+        )
+
+    def _send_collection(
+        self,
+        data: list,
+        *,
+        limit: int,
+        offset: int,
+        total: int | None,
+        filters: list | None = None,
+        sort: list | None = None,
+    ) -> None:
+        """Send a contract collection response with pagination metadata."""
+        has_more = total is not None and (offset + limit) < total
+        next_offset = offset + limit if has_more else None
+        cursor = api_contract.encode_cursor(offset) if offset > 0 else None
+        next_cursor = (
+            api_contract.encode_cursor(next_offset)
+            if next_offset is not None
+            else None
+        )
+        meta_extras = api_contract.build_collection_meta(
+            cursor=cursor,
+            limit=limit,
+            next_cursor=next_cursor,
+            has_more=has_more,
+            total=total,
+            filters=filters or [],
+            sort=sort or [],
+        )
+        self._send_json(
+            200,
+            api_contract.success_response(
+                data, request_id=self._request_id, meta_extras=meta_extras
+            ),
+        )
+
     # ------------------------------------------------------------------
     # Routing
     # ------------------------------------------------------------------
@@ -426,8 +496,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         path = parsed.path
         try:
             body = self._read_json_body()
-        except Exception as ex:
-            self._send_json(400, {"ok": False, "error": f"Invalid JSON: {ex}"})
+        except Exception:
+            self._send_error(400, "REQUEST_INVALID_JSON", "The request body contains invalid JSON.")
             return
         self._handle_api_post(path, body)
 
@@ -436,8 +506,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         path = parsed.path
         try:
             body = self._read_json_body()
-        except Exception as ex:
-            self._send_json(400, {"ok": False, "error": f"Invalid JSON: {ex}"})
+        except Exception:
+            self._send_error(400, "REQUEST_INVALID_JSON", "The request body contains invalid JSON.")
             return
         self._handle_api_put(path, body)
 
@@ -481,16 +551,15 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif path == "/api/backups":
                 self._get_backups()
             else:
-                self._send_json(404, {"ok": False, "error": "Not found"})
-        except Exception as ex:
-            self._send_json(500, {"ok": False, "error": str(ex)})
+                self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
+        except Exception:
+            self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 
     def _get_health(self):
         backup_catalog = build_backup_catalog()
-        self._send_json(
+        self._send_success(
             200,
             {
-                "ok": True,
                 "database_path": str(DATABASE_PATH),
                 "server_time": utc_now_iso(),
                 "next_backup_at": next_backup_time_iso(),
@@ -502,7 +571,7 @@ class AppHandler(SimpleHTTPRequestHandler):
     def _get_config(self):
         global APP_CONFIG
         APP_CONFIG = load_app_config()
-        self._send_json(200, {"ok": True, **APP_CONFIG})
+        self._send_success(200, APP_CONFIG)
 
     def _get_statuses(self):
         with open_db() as conn:
@@ -514,7 +583,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 FROM status s ORDER BY s.id
                 """
             ).fetchall()
-        self._send_json(200, {"ok": True, "statuses": [dict(r) for r in rows]})
+        self._send_success(200, {"statuses": [dict(r) for r in rows]})
 
     def _get_models(self, qs: dict):
         q = qs.get("q", [""])[0].strip()
@@ -537,15 +606,11 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "SELECT COUNT(*) FROM model WHERE (display_name LIKE ? OR primary_name LIKE ?)",
                 (pattern, pattern),
             ).fetchone()[0]
-        self._send_json(
-            200,
-            {
-                "ok": True,
-                "models": [dict(r) for r in rows],
-                "total": total,
-                "limit": limit,
-                "offset": offset,
-            },
+        self._send_collection(
+            [dict(r) for r in rows],
+            limit=limit,
+            offset=offset,
+            total=total,
         )
 
     def _get_model(self, model_id: int):
@@ -554,7 +619,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "SELECT * FROM model WHERE id = ?", (model_id,)
             ).fetchone()
             if row is None:
-                self._send_json(404, {"ok": False, "error": "Model not found"})
+                self._send_error(404, "NOT_FOUND", "Model not found.")
                 return
             albums = conn.execute(
                 """
@@ -568,10 +633,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 """,
                 (model_id,),
             ).fetchall()
-        self._send_json(
+        self._send_success(
             200,
             {
-                "ok": True,
                 "model": dict(row),
                 "albums": [dict(a) for a in albums],
             },
@@ -593,15 +657,11 @@ class AppHandler(SimpleHTTPRequestHandler):
             total = conn.execute(
                 "SELECT COUNT(*) FROM studio WHERE name LIKE ?", (pattern,)
             ).fetchone()[0]
-        self._send_json(
-            200,
-            {
-                "ok": True,
-                "studios": [dict(r) for r in rows],
-                "total": total,
-                "limit": limit,
-                "offset": offset,
-            },
+        self._send_collection(
+            [dict(r) for r in rows],
+            limit=limit,
+            offset=offset,
+            total=total,
         )
 
     def _get_studio(self, studio_id: int):
@@ -610,7 +670,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "SELECT * FROM studio WHERE id = ?", (studio_id,)
             ).fetchone()
             if row is None:
-                self._send_json(404, {"ok": False, "error": "Studio not found"})
+                self._send_error(404, "NOT_FOUND", "Studio not found.")
                 return
             albums = conn.execute(
                 """
@@ -623,10 +683,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 """,
                 (studio_id,),
             ).fetchall()
-        self._send_json(
+        self._send_success(
             200,
             {
-                "ok": True,
                 "studio": dict(row),
                 "albums": [dict(a) for a in albums],
             },
@@ -709,15 +768,11 @@ class AppHandler(SimpleHTTPRequestHandler):
             rows = conn.execute(query, params + [limit, offset]).fetchall()
             total = conn.execute(count_query, params).fetchone()[0]
 
-        self._send_json(
-            200,
-            {
-                "ok": True,
-                "albums": [dict(r) for r in rows],
-                "total": total,
-                "limit": limit,
-                "offset": offset,
-            },
+        self._send_collection(
+            [dict(r) for r in rows],
+            limit=limit,
+            offset=offset,
+            total=total,
         )
 
     def _get_album(self, album_id: int):
@@ -733,7 +788,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 (album_id,),
             ).fetchone()
             if row is None:
-                self._send_json(404, {"ok": False, "error": "Album not found"})
+                self._send_error(404, "NOT_FOUND", "Album not found.")
                 return
             models = conn.execute(
                 """
@@ -763,10 +818,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 """,
                 (album_id,),
             ).fetchall()
-        self._send_json(
+        self._send_success(
             200,
             {
-                "ok": True,
                 "album": dict(row),
                 "models": [dict(m) for m in models],
                 "relations": [dict(r) for r in relations],
@@ -825,15 +879,11 @@ class AppHandler(SimpleHTTPRequestHandler):
             rows = conn.execute(query, params + [limit, offset]).fetchall()
             total = conn.execute(count_query, params).fetchone()[0]
 
-        self._send_json(
-            200,
-            {
-                "ok": True,
-                "albums": [dict(r) for r in rows],
-                "total": total,
-                "limit": limit,
-                "offset": offset,
-            },
+        self._send_collection(
+            [dict(r) for r in rows],
+            limit=limit,
+            offset=offset,
+            total=total,
         )
 
     def _get_workspace_album(self, wa_id: int):
@@ -848,7 +898,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 (wa_id,),
             ).fetchone()
             if row is None:
-                self._send_json(404, {"ok": False, "error": "Workspace album not found"})
+                self._send_error(404, "NOT_FOUND", "Workspace album not found.")
                 return
             d = dict(row)
             # belongs_to info
@@ -868,14 +918,12 @@ class AppHandler(SimpleHTTPRequestHandler):
                 d["linked_album"] = dict(linked) if linked else None
             else:
                 d["linked_album"] = None
-        self._send_json(200, {"ok": True, "album": d})
+        self._send_success(200, {"album": d})
 
     def _get_backups(self):
         catalog = build_backup_catalog()
         items = [public_backup_item(x) for x in catalog]
-        self._send_json(
-            200, {"ok": True, "items": items, "retention_days": RETENTION_DAYS}
-        )
+        self._send_success(200, {"items": items, "retention_days": RETENTION_DAYS})
 
     # ------------------------------------------------------------------
     # POST handlers
@@ -913,15 +961,15 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif path == "/api/rollback":
                 self._post_rollback(body)
             else:
-                self._send_json(404, {"ok": False, "error": "Not found"})
-        except Exception as ex:
-            self._send_json(500, {"ok": False, "error": str(ex)})
+                self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
+        except Exception:
+            self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 
     def _post_status(self, body: dict):
         name = body.get("name", "").strip()
         description = body.get("description", "")
         if not name:
-            self._send_json(400, {"ok": False, "error": "name is required"})
+            self._send_error(400, "REQUEST_MISSING_FIELD", "The 'name' field is required.")
             return
         with open_db() as conn:
             cur = conn.execute(
@@ -932,7 +980,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             row = conn.execute(
                 "SELECT * FROM status WHERE id = ?", (cur.lastrowid,)
             ).fetchone()
-        self._send_json(201, {"ok": True, "id": cur.lastrowid, "status": dict(row)})
+        self._send_success(201, {"id": cur.lastrowid, "status": dict(row)})
 
     def _post_model(self, body: dict):
         now = utc_now_iso()
@@ -967,7 +1015,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             row = conn.execute(
                 "SELECT * FROM model WHERE id = ?", (cur.lastrowid,)
             ).fetchone()
-        self._send_json(201, {"ok": True, "id": cur.lastrowid, "model": dict(row)})
+        self._send_success(201, {"id": cur.lastrowid, "model": dict(row)})
 
     def _post_studio(self, body: dict):
         now = utc_now_iso()
@@ -992,7 +1040,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             row = conn.execute(
                 "SELECT * FROM studio WHERE id = ?", (cur.lastrowid,)
             ).fetchone()
-        self._send_json(201, {"ok": True, "id": cur.lastrowid, "studio": dict(row)})
+        self._send_success(201, {"id": cur.lastrowid, "studio": dict(row)})
 
     def _post_album(self, body: dict):
         now = utc_now_iso()
@@ -1058,7 +1106,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 conn.rollback()
                 raise
         append_log({"timestamp": now, "action": "create_album", "album_id": album_id, "success": True})
-        self._send_json(201, {"ok": True, "id": album_id})
+        self._send_success(201, {"id": album_id})
 
     def _post_album_model(self, album_id: int, body: dict):
         with open_db() as conn:
@@ -1076,7 +1124,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 ),
             )
             conn.commit()
-        self._send_json(201, {"ok": True, "id": cur.lastrowid})
+        self._send_success(201, {"id": cur.lastrowid})
 
     def _post_album_relation(self, album_id: int, body: dict):
         with open_db() as conn:
@@ -1093,7 +1141,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 ),
             )
             conn.commit()
-        self._send_json(201, {"ok": True, "id": cur.lastrowid})
+        self._send_success(201, {"id": cur.lastrowid})
 
     def _post_album_photo(self, album_id: int, body: dict):
         now = utc_now_iso()
@@ -1118,13 +1166,13 @@ class AppHandler(SimpleHTTPRequestHandler):
                 ),
             )
             conn.commit()
-        self._send_json(201, {"ok": True, "id": cur.lastrowid})
+        self._send_success(201, {"id": cur.lastrowid})
 
     def _post_workspace_batch(self, body: dict):
         ids = body.get("ids", [])
         changes = body.get("changes", {})
         if not ids:
-            self._send_json(400, {"ok": False, "error": "ids is required"})
+            self._send_error(400, "REQUEST_MISSING_FIELD", "The 'ids' field is required.")
             return
 
         allowed = {
@@ -1134,7 +1182,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         }
         filtered = {k: v for k, v in changes.items() if k in allowed}
         if not filtered:
-            self._send_json(400, {"ok": False, "error": "No valid fields to update"})
+            self._send_error(400, "REQUEST_INVALID", "No valid fields to update were supplied.")
             return
 
         try:
@@ -1164,7 +1212,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 )
                 updated += 1
             conn.commit()
-        self._send_json(200, {"ok": True, "updated": updated})
+        self._send_success(200, {"updated": updated})
 
     def _post_import_preview(self, body: dict):
         items_in = body.get("items", [])
@@ -1236,10 +1284,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         total = len(preview_items)
         importable = sum(1 for x in preview_items if x["can_import"])
-        self._send_json(
+        self._send_success(
             200,
             {
-                "ok": True,
                 "preview": {
                     "items": preview_items,
                     "summary": {
@@ -1254,7 +1301,7 @@ class AppHandler(SimpleHTTPRequestHandler):
     def _post_import_execute(self, body: dict):
         items_in = body.get("items", [])
         if not items_in:
-            self._send_json(400, {"ok": False, "error": "items is required"})
+            self._send_error(400, "REQUEST_MISSING_FIELD", "The 'items' field is required.")
             return
 
         global APP_CONFIG
@@ -1395,10 +1442,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 
             results.append(result)
 
-        self._send_json(
+        self._send_success(
             200,
             {
-                "ok": True,
                 "results": results,
                 "summary": {
                     "total": len(items_in),
@@ -1422,18 +1468,16 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "tag": tag,
             }
             append_backup_log(entry)
-            self._send_json(
-                200, {"ok": True, "snapshot": str(snap), "filename": snap.name}
-            )
+            self._send_success(200, {"snapshot": str(snap), "filename": snap.name})
         except Exception as ex:
             append_backup_log(
                 {"timestamp": utc_now_iso(), "reason": reason, "ok": False, "error": str(ex), "tag": tag}
             )
-            self._send_json(500, {"ok": False, "error": str(ex)})
+            self._send_error(500, "INTERNAL_ERROR", "The backup operation failed.")
 
     def _post_backup_cleanup(self):
         result = cleanup_expired_snapshots(RETENTION_DAYS)
-        self._send_json(200, {"ok": True, **result})
+        self._send_success(200, result)
 
     def _post_rollback(self, body: dict):
         mode = body.get("mode", "")
@@ -1442,11 +1486,11 @@ class AppHandler(SimpleHTTPRequestHandler):
         if mode == "snapshot":
             snap_path_str = body.get("snapshot", "")
             if not snap_path_str:
-                self._send_json(400, {"ok": False, "error": "snapshot path required"})
+                self._send_error(400, "REQUEST_MISSING_FIELD", "The 'snapshot' path is required.")
                 return
             snap_path = Path(snap_path_str)
             if not snap_path.exists():
-                self._send_json(404, {"ok": False, "error": "Snapshot not found"})
+                self._send_error(404, "NOT_FOUND", "The specified snapshot was not found.")
                 return
             catalog = build_backup_catalog()
             for item in catalog:
@@ -1463,34 +1507,34 @@ class AppHandler(SimpleHTTPRequestHandler):
         elif mode == "tag":
             tag = body.get("tag", "").strip()
             if not tag:
-                self._send_json(400, {"ok": False, "error": "tag required"})
+                self._send_error(400, "REQUEST_MISSING_FIELD", "The 'tag' field is required.")
                 return
             selected = find_snapshot_by_tag(tag)
             if selected is None:
-                self._send_json(404, {"ok": False, "error": f"No snapshot with tag '{tag}'"})
+                self._send_error(404, "NOT_FOUND", "No snapshot found with the specified tag.")
                 return
         elif mode == "before_last_operation":
             last_entry = get_last_success_change_entry()
             if last_entry is None:
-                self._send_json(404, {"ok": False, "error": "No successful change entry found"})
+                self._send_error(404, "NOT_FOUND", "No successful change entry was found.")
                 return
             ts_str = last_entry.get("timestamp", "")
             try:
                 target_dt = parse_iso_datetime(ts_str)
             except Exception:
-                self._send_json(400, {"ok": False, "error": "Cannot parse timestamp from last entry"})
+                self._send_error(400, "REQUEST_INVALID", "The timestamp from the last change entry could not be parsed.")
                 return
             selected = find_snapshot_before_or_at(target_dt)
             if selected is None:
-                self._send_json(404, {"ok": False, "error": "No snapshot found before last operation"})
+                self._send_error(404, "NOT_FOUND", "No snapshot was found before the last operation.")
                 return
         else:
-            self._send_json(400, {"ok": False, "error": f"Unknown mode: {mode}"})
+            self._send_error(400, "REQUEST_INVALID", "The rollback mode is not recognised.")
             return
 
         snap_path = Path(selected["path"])
         if not snap_path.exists():
-            self._send_json(404, {"ok": False, "error": "Snapshot file does not exist"})
+            self._send_error(404, "NOT_FOUND", "The snapshot file no longer exists.")
             return
 
         # Create safety backup before rolling back
@@ -1522,7 +1566,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                     "error": str(ex),
                 }
             )
-            self._send_json(500, {"ok": False, "error": f"Restore failed: {ex}"})
+            self._send_error(500, "INTERNAL_ERROR", "The restore operation failed.")
             return
 
         append_rollback_log(
@@ -1533,10 +1577,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "ok": True,
             }
         )
-        self._send_json(
-            200,
-            {"ok": True, "selected_snapshot": public_backup_item(selected)},
-        )
+        self._send_success(200, {"selected_snapshot": public_backup_item(selected)})
 
     # ------------------------------------------------------------------
     # PUT handlers
@@ -1573,9 +1614,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 wa_id = int(path.split("/")[-1])
                 self._put_workspace_album(wa_id, body)
             else:
-                self._send_json(404, {"ok": False, "error": "Not found"})
-        except Exception as ex:
-            self._send_json(500, {"ok": False, "error": str(ex)})
+                self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
+        except Exception:
+            self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 
     def _put_status(self, status_id: int, body: dict):
         with open_db() as conn:
@@ -1588,9 +1629,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "SELECT * FROM status WHERE id = ?", (status_id,)
             ).fetchone()
         if row is None:
-            self._send_json(404, {"ok": False, "error": "Status not found"})
+            self._send_error(404, "NOT_FOUND", "Status not found.")
             return
-        self._send_json(200, {"ok": True, "status": dict(row)})
+        self._send_success(200, {"status": dict(row)})
 
     def _put_model(self, model_id: int, body: dict):
         now = utc_now_iso()
@@ -1620,10 +1661,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "SELECT * FROM model WHERE id = ?", (model_id,)
             ).fetchone()
         if row is None:
-            self._send_json(404, {"ok": False, "error": "Model not found"})
+            self._send_error(404, "NOT_FOUND", "Model not found.")
             return
         append_log({"timestamp": now, "action": "update_model", "model_id": model_id, "success": True})
-        self._send_json(200, {"ok": True, "model": dict(row)})
+        self._send_success(200, {"model": dict(row)})
 
     def _put_studio(self, studio_id: int, body: dict):
         now = utc_now_iso()
@@ -1648,9 +1689,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "SELECT * FROM studio WHERE id = ?", (studio_id,)
             ).fetchone()
         if row is None:
-            self._send_json(404, {"ok": False, "error": "Studio not found"})
+            self._send_error(404, "NOT_FOUND", "Studio not found.")
             return
-        self._send_json(200, {"ok": True, "studio": dict(row)})
+        self._send_success(200, {"studio": dict(row)})
 
     def _put_album(self, album_id: int, body: dict):
         now = utc_now_iso()
@@ -1699,7 +1740,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 conn.rollback()
                 raise
         append_log({"timestamp": now, "action": "update_album", "album_id": album_id, "success": True})
-        self._send_json(200, {"ok": True})
+        self._send_success(200, None)
 
     def _put_album_model(self, album_id: int, am_id: int, body: dict):
         with open_db() as conn:
@@ -1711,7 +1752,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 (body.get("age_when_shot"), body.get("role"), body.get("remarks"), am_id, album_id),
             )
             conn.commit()
-        self._send_json(200, {"ok": True})
+        self._send_success(200, None)
 
     def _put_album_relation(self, album_id: int, relation_id: int, body: dict):
         with open_db() as conn:
@@ -1723,7 +1764,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 (body.get("relation_type"), body.get("remarks"), relation_id, album_id),
             )
             conn.commit()
-        self._send_json(200, {"ok": True})
+        self._send_success(200, None)
 
     def _put_photo(self, photo_id: int, body: dict):
         with open_db() as conn:
@@ -1743,7 +1784,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 ),
             )
             conn.commit()
-        self._send_json(200, {"ok": True})
+        self._send_success(200, None)
 
     def _put_workspace_album(self, wa_id: int, body: dict):
         allowed = {
@@ -1753,7 +1794,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         }
         filtered = {k: v for k, v in body.items() if k in allowed}
         if not filtered:
-            self._send_json(400, {"ok": False, "error": "No valid fields to update"})
+            self._send_error(400, "REQUEST_INVALID", "No valid fields to update were supplied.")
             return
         set_clauses = ", ".join(f"{k} = ?" for k in filtered)
         set_values = list(filtered.values())
@@ -1763,7 +1804,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 set_values + [wa_id],
             )
             conn.commit()
-        self._send_json(200, {"ok": True})
+        self._send_success(200, None)
 
     # ------------------------------------------------------------------
     # DELETE handlers
@@ -1797,9 +1838,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 photo_id = int(path.split("/")[-1])
                 self._delete_photo(photo_id)
             else:
-                self._send_json(404, {"ok": False, "error": "Not found"})
-        except Exception as ex:
-            self._send_json(500, {"ok": False, "error": str(ex)})
+                self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
+        except Exception:
+            self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 
     def _delete_status(self, status_id: int):
         with open_db() as conn:
@@ -1810,17 +1851,16 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "SELECT COUNT(*) FROM workspace_album WHERE status_id = ?", (status_id,)
             ).fetchone()[0]
             if album_refs > 0 or wa_refs > 0:
-                self._send_json(
+                self._send_error(
                     409,
-                    {
-                        "ok": False,
-                        "error": f"Status is referenced by {album_refs} album(s) and {wa_refs} workspace album(s)",
-                    },
+                    "BUSINESS_CONFLICT",
+                    "The status is still referenced and cannot be deleted.",
+                    details={"album_refs": album_refs, "workspace_album_refs": wa_refs},
                 )
                 return
             conn.execute("DELETE FROM status WHERE id = ?", (status_id,))
             conn.commit()
-        self._send_json(200, {"ok": True})
+        self._send_success(200, None)
 
     def _delete_model(self, model_id: int):
         with open_db() as conn:
@@ -1828,14 +1868,16 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "SELECT COUNT(*) FROM album_model WHERE model_id = ?", (model_id,)
             ).fetchone()[0]
             if refs > 0:
-                self._send_json(
+                self._send_error(
                     409,
-                    {"ok": False, "error": f"Model is referenced by {refs} album(s)"},
+                    "BUSINESS_CONFLICT",
+                    "The model is still referenced by albums and cannot be deleted.",
+                    details={"album_refs": refs},
                 )
                 return
             conn.execute("DELETE FROM model WHERE id = ?", (model_id,))
             conn.commit()
-        self._send_json(200, {"ok": True})
+        self._send_success(200, None)
 
     def _delete_studio(self, studio_id: int):
         with open_db() as conn:
@@ -1843,14 +1885,16 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "SELECT COUNT(*) FROM album WHERE studio_id = ?", (studio_id,)
             ).fetchone()[0]
             if refs > 0:
-                self._send_json(
+                self._send_error(
                     409,
-                    {"ok": False, "error": f"Studio is referenced by {refs} album(s)"},
+                    "BUSINESS_CONFLICT",
+                    "The studio is still referenced by albums and cannot be deleted.",
+                    details={"album_refs": refs},
                 )
                 return
             conn.execute("DELETE FROM studio WHERE id = ?", (studio_id,))
             conn.commit()
-        self._send_json(200, {"ok": True})
+        self._send_success(200, None)
 
     def _delete_album(self, album_id: int):
         now = utc_now_iso()
@@ -1869,7 +1913,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 conn.rollback()
                 raise
         append_log({"timestamp": now, "action": "delete_album", "album_id": album_id, "success": True})
-        self._send_json(200, {"ok": True})
+        self._send_success(200, None)
 
     def _delete_album_model(self, album_id: int, am_id: int):
         with open_db() as conn:
@@ -1878,7 +1922,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 (am_id, album_id),
             )
             conn.commit()
-        self._send_json(200, {"ok": True})
+        self._send_success(200, None)
 
     def _delete_album_relation(self, album_id: int, relation_id: int):
         with open_db() as conn:
@@ -1887,13 +1931,13 @@ class AppHandler(SimpleHTTPRequestHandler):
                 (relation_id, album_id),
             )
             conn.commit()
-        self._send_json(200, {"ok": True})
+        self._send_success(200, None)
 
     def _delete_photo(self, photo_id: int):
         with open_db() as conn:
             conn.execute("DELETE FROM photo WHERE id = ?", (photo_id,))
             conn.commit()
-        self._send_json(200, {"ok": True})
+        self._send_success(200, None)
 
 
 # ---------------------------------------------------------------------------
