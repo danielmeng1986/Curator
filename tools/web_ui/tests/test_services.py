@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, call, patch
 # Make the tools/web_ui package importable.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import repositories as repo
 import services as svc
 
 
@@ -139,7 +140,8 @@ class TestStatusServiceDelete(unittest.TestCase):
         self.conn = _make_db()
         self.conn.execute("INSERT INTO status (name) VALUES ('Active')")
         self.conn.commit()
-        self.service = svc.StatusService(db_factory=_db_factory(self.conn))
+        status_repo = repo.StatusRepository(db_factory=_db_factory(self.conn))
+        self.service = svc.StatusService(status_repo=status_repo)
 
     def tearDown(self):
         self.conn.close()
@@ -197,7 +199,8 @@ class TestModelServiceDelete(unittest.TestCase):
             "INSERT INTO model (uuid, display_name) VALUES ('m1', 'Alice')"
         )
         self.conn.commit()
-        self.service = svc.ModelService(db_factory=_db_factory(self.conn))
+        model_repo = repo.ModelRepository(db_factory=_db_factory(self.conn))
+        self.service = svc.ModelService(model_repo=model_repo)
 
     def tearDown(self):
         self.conn.close()
@@ -250,8 +253,9 @@ class TestModelServiceUpdateFields(unittest.TestCase):
         )
         self.conn.commit()
         self.log_calls = []
+        model_repo = repo.ModelRepository(db_factory=_db_factory(self.conn))
         self.service = svc.ModelService(
-            db_factory=_db_factory(self.conn),
+            model_repo=model_repo,
             log_fn=self.log_calls.append,
         )
 
@@ -295,7 +299,8 @@ class TestStudioServiceDelete(unittest.TestCase):
             "INSERT INTO studio (uuid, name) VALUES ('s1', 'MetArt')"
         )
         self.conn.commit()
-        self.service = svc.StudioService(db_factory=_db_factory(self.conn))
+        studio_repo = repo.StudioRepository(db_factory=_db_factory(self.conn))
+        self.service = svc.StudioService(studio_repo=studio_repo)
 
     def tearDown(self):
         self.conn.close()
@@ -327,8 +332,9 @@ class TestAlbumServiceCreate(unittest.TestCase):
     def setUp(self):
         self.conn = _make_db()
         self.log_calls = []
+        album_repo = repo.AlbumRepository(db_factory=_db_factory(self.conn))
         self.service = svc.AlbumService(
-            db_factory=_db_factory(self.conn),
+            album_repo=album_repo,
             log_fn=self.log_calls.append,
         )
 
@@ -398,8 +404,9 @@ class TestAlbumServiceUpdate(unittest.TestCase):
         )
         self.conn.commit()
         self.log_calls = []
+        album_repo = repo.AlbumRepository(db_factory=_db_factory(self.conn))
         self.service = svc.AlbumService(
-            db_factory=_db_factory(self.conn),
+            album_repo=album_repo,
             log_fn=self.log_calls.append,
         )
 
@@ -462,8 +469,9 @@ class TestAlbumServiceDelete(unittest.TestCase):
         )
         self.conn.commit()
         self.log_calls = []
+        album_repo = repo.AlbumRepository(db_factory=_db_factory(self.conn))
         self.service = svc.AlbumService(
-            db_factory=_db_factory(self.conn),
+            album_repo=album_repo,
             log_fn=self.log_calls.append,
         )
 
@@ -514,8 +522,9 @@ class TestWorkspaceAlbumServiceBatchUpdate(unittest.TestCase):
         self.conn.commit()
         self.snapshot_calls = []
         self.log_calls = []
+        workspace_repo = repo.WorkspaceAlbumRepository(db_factory=_db_factory(self.conn))
         self.service = svc.WorkspaceAlbumService(
-            db_factory=_db_factory(self.conn),
+            workspace_repo=workspace_repo,
             snapshot_fn=lambda r, t="": self.snapshot_calls.append((r, t)) or MagicMock(name="snap.db"),
             backup_log_fn=self.log_calls.append,
         )
@@ -569,8 +578,9 @@ class TestWorkspaceAlbumServiceUpdate(unittest.TestCase):
             "INSERT INTO workspace_album (studio_name, remark) VALUES ('S', 'old')"
         )
         self.conn.commit()
+        workspace_repo = repo.WorkspaceAlbumRepository(db_factory=_db_factory(self.conn))
         self.service = svc.WorkspaceAlbumService(
-            db_factory=_db_factory(self.conn),
+            workspace_repo=workspace_repo,
             snapshot_fn=lambda *a, **kw: MagicMock(),
             backup_log_fn=lambda _: None,
         )
@@ -659,8 +669,9 @@ class TestImportServicePreview(unittest.TestCase):
             " VALUES ('m1', 'Alice', '2024-01-01', '2024-01-01')"
         )
         self.conn.commit()
+        import_repo = repo.ImportRepository(db_factory=_db_factory(self.conn))
         self.service = svc.ImportService(
-            db_factory=_db_factory(self.conn),
+            import_repo=import_repo,
             snapshot_fn=lambda *a, **kw: MagicMock(),
             backup_log_fn=lambda _: None,
             change_log_fn=lambda _: None,
@@ -732,8 +743,9 @@ class TestImportServiceExecute(unittest.TestCase):
         self.log_calls = []
         self.backup_calls = []
         self.snapshot_mock = MagicMock(name="snap.db")
+        import_repo = repo.ImportRepository(db_factory=_db_factory(self.conn))
         self.service = svc.ImportService(
-            db_factory=_db_factory(self.conn),
+            import_repo=import_repo,
             snapshot_fn=lambda *a, **kw: self.snapshot_mock,
             backup_log_fn=self.backup_calls.append,
             change_log_fn=self.log_calls.append,

@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import api_contract
+import repositories as repo
 import services as svc
 
 # ---------------------------------------------------------------------------
@@ -549,351 +550,91 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, APP_CONFIG)
 
     def _get_statuses(self):
-        with open_db() as conn:
-            rows = conn.execute(
-                """
-                SELECT s.id, s.name, s.description,
-                    (SELECT COUNT(*) FROM album a WHERE a.status_id = s.id) as album_count,
-                    (SELECT COUNT(*) FROM workspace_album wa WHERE wa.status_id = s.id) as workspace_album_count
-                FROM status s ORDER BY s.id
-                """
-            ).fetchall()
-        self._send_success(200, {"statuses": [dict(r) for r in rows]})
+        status_repo = repo.StatusRepository(open_db)
+        self._send_success(200, {"statuses": status_repo.list_with_counts()})
 
     def _get_models(self, qs: dict):
         q = qs.get("q", [""])[0].strip()
         limit = int(qs.get("limit", ["50"])[0])
         offset = int(qs.get("offset", ["0"])[0])
-        pattern = f"%{q}%" if q else "%%"
-        with open_db() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, uuid, display_name, primary_name, description,
-                    country, ethnicity, eye_color, natural_hair_color, created_at, updated_at
-                FROM model
-                WHERE (display_name LIKE ? OR primary_name LIKE ?)
-                ORDER BY COALESCE(display_name, primary_name)
-                LIMIT ? OFFSET ?
-                """,
-                (pattern, pattern, limit, offset),
-            ).fetchall()
-            total = conn.execute(
-                "SELECT COUNT(*) FROM model WHERE (display_name LIKE ? OR primary_name LIKE ?)",
-                (pattern, pattern),
-            ).fetchone()[0]
-        self._send_collection(
-            [dict(r) for r in rows],
-            limit=limit,
-            offset=offset,
-            total=total,
-        )
+        model_repo = repo.ModelRepository(open_db)
+        rows, total = model_repo.search(q, limit, offset)
+        self._send_collection(rows, limit=limit, offset=offset, total=total)
 
     def _get_model(self, model_id: int):
-        with open_db() as conn:
-            row = conn.execute(
-                "SELECT * FROM model WHERE id = ?", (model_id,)
-            ).fetchone()
-            if row is None:
-                self._send_error(404, "NOT_FOUND", "Model not found.")
-                return
-            albums = conn.execute(
-                """
-                SELECT a.id, a.title, a.capture_date, am.age_when_shot, am.role, am.remarks,
-                    s.name as studio_name
-                FROM album_model am
-                JOIN album a ON a.id = am.album_id
-                LEFT JOIN studio s ON s.id = a.studio_id
-                WHERE am.model_id = ?
-                ORDER BY a.capture_date DESC
-                """,
-                (model_id,),
-            ).fetchall()
-        self._send_success(
-            200,
-            {
-                "model": dict(row),
-                "albums": [dict(a) for a in albums],
-            },
-        )
+        model_repo = repo.ModelRepository(open_db)
+        result = model_repo.get_by_id(model_id)
+        if result is None:
+            self._send_error(404, "NOT_FOUND", "Model not found.")
+            return
+        self._send_success(200, result)
 
     def _get_studios(self, qs: dict):
         q = qs.get("q", [""])[0].strip()
         limit = int(qs.get("limit", ["50"])[0])
         offset = int(qs.get("offset", ["0"])[0])
-        pattern = f"%{q}%" if q else "%%"
-        with open_db() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, uuid, name, website, description, media_scope, created_at, updated_at
-                FROM studio WHERE name LIKE ? ORDER BY name LIMIT ? OFFSET ?
-                """,
-                (pattern, limit, offset),
-            ).fetchall()
-            total = conn.execute(
-                "SELECT COUNT(*) FROM studio WHERE name LIKE ?", (pattern,)
-            ).fetchone()[0]
-        self._send_collection(
-            [dict(r) for r in rows],
-            limit=limit,
-            offset=offset,
-            total=total,
-        )
+        studio_repo = repo.StudioRepository(open_db)
+        rows, total = studio_repo.search(q, limit, offset)
+        self._send_collection(rows, limit=limit, offset=offset, total=total)
 
     def _get_studio(self, studio_id: int):
-        with open_db() as conn:
-            row = conn.execute(
-                "SELECT * FROM studio WHERE id = ?", (studio_id,)
-            ).fetchone()
-            if row is None:
-                self._send_error(404, "NOT_FOUND", "Studio not found.")
-                return
-            albums = conn.execute(
-                """
-                SELECT a.id, a.title, a.capture_date, a.publish_date, a.rating,
-                    st.name as status_name
-                FROM album a
-                LEFT JOIN status st ON st.id = a.status_id
-                WHERE a.studio_id = ?
-                ORDER BY a.publish_date DESC
-                """,
-                (studio_id,),
-            ).fetchall()
-        self._send_success(
-            200,
-            {
-                "studio": dict(row),
-                "albums": [dict(a) for a in albums],
-            },
-        )
+        studio_repo = repo.StudioRepository(open_db)
+        result = studio_repo.get_by_id(studio_id)
+        if result is None:
+            self._send_error(404, "NOT_FOUND", "Studio not found.")
+            return
+        self._send_success(200, result)
 
     def _get_albums(self, qs: dict):
-        q = qs.get("q", [""])[0].strip()
-        studio_id = qs.get("studio_id", [""])[0].strip()
-        status_id = qs.get("status_id", [""])[0].strip()
-        model_id = qs.get("model_id", [""])[0].strip()
-        rating_min = qs.get("rating_min", [""])[0].strip()
-        rating_max = qs.get("rating_max", [""])[0].strip()
-        sort = qs.get("sort", ["updated_at"])[0].strip()
-        limit = int(qs.get("limit", ["50"])[0])
-        offset = int(qs.get("offset", ["0"])[0])
-
-        sort_map = {
-            "title": "a.title",
-            "studio_name": "s.name",
-            "publish_date": "a.publish_date",
-            "rating": "a.rating",
-            "updated_at": "a.updated_at",
-            "capture_date": "a.capture_date",
-        }
-        order_col = sort_map.get(sort, "a.updated_at")
-
-        conditions = []
-        params: list = []
-
-        if q:
-            conditions.append("(a.title LIKE ? OR a.description LIKE ?)")
-            params += [f"%{q}%", f"%{q}%"]
-        if studio_id:
-            conditions.append("a.studio_id = ?")
-            params.append(int(studio_id))
-        if status_id:
-            conditions.append("a.status_id = ?")
-            params.append(int(status_id))
-        if model_id:
-            conditions.append(
-                "EXISTS (SELECT 1 FROM album_model am2 WHERE am2.album_id = a.id AND am2.model_id = ?)"
-            )
-            params.append(int(model_id))
-        if rating_min:
-            conditions.append("a.rating >= ?")
-            params.append(float(rating_min))
-        if rating_max:
-            conditions.append("a.rating <= ?")
-            params.append(float(rating_max))
-
-        where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-
-        query = f"""
-            SELECT a.id, a.uuid, a.title, a.description, a.scene, a.location,
-                a.capture_date, a.publish_date, a.rating, a.path,
-                a.studio_id, a.status_id, a.created_at, a.updated_at,
-                s.name as studio_name,
-                st.name as status_name,
-                GROUP_CONCAT(DISTINCT COALESCE(m.display_name, m.primary_name)) as model_names
-            FROM album a
-            LEFT JOIN studio s ON s.id = a.studio_id
-            LEFT JOIN status st ON st.id = a.status_id
-            LEFT JOIN album_model am ON am.album_id = a.id
-            LEFT JOIN model m ON m.id = am.model_id
-            {where_clause}
-            GROUP BY a.id
-            ORDER BY {order_col} DESC
-            LIMIT ? OFFSET ?
-        """
-
-        count_query = f"""
-            SELECT COUNT(DISTINCT a.id)
-            FROM album a
-            LEFT JOIN studio s ON s.id = a.studio_id
-            LEFT JOIN status st ON st.id = a.status_id
-            {where_clause}
-        """
-
-        with open_db() as conn:
-            rows = conn.execute(query, params + [limit, offset]).fetchall()
-            total = conn.execute(count_query, params).fetchone()[0]
-
+        album_repo = repo.AlbumRepository(open_db)
+        rows, total = album_repo.search(
+            q=qs.get("q", [""])[0].strip(),
+            studio_id=qs.get("studio_id", [""])[0].strip(),
+            status_id=qs.get("status_id", [""])[0].strip(),
+            model_id=qs.get("model_id", [""])[0].strip(),
+            rating_min=qs.get("rating_min", [""])[0].strip(),
+            rating_max=qs.get("rating_max", [""])[0].strip(),
+            sort=qs.get("sort", ["updated_at"])[0].strip(),
+            limit=int(qs.get("limit", ["50"])[0]),
+            offset=int(qs.get("offset", ["0"])[0]),
+        )
         self._send_collection(
-            [dict(r) for r in rows],
-            limit=limit,
-            offset=offset,
+            rows,
+            limit=int(qs.get("limit", ["50"])[0]),
+            offset=int(qs.get("offset", ["0"])[0]),
             total=total,
         )
 
     def _get_album(self, album_id: int):
-        with open_db() as conn:
-            row = conn.execute(
-                """
-                SELECT a.*, s.name as studio_name, st.name as status_name
-                FROM album a
-                LEFT JOIN studio s ON s.id = a.studio_id
-                LEFT JOIN status st ON st.id = a.status_id
-                WHERE a.id = ?
-                """,
-                (album_id,),
-            ).fetchone()
-            if row is None:
-                self._send_error(404, "NOT_FOUND", "Album not found.")
-                return
-            models = conn.execute(
-                """
-                SELECT am.id, am.model_id, am.age_when_shot, am.role, am.remarks,
-                    COALESCE(m.display_name, m.primary_name) as model_name
-                FROM album_model am
-                JOIN model m ON m.id = am.model_id
-                WHERE am.album_id = ?
-                """,
-                (album_id,),
-            ).fetchall()
-            relations = conn.execute(
-                """
-                SELECT ar.id, ar.related_album_id, ar.relation_type, ar.remarks,
-                    a2.title as related_title, s2.name as related_studio
-                FROM album_relation ar
-                JOIN album a2 ON a2.id = ar.related_album_id
-                LEFT JOIN studio s2 ON s2.id = a2.studio_id
-                WHERE ar.album_id = ?
-                """,
-                (album_id,),
-            ).fetchall()
-            photos = conn.execute(
-                """
-                SELECT id, uuid, filename, relative_path, width, height, capture_time, created_at
-                FROM photo WHERE album_id = ? ORDER BY filename
-                """,
-                (album_id,),
-            ).fetchall()
-        self._send_success(
-            200,
-            {
-                "album": dict(row),
-                "models": [dict(m) for m in models],
-                "relations": [dict(r) for r in relations],
-                "photos": [dict(p) for p in photos],
-            },
-        )
+        album_repo = repo.AlbumRepository(open_db)
+        result = album_repo.get_by_id(album_id)
+        if result is None:
+            self._send_error(404, "NOT_FOUND", "Album not found.")
+            return
+        self._send_success(200, result)
 
     def _get_workspace_albums(self, qs: dict):
-        status_id = qs.get("status_id", [""])[0].strip()
-        studio_name = qs.get("studio_name", [""])[0].strip()
-        primary_model = qs.get("primary_model", [""])[0].strip()
-        linked = qs.get("linked", [""])[0].strip().lower()
-        q = qs.get("q", [""])[0].strip()
+        wa_repo = repo.WorkspaceAlbumRepository(open_db)
         limit = int(qs.get("limit", ["50"])[0])
         offset = int(qs.get("offset", ["0"])[0])
-
-        conditions = []
-        params: list = []
-
-        if status_id:
-            conditions.append("wa.status_id = ?")
-            params.append(int(status_id))
-        if studio_name:
-            conditions.append("wa.studio_name LIKE ?")
-            params.append(f"%{studio_name}%")
-        if primary_model:
-            conditions.append("wa.primary_model LIKE ?")
-            params.append(f"%{primary_model}%")
-        if linked == "yes":
-            conditions.append("wa.album_id IS NOT NULL")
-        elif linked == "no":
-            conditions.append("wa.album_id IS NULL")
-        if q:
-            conditions.append(
-                "(wa.album_name LIKE ? OR wa.primary_model LIKE ? OR wa.studio_name LIKE ?)"
-            )
-            params += [f"%{q}%", f"%{q}%", f"%{q}%"]
-
-        where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-
-        query = f"""
-            SELECT wa.*, s.name as status_name
-            FROM workspace_album wa
-            LEFT JOIN status s ON s.id = wa.status_id
-            {where_clause}
-            ORDER BY wa.id DESC
-            LIMIT ? OFFSET ?
-        """
-        count_query = f"""
-            SELECT COUNT(*) FROM workspace_album wa
-            LEFT JOIN status s ON s.id = wa.status_id
-            {where_clause}
-        """
-
-        with open_db() as conn:
-            rows = conn.execute(query, params + [limit, offset]).fetchall()
-            total = conn.execute(count_query, params).fetchone()[0]
-
-        self._send_collection(
-            [dict(r) for r in rows],
+        rows, total = wa_repo.search(
+            status_id=qs.get("status_id", [""])[0].strip(),
+            studio_name=qs.get("studio_name", [""])[0].strip(),
+            primary_model=qs.get("primary_model", [""])[0].strip(),
+            linked=qs.get("linked", [""])[0].strip().lower(),
+            q=qs.get("q", [""])[0].strip(),
             limit=limit,
             offset=offset,
-            total=total,
         )
+        self._send_collection(rows, limit=limit, offset=offset, total=total)
 
     def _get_workspace_album(self, wa_id: int):
-        with open_db() as conn:
-            row = conn.execute(
-                """
-                SELECT wa.*, s.name as status_name
-                FROM workspace_album wa
-                LEFT JOIN status s ON s.id = wa.status_id
-                WHERE wa.id = ?
-                """,
-                (wa_id,),
-            ).fetchone()
-            if row is None:
-                self._send_error(404, "NOT_FOUND", "Workspace album not found.")
-                return
-            d = dict(row)
-            # belongs_to info
-            if d.get("belongs_to_album_id"):
-                parent = conn.execute(
-                    "SELECT id, album_name, primary_model FROM workspace_album WHERE id = ?",
-                    (d["belongs_to_album_id"],),
-                ).fetchone()
-                d["belongs_to"] = dict(parent) if parent else None
-            else:
-                d["belongs_to"] = None
-            # linked album info
-            if d.get("album_id"):
-                linked = conn.execute(
-                    "SELECT id, title FROM album WHERE id = ?", (d["album_id"],)
-                ).fetchone()
-                d["linked_album"] = dict(linked) if linked else None
-            else:
-                d["linked_album"] = None
-        self._send_success(200, {"album": d})
+        wa_repo = repo.WorkspaceAlbumRepository(open_db)
+        result = wa_repo.get_by_id(wa_id)
+        if result is None:
+            self._send_error(404, "NOT_FOUND", "Workspace album not found.")
+            return
+        self._send_success(200, {"album": result})
 
     def _get_backups(self):
         catalog = build_backup_catalog()
@@ -946,143 +687,42 @@ class AppHandler(SimpleHTTPRequestHandler):
         if not name:
             self._send_error(400, "REQUEST_MISSING_FIELD", "The 'name' field is required.")
             return
-        with open_db() as conn:
-            cur = conn.execute(
-                "INSERT INTO status (name, description) VALUES (?, ?)",
-                (name, description),
-            )
-            conn.commit()
-            row = conn.execute(
-                "SELECT * FROM status WHERE id = ?", (cur.lastrowid,)
-            ).fetchone()
-        self._send_success(201, {"id": cur.lastrowid, "status": dict(row)})
+        status_repo = repo.StatusRepository(open_db)
+        result = status_repo.create(name, description)
+        self._send_success(201, result)
 
     def _post_model(self, body: dict):
-        now = utc_now_iso()
-        new_uuid = str(uuid.uuid4())
-        fields = (
-            "display_name", "primary_name", "description",
-            "country", "ethnicity", "eye_color", "natural_hair_color",
-        )
-        vals = {f: body.get(f) for f in fields}
-        with open_db() as conn:
-            cur = conn.execute(
-                """
-                INSERT INTO model
-                    (uuid, display_name, primary_name, description, country, ethnicity,
-                     eye_color, natural_hair_color, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    new_uuid,
-                    vals["display_name"],
-                    vals["primary_name"],
-                    vals["description"],
-                    vals["country"],
-                    vals["ethnicity"],
-                    vals["eye_color"],
-                    vals["natural_hair_color"],
-                    now,
-                    now,
-                ),
-            )
-            conn.commit()
-            row = conn.execute(
-                "SELECT * FROM model WHERE id = ?", (cur.lastrowid,)
-            ).fetchone()
-        self._send_success(201, {"id": cur.lastrowid, "model": dict(row)})
+        model_repo = repo.ModelRepository(open_db)
+        result = model_repo.create(body)
+        self._send_success(201, result)
 
     def _post_studio(self, body: dict):
-        now = utc_now_iso()
-        new_uuid = str(uuid.uuid4())
-        with open_db() as conn:
-            cur = conn.execute(
-                """
-                INSERT INTO studio (uuid, name, website, description, media_scope, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    new_uuid,
-                    body.get("name"),
-                    body.get("website"),
-                    body.get("description"),
-                    body.get("media_scope"),
-                    now,
-                    now,
-                ),
-            )
-            conn.commit()
-            row = conn.execute(
-                "SELECT * FROM studio WHERE id = ?", (cur.lastrowid,)
-            ).fetchone()
-        self._send_success(201, {"id": cur.lastrowid, "studio": dict(row)})
+        studio_repo = repo.StudioRepository(open_db)
+        result = studio_repo.create(body)
+        self._send_success(201, result)
 
     def _post_album(self, body: dict):
-        album_service = svc.AlbumService(db_factory=open_db, log_fn=append_log)
+        album_repo = repo.AlbumRepository(open_db)
+        album_service = svc.AlbumService(album_repo=album_repo, log_fn=append_log)
         models = body.get("models", [])
         relations = body.get("relations", [])
         album_id = album_service.create(body, models, relations)
         self._send_success(201, {"id": album_id})
 
     def _post_album_model(self, album_id: int, body: dict):
-        with open_db() as conn:
-            cur = conn.execute(
-                """
-                INSERT INTO album_model (album_id, model_id, age_when_shot, role, remarks)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    album_id,
-                    body.get("model_id"),
-                    body.get("age_when_shot"),
-                    body.get("role"),
-                    body.get("remarks"),
-                ),
-            )
-            conn.commit()
-        self._send_success(201, {"id": cur.lastrowid})
+        am_repo = repo.AlbumModelRepository(open_db)
+        new_id = am_repo.add(album_id, body)
+        self._send_success(201, {"id": new_id})
 
     def _post_album_relation(self, album_id: int, body: dict):
-        with open_db() as conn:
-            cur = conn.execute(
-                """
-                INSERT INTO album_relation (album_id, related_album_id, relation_type, remarks)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    album_id,
-                    body.get("related_album_id"),
-                    body.get("relation_type"),
-                    body.get("remarks"),
-                ),
-            )
-            conn.commit()
-        self._send_success(201, {"id": cur.lastrowid})
+        ar_repo = repo.AlbumRelationRepository(open_db)
+        new_id = ar_repo.add(album_id, body)
+        self._send_success(201, {"id": new_id})
 
     def _post_album_photo(self, album_id: int, body: dict):
-        now = utc_now_iso()
-        new_uuid = str(uuid.uuid4())
-        with open_db() as conn:
-            cur = conn.execute(
-                """
-                INSERT INTO photo
-                    (uuid, album_id, filename, relative_path, hash, width, height, capture_time, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    new_uuid,
-                    album_id,
-                    body.get("filename"),
-                    body.get("relative_path"),
-                    body.get("hash"),
-                    body.get("width"),
-                    body.get("height"),
-                    body.get("capture_time"),
-                    now,
-                ),
-            )
-            conn.commit()
-        self._send_success(201, {"id": cur.lastrowid})
+        photo_repo = repo.PhotoRepository(open_db)
+        new_id = photo_repo.add(album_id, body)
+        self._send_success(201, {"id": new_id})
 
     def _post_workspace_batch(self, body: dict):
         ids = body.get("ids", [])
@@ -1090,8 +730,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         if not ids:
             self._send_error(400, "REQUEST_MISSING_FIELD", "The 'ids' field is required.")
             return
+        wa_repo = repo.WorkspaceAlbumRepository(open_db)
         workspace_service = svc.WorkspaceAlbumService(
-            db_factory=open_db,
+            workspace_repo=wa_repo,
             snapshot_fn=create_db_snapshot,
             backup_log_fn=append_backup_log,
         )
@@ -1109,8 +750,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         archive_root = APP_CONFIG.get("archive_root", "")
         default_studio = APP_CONFIG.get("default_import_studio", "")
 
+        import_repo = repo.ImportRepository(open_db)
         import_service = svc.ImportService(
-            db_factory=open_db,
+            import_repo=import_repo,
             snapshot_fn=create_db_snapshot,
             backup_log_fn=append_backup_log,
             change_log_fn=append_log,
@@ -1129,8 +771,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         archive_root = APP_CONFIG.get("archive_root", "")
         default_studio = APP_CONFIG.get("default_import_studio", "")
 
+        import_repo = repo.ImportRepository(open_db)
         import_service = svc.ImportService(
-            db_factory=open_db,
+            import_repo=import_repo,
             snapshot_fn=create_db_snapshot,
             backup_log_fn=append_backup_log,
             change_log_fn=append_log,
@@ -1230,22 +873,16 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 
     def _put_status(self, status_id: int, body: dict):
-        with open_db() as conn:
-            conn.execute(
-                "UPDATE status SET name = ?, description = ? WHERE id = ?",
-                (body.get("name"), body.get("description"), status_id),
-            )
-            conn.commit()
-            row = conn.execute(
-                "SELECT * FROM status WHERE id = ?", (status_id,)
-            ).fetchone()
-        if row is None:
+        status_repo = repo.StatusRepository(open_db)
+        result = status_repo.update(status_id, body.get("name"), body.get("description"))
+        if result is None:
             self._send_error(404, "NOT_FOUND", "Status not found.")
             return
-        self._send_success(200, {"status": dict(row)})
+        self._send_success(200, {"status": result})
 
     def _put_model(self, model_id: int, body: dict):
-        model_service = svc.ModelService(db_factory=open_db, log_fn=append_log)
+        model_repo = repo.ModelRepository(open_db)
+        model_service = svc.ModelService(model_repo=model_repo, log_fn=append_log)
         try:
             row = model_service.update_fields(model_id, body)
         except svc.ServiceNotFound:
@@ -1254,86 +891,41 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, {"model": row})
 
     def _put_studio(self, studio_id: int, body: dict):
+        studio_repo = repo.StudioRepository(open_db)
         now = utc_now_iso()
-        with open_db() as conn:
-            conn.execute(
-                """
-                UPDATE studio SET
-                    name = ?, website = ?, description = ?, media_scope = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (
-                    body.get("name"),
-                    body.get("website"),
-                    body.get("description"),
-                    body.get("media_scope"),
-                    now,
-                    studio_id,
-                ),
-            )
-            conn.commit()
-            row = conn.execute(
-                "SELECT * FROM studio WHERE id = ?", (studio_id,)
-            ).fetchone()
-        if row is None:
+        result = studio_repo.update(studio_id, body, now)
+        if result is None:
             self._send_error(404, "NOT_FOUND", "Studio not found.")
             return
-        self._send_success(200, {"studio": dict(row)})
+        self._send_success(200, {"studio": result})
 
     def _put_album(self, album_id: int, body: dict):
-        album_service = svc.AlbumService(db_factory=open_db, log_fn=append_log)
+        album_repo = repo.AlbumRepository(open_db)
+        album_service = svc.AlbumService(album_repo=album_repo, log_fn=append_log)
         models = body.get("models", [])
         relations = body.get("relations", [])
         album_service.update(album_id, body, models, relations)
         self._send_success(200, None)
 
     def _put_album_model(self, album_id: int, am_id: int, body: dict):
-        with open_db() as conn:
-            conn.execute(
-                """
-                UPDATE album_model SET age_when_shot = ?, role = ?, remarks = ?
-                WHERE id = ? AND album_id = ?
-                """,
-                (body.get("age_when_shot"), body.get("role"), body.get("remarks"), am_id, album_id),
-            )
-            conn.commit()
+        am_repo = repo.AlbumModelRepository(open_db)
+        am_repo.update(album_id, am_id, body)
         self._send_success(200, None)
 
     def _put_album_relation(self, album_id: int, relation_id: int, body: dict):
-        with open_db() as conn:
-            conn.execute(
-                """
-                UPDATE album_relation SET relation_type = ?, remarks = ?
-                WHERE id = ? AND album_id = ?
-                """,
-                (body.get("relation_type"), body.get("remarks"), relation_id, album_id),
-            )
-            conn.commit()
+        ar_repo = repo.AlbumRelationRepository(open_db)
+        ar_repo.update(album_id, relation_id, body)
         self._send_success(200, None)
 
     def _put_photo(self, photo_id: int, body: dict):
-        with open_db() as conn:
-            conn.execute(
-                """
-                UPDATE photo SET
-                    filename = ?, relative_path = ?, width = ?, height = ?, capture_time = ?
-                WHERE id = ?
-                """,
-                (
-                    body.get("filename"),
-                    body.get("relative_path"),
-                    body.get("width"),
-                    body.get("height"),
-                    body.get("capture_time"),
-                    photo_id,
-                ),
-            )
-            conn.commit()
+        photo_repo = repo.PhotoRepository(open_db)
+        photo_repo.update(photo_id, body)
         self._send_success(200, None)
 
     def _put_workspace_album(self, wa_id: int, body: dict):
+        wa_repo = repo.WorkspaceAlbumRepository(open_db)
         workspace_service = svc.WorkspaceAlbumService(
-            db_factory=open_db,
+            workspace_repo=wa_repo,
             snapshot_fn=create_db_snapshot,
             backup_log_fn=append_backup_log,
         )
@@ -1381,7 +973,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 
     def _delete_status(self, status_id: int):
-        status_service = svc.StatusService(db_factory=open_db)
+        status_repo = repo.StatusRepository(open_db)
+        status_service = svc.StatusService(status_repo=status_repo)
         try:
             status_service.delete(status_id)
         except svc.ServiceConflict as exc:
@@ -1390,7 +983,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, None)
 
     def _delete_model(self, model_id: int):
-        model_service = svc.ModelService(db_factory=open_db)
+        model_repo = repo.ModelRepository(open_db)
+        model_service = svc.ModelService(model_repo=model_repo)
         try:
             model_service.delete(model_id)
         except svc.ServiceConflict as exc:
@@ -1399,7 +993,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, None)
 
     def _delete_studio(self, studio_id: int):
-        studio_service = svc.StudioService(db_factory=open_db)
+        studio_repo = repo.StudioRepository(open_db)
+        studio_service = svc.StudioService(studio_repo=studio_repo)
         try:
             studio_service.delete(studio_id)
         except svc.ServiceConflict as exc:
@@ -1408,32 +1003,24 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, None)
 
     def _delete_album(self, album_id: int):
-        album_service = svc.AlbumService(db_factory=open_db, log_fn=append_log)
+        album_repo = repo.AlbumRepository(open_db)
+        album_service = svc.AlbumService(album_repo=album_repo, log_fn=append_log)
         album_service.delete(album_id)
         self._send_success(200, None)
 
     def _delete_album_model(self, album_id: int, am_id: int):
-        with open_db() as conn:
-            conn.execute(
-                "DELETE FROM album_model WHERE id = ? AND album_id = ?",
-                (am_id, album_id),
-            )
-            conn.commit()
+        am_repo = repo.AlbumModelRepository(open_db)
+        am_repo.delete(album_id, am_id)
         self._send_success(200, None)
 
     def _delete_album_relation(self, album_id: int, relation_id: int):
-        with open_db() as conn:
-            conn.execute(
-                "DELETE FROM album_relation WHERE id = ? AND album_id = ?",
-                (relation_id, album_id),
-            )
-            conn.commit()
+        ar_repo = repo.AlbumRelationRepository(open_db)
+        ar_repo.delete(album_id, relation_id)
         self._send_success(200, None)
 
     def _delete_photo(self, photo_id: int):
-        with open_db() as conn:
-            conn.execute("DELETE FROM photo WHERE id = ?", (photo_id,))
-            conn.commit()
+        photo_repo = repo.PhotoRepository(open_db)
+        photo_repo.delete(photo_id)
         self._send_success(200, None)
 
 

@@ -4,24 +4,21 @@
 Services own business rules, workflow decisions, and transaction boundaries.
 They are independent of HTTP and called by transport adapters (AppHandler).
 
-Each service accepts its infrastructure dependencies (db_factory, snapshot and
-logging callables) at construction time so they can be tested in isolation
-without HTTP machinery.
+Each service accepts its repository dependencies at construction time so they
+can be tested in isolation without HTTP machinery or a real database.
 
-Persistence notes
------------------
-Services call ``open_db()`` (supplied as ``db_factory``) directly for now.
-Formal repository boundaries are deferred to BT-005 (Centralise Repository
-Access).
+Persistence is performed exclusively through repository methods; services
+contain no SQL or direct database-connection handling.
 """
 
 from __future__ import annotations
 
 import re
 import shutil
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+import repositories as repo
 
 
 # ---------------------------------------------------------------------------
@@ -61,8 +58,8 @@ def _utc_now_iso() -> str:
 class StatusService:
     """Business rules for status management."""
 
-    def __init__(self, db_factory):
-        self._db = db_factory
+    def __init__(self, status_repo: repo.StatusRepository):
+        self._repo = status_repo
 
     def delete(self, status_id: int) -> None:
         """Delete a status after verifying it has no references.
@@ -71,22 +68,14 @@ class StatusService:
             ServiceConflict: If any album or workspace album references the
                 status.
         """
-        with self._db() as conn:
-            album_refs = conn.execute(
-                "SELECT COUNT(*) FROM album WHERE status_id = ?", (status_id,)
-            ).fetchone()[0]
-            wa_refs = conn.execute(
-                "SELECT COUNT(*) FROM workspace_album WHERE status_id = ?",
-                (status_id,),
-            ).fetchone()[0]
-            if album_refs > 0 or wa_refs > 0:
-                raise ServiceConflict(
-                    "BUSINESS_CONFLICT",
-                    "The status is still referenced and cannot be deleted.",
-                    {"album_refs": album_refs, "workspace_album_refs": wa_refs},
-                )
-            conn.execute("DELETE FROM status WHERE id = ?", (status_id,))
-            conn.commit()
+        try:
+            self._repo.delete(status_id)
+        except repo.PersistenceConflict as exc:
+            raise ServiceConflict(
+                "BUSINESS_CONFLICT",
+                "The status is still referenced and cannot be deleted.",
+                exc.details,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -96,8 +85,8 @@ class StatusService:
 class ModelService:
     """Business rules for model management."""
 
-    def __init__(self, db_factory, log_fn=None):
-        self._db = db_factory
+    def __init__(self, model_repo: repo.ModelRepository, log_fn=None):
+        self._repo = model_repo
         self._log = log_fn or (lambda _: None)
 
     def update_fields(self, model_id: int, data: dict) -> dict:
@@ -107,37 +96,13 @@ class ModelService:
             ServiceNotFound: If no model with ``model_id`` exists.
         """
         now = _utc_now_iso()
-        with self._db() as conn:
-            conn.execute(
-                """
-                UPDATE model SET
-                    display_name = ?, primary_name = ?, description = ?,
-                    country = ?, ethnicity = ?, eye_color = ?, natural_hair_color = ?,
-                    updated_at = ?
-                WHERE id = ?
-                """,
-                (
-                    data.get("display_name"),
-                    data.get("primary_name"),
-                    data.get("description"),
-                    data.get("country"),
-                    data.get("ethnicity"),
-                    data.get("eye_color"),
-                    data.get("natural_hair_color"),
-                    now,
-                    model_id,
-                ),
-            )
-            conn.commit()
-            row = conn.execute(
-                "SELECT * FROM model WHERE id = ?", (model_id,)
-            ).fetchone()
-        if row is None:
+        result = self._repo.update_fields(model_id, data, now)
+        if result is None:
             raise ServiceNotFound("Model not found.")
         self._log(
             {"timestamp": now, "action": "update_model", "model_id": model_id, "success": True}
         )
-        return dict(row)
+        return result
 
     def delete(self, model_id: int) -> None:
         """Delete a model after verifying it has no album references.
@@ -145,18 +110,14 @@ class ModelService:
         Raises:
             ServiceConflict: If the model is referenced by any album.
         """
-        with self._db() as conn:
-            refs = conn.execute(
-                "SELECT COUNT(*) FROM album_model WHERE model_id = ?", (model_id,)
-            ).fetchone()[0]
-            if refs > 0:
-                raise ServiceConflict(
-                    "BUSINESS_CONFLICT",
-                    "The model is still referenced by albums and cannot be deleted.",
-                    {"album_refs": refs},
-                )
-            conn.execute("DELETE FROM model WHERE id = ?", (model_id,))
-            conn.commit()
+        try:
+            self._repo.delete(model_id)
+        except repo.PersistenceConflict as exc:
+            raise ServiceConflict(
+                "BUSINESS_CONFLICT",
+                "The model is still referenced by albums and cannot be deleted.",
+                exc.details,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +127,8 @@ class ModelService:
 class StudioService:
     """Business rules for studio management."""
 
-    def __init__(self, db_factory):
-        self._db = db_factory
+    def __init__(self, studio_repo: repo.StudioRepository):
+        self._repo = studio_repo
 
     def delete(self, studio_id: int) -> None:
         """Delete a studio after verifying it has no album references.
@@ -175,18 +136,14 @@ class StudioService:
         Raises:
             ServiceConflict: If any album references the studio.
         """
-        with self._db() as conn:
-            refs = conn.execute(
-                "SELECT COUNT(*) FROM album WHERE studio_id = ?", (studio_id,)
-            ).fetchone()[0]
-            if refs > 0:
-                raise ServiceConflict(
-                    "BUSINESS_CONFLICT",
-                    "The studio is still referenced by albums and cannot be deleted.",
-                    {"album_refs": refs},
-                )
-            conn.execute("DELETE FROM studio WHERE id = ?", (studio_id,))
-            conn.commit()
+        try:
+            self._repo.delete(studio_id)
+        except repo.PersistenceConflict as exc:
+            raise ServiceConflict(
+                "BUSINESS_CONFLICT",
+                "The studio is still referenced by albums and cannot be deleted.",
+                exc.details,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -196,12 +153,12 @@ class StudioService:
 class AlbumService:
     """Workflow owner for album create, update, and delete operations.
 
-    Owns transaction boundaries and audit log writes for material album
-    changes.
+    Owns audit log writes for material album changes; delegates all
+    persistence to AlbumRepository.
     """
 
-    def __init__(self, db_factory, log_fn):
-        self._db = db_factory
+    def __init__(self, album_repo: repo.AlbumRepository, log_fn):
+        self._repo = album_repo
         self._log = log_fn
 
     def create(self, data: dict, models: list, relations: list) -> int:
@@ -211,67 +168,7 @@ class AlbumService:
             The new album's integer id.
         """
         now = _utc_now_iso()
-        new_uuid = str(uuid.uuid4())
-        with self._db() as conn:
-            try:
-                conn.execute("BEGIN")
-                cur = conn.execute(
-                    """
-                    INSERT INTO album
-                        (uuid, studio_id, status_id, title, description, scene, location,
-                         capture_date, publish_date, rating, path, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        new_uuid,
-                        data.get("studio_id"),
-                        data.get("status_id"),
-                        data.get("title"),
-                        data.get("description"),
-                        data.get("scene"),
-                        data.get("location"),
-                        data.get("capture_date"),
-                        data.get("publish_date"),
-                        data.get("rating"),
-                        data.get("path"),
-                        now,
-                        now,
-                    ),
-                )
-                album_id = cur.lastrowid
-                for m in models:
-                    conn.execute(
-                        """
-                        INSERT INTO album_model
-                            (album_id, model_id, age_when_shot, role, remarks)
-                        VALUES (?, ?, ?, ?, ?)
-                        """,
-                        (
-                            album_id,
-                            m.get("model_id"),
-                            m.get("age_when_shot"),
-                            m.get("role"),
-                            m.get("remarks"),
-                        ),
-                    )
-                for r in relations:
-                    conn.execute(
-                        """
-                        INSERT INTO album_relation
-                            (album_id, related_album_id, relation_type, remarks)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (
-                            album_id,
-                            r.get("related_album_id"),
-                            r.get("relation_type"),
-                            r.get("remarks"),
-                        ),
-                    )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
+        album_id = self._repo.create(data, models, relations, now)
         self._log(
             {"timestamp": now, "action": "create_album", "album_id": album_id, "success": True}
         )
@@ -282,69 +179,7 @@ class AlbumService:
     ) -> None:
         """Replace album fields, model list, and relation list atomically."""
         now = _utc_now_iso()
-        with self._db() as conn:
-            try:
-                conn.execute("BEGIN")
-                conn.execute(
-                    """
-                    UPDATE album SET
-                        studio_id = ?, status_id = ?, title = ?, description = ?,
-                        scene = ?, location = ?, capture_date = ?, publish_date = ?,
-                        rating = ?, path = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        data.get("studio_id"),
-                        data.get("status_id"),
-                        data.get("title"),
-                        data.get("description"),
-                        data.get("scene"),
-                        data.get("location"),
-                        data.get("capture_date"),
-                        data.get("publish_date"),
-                        data.get("rating"),
-                        data.get("path"),
-                        now,
-                        album_id,
-                    ),
-                )
-                conn.execute("DELETE FROM album_model WHERE album_id = ?", (album_id,))
-                for m in models:
-                    conn.execute(
-                        """
-                        INSERT INTO album_model
-                            (album_id, model_id, age_when_shot, role, remarks)
-                        VALUES (?, ?, ?, ?, ?)
-                        """,
-                        (
-                            album_id,
-                            m.get("model_id"),
-                            m.get("age_when_shot"),
-                            m.get("role"),
-                            m.get("remarks"),
-                        ),
-                    )
-                conn.execute(
-                    "DELETE FROM album_relation WHERE album_id = ?", (album_id,)
-                )
-                for r in relations:
-                    conn.execute(
-                        """
-                        INSERT INTO album_relation
-                            (album_id, related_album_id, relation_type, remarks)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (
-                            album_id,
-                            r.get("related_album_id"),
-                            r.get("relation_type"),
-                            r.get("remarks"),
-                        ),
-                    )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
+        self._repo.update(album_id, data, models, relations, now)
         self._log(
             {"timestamp": now, "action": "update_album", "album_id": album_id, "success": True}
         )
@@ -352,20 +187,7 @@ class AlbumService:
     def delete(self, album_id: int) -> None:
         """Delete an album and all its associated records atomically."""
         now = _utc_now_iso()
-        with self._db() as conn:
-            try:
-                conn.execute("BEGIN")
-                conn.execute("DELETE FROM album_model WHERE album_id = ?", (album_id,))
-                conn.execute(
-                    "DELETE FROM album_relation WHERE album_id = ? OR related_album_id = ?",
-                    (album_id, album_id),
-                )
-                conn.execute("DELETE FROM photo WHERE album_id = ?", (album_id,))
-                conn.execute("DELETE FROM album WHERE id = ?", (album_id,))
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
+        self._repo.delete(album_id)
         self._log(
             {"timestamp": now, "action": "delete_album", "album_id": album_id, "success": True}
         )
@@ -390,8 +212,13 @@ class WorkspaceAlbumService:
         "belongs_to_album_id", "ai_result", "album_id",
     })
 
-    def __init__(self, db_factory, snapshot_fn, backup_log_fn):
-        self._db = db_factory
+    def __init__(
+        self,
+        workspace_repo: repo.WorkspaceAlbumRepository,
+        snapshot_fn,
+        backup_log_fn,
+    ):
+        self._repo = workspace_repo
         self._snapshot = snapshot_fn
         self._backup_log = backup_log_fn
 
@@ -406,10 +233,6 @@ class WorkspaceAlbumService:
         Raises:
             ValueError: If ``changes`` contains no allowed fields.
         """
-        filtered = {k: v for k, v in changes.items() if k in self.ALLOWED_BATCH_FIELDS}
-        if not filtered:
-            raise ValueError("No valid fields to update were supplied.")
-
         now = _utc_now_iso()
         try:
             snap = self._snapshot("workspace_batch")
@@ -421,18 +244,7 @@ class WorkspaceAlbumService:
                 {"timestamp": now, "reason": "workspace_batch", "ok": False, "error": str(ex), "tag": ""}
             )
 
-        set_clauses = ", ".join(f"{k} = ?" for k in filtered)
-        set_values = list(filtered.values())
-        updated = 0
-        with self._db() as conn:
-            for wa_id in ids:
-                conn.execute(
-                    f"UPDATE workspace_album SET {set_clauses} WHERE id = ?",
-                    set_values + [wa_id],
-                )
-                updated += 1
-            conn.commit()
-        return updated
+        return self._repo.batch_update(ids, self.ALLOWED_BATCH_FIELDS, changes)
 
     def update(self, wa_id: int, changes: dict) -> None:
         """Apply an allowed subset of changes to a single workspace album.
@@ -440,17 +252,7 @@ class WorkspaceAlbumService:
         Raises:
             ValueError: If ``changes`` contains no allowed fields.
         """
-        filtered = {k: v for k, v in changes.items() if k in self.ALLOWED_UPDATE_FIELDS}
-        if not filtered:
-            raise ValueError("No valid fields to update were supplied.")
-        set_clauses = ", ".join(f"{k} = ?" for k in filtered)
-        set_values = list(filtered.values())
-        with self._db() as conn:
-            conn.execute(
-                f"UPDATE workspace_album SET {set_clauses} WHERE id = ?",
-                set_values + [wa_id],
-            )
-            conn.commit()
+        self._repo.update(wa_id, self.ALLOWED_UPDATE_FIELDS, changes)
 
 
 # ---------------------------------------------------------------------------
@@ -498,8 +300,14 @@ def build_archive_path(model_name: str, studio_name: str, album_name: str) -> st
 class ImportService:
     """Workflow owner for album import preview and execution."""
 
-    def __init__(self, db_factory, snapshot_fn, backup_log_fn, change_log_fn):
-        self._db = db_factory
+    def __init__(
+        self,
+        import_repo: repo.ImportRepository,
+        snapshot_fn,
+        backup_log_fn,
+        change_log_fn,
+    ):
+        self._repo = import_repo
         self._snapshot = snapshot_fn
         self._backup_log = backup_log_fn
         self._change_log = change_log_fn
@@ -525,34 +333,9 @@ class ImportService:
             expected_path = build_archive_path(model_name, studio_name, album_name)
             full_path = Path(archive_root) / expected_path
 
-            with self._db() as conn:
-                studio_row = conn.execute(
-                    "SELECT id, name FROM studio WHERE LOWER(name) = LOWER(?)",
-                    (studio_name,),
-                ).fetchone()
-                studio_exists = studio_row is not None
-                studio_id = studio_row["id"] if studio_row else None
-
-                model_row = conn.execute(
-                    "SELECT id FROM model WHERE LOWER(display_name) = LOWER(?) OR LOWER(primary_name) = LOWER(?)",
-                    (model_name, model_name),
-                ).fetchone()
-                model_exists = model_row is not None
-                model_id = model_row["id"] if model_row else None
-
-                album_exists = False
-                album_id = None
-                if studio_id:
-                    album_row = conn.execute(
-                        "SELECT id FROM album WHERE studio_id = ? AND LOWER(title) = LOWER(?)",
-                        (studio_id, album_name),
-                    ).fetchone()
-                    if album_row:
-                        album_exists = True
-                        album_id = album_row["id"]
-
+            lookup = self._repo.lookup_preview_item(studio_name, model_name, album_name)
             path_exists = full_path.exists()
-            can_import = not album_exists and not path_exists
+            can_import = not lookup["album_exists"] and not path_exists
 
             preview_items.append(
                 {
@@ -562,12 +345,12 @@ class ImportService:
                     "studio_name": studio_name,
                     "expected_path": expected_path,
                     "source_path": item.get("source_path", ""),
-                    "model_exists": model_exists,
-                    "model_id": model_id,
-                    "studio_exists": studio_exists,
-                    "studio_id": studio_id,
-                    "album_exists": album_exists,
-                    "album_id": album_id,
+                    "model_exists": lookup["model_exists"],
+                    "model_id": lookup["model_id"],
+                    "studio_exists": lookup["studio_exists"],
+                    "studio_id": lookup["studio_id"],
+                    "album_exists": lookup["album_exists"],
+                    "album_id": lookup["album_id"],
                     "path_exists": path_exists,
                     "can_import": can_import,
                 }
@@ -639,60 +422,17 @@ class ImportService:
 
             try:
                 item_now = _utc_now_iso()
-                with self._db() as conn:
-                    studio_row = conn.execute(
-                        "SELECT id FROM studio WHERE LOWER(name) = LOWER(?)",
-                        (studio_name,),
-                    ).fetchone()
-                    if studio_row:
-                        studio_id = studio_row["id"]
-                    else:
-                        new_uuid = str(uuid.uuid4())
-                        cur = conn.execute(
-                            "INSERT INTO studio (uuid, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                            (new_uuid, studio_name, item_now, item_now),
-                        )
-                        studio_id = cur.lastrowid
+                item_result = self._repo.create_item(
+                    studio_name, model_name, album_name, expected_path, item_now
+                )
+                album_id = item_result["album_id"]
 
-                    model_row = conn.execute(
-                        "SELECT id FROM model WHERE LOWER(display_name) = LOWER(?) OR LOWER(primary_name) = LOWER(?)",
-                        (model_name, model_name),
-                    ).fetchone()
-                    if model_row:
-                        model_id = model_row["id"]
-                    else:
-                        new_uuid = str(uuid.uuid4())
-                        cur = conn.execute(
-                            "INSERT INTO model (uuid, display_name, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                            (new_uuid, model_name, item_now, item_now),
-                        )
-                        model_id = cur.lastrowid
-
-                    album_row = conn.execute(
-                        "SELECT id FROM album WHERE studio_id = ? AND LOWER(title) = LOWER(?)",
-                        (studio_id, album_name),
-                    ).fetchone()
-                    if album_row:
-                        result["skipped"] = True
-                        result["album_id"] = album_row["id"]
-                        skipped += 1
-                        results.append(result)
-                        continue
-
-                    new_uuid = str(uuid.uuid4())
-                    cur = conn.execute(
-                        """
-                        INSERT INTO album (uuid, studio_id, title, path, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (new_uuid, studio_id, album_name, expected_path, item_now, item_now),
-                    )
-                    album_id = cur.lastrowid
-                    conn.execute(
-                        "INSERT INTO album_model (album_id, model_id) VALUES (?, ?)",
-                        (album_id, model_id),
-                    )
-                    conn.commit()
+                if item_result["status"] == "skipped":
+                    result["skipped"] = True
+                    result["album_id"] = album_id
+                    skipped += 1
+                    results.append(result)
+                    continue
 
                 if source_path and Path(source_path).exists():
                     full_dest.mkdir(parents=True, exist_ok=True)
