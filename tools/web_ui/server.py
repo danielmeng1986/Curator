@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import api_contract
+import services as svc
 
 # ---------------------------------------------------------------------------
 # Path constants
@@ -347,32 +348,6 @@ def run_daily_backup() -> None:
             )
         # Sleep at least 60s to avoid double-firing near midnight
         STOP_EVENT.wait(timeout=60)
-
-# ---------------------------------------------------------------------------
-# Import helpers
-# ---------------------------------------------------------------------------
-
-def parse_album_folder_name(folder_name: str) -> tuple[str, str]:
-    m = ALBUM_FOLDER_RE.match(folder_name.strip())
-    if m:
-        return m.group(1).strip(), m.group(2).strip()
-    return "", folder_name.strip()
-
-
-def alphabet_for_model(model_name: str) -> str:
-    if not model_name:
-        return "_"
-    first = model_name[0]
-    if first.isalpha():
-        return first.upper()
-    if first.isdigit():
-        return "0-9"
-    return "_"
-
-
-def build_archive_path(model_name: str, studio_name: str, album_name: str) -> str:
-    alpha = alphabet_for_model(model_name)
-    return f"{alpha}/{model_name}/p/{studio_name}/{album_name}"
 
 # ---------------------------------------------------------------------------
 # AppHandler
@@ -1043,69 +1018,10 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(201, {"id": cur.lastrowid, "studio": dict(row)})
 
     def _post_album(self, body: dict):
-        now = utc_now_iso()
-        new_uuid = str(uuid.uuid4())
+        album_service = svc.AlbumService(db_factory=open_db, log_fn=append_log)
         models = body.get("models", [])
         relations = body.get("relations", [])
-        with open_db() as conn:
-            try:
-                conn.execute("BEGIN")
-                cur = conn.execute(
-                    """
-                    INSERT INTO album
-                        (uuid, studio_id, status_id, title, description, scene, location,
-                         capture_date, publish_date, rating, path, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        new_uuid,
-                        body.get("studio_id"),
-                        body.get("status_id"),
-                        body.get("title"),
-                        body.get("description"),
-                        body.get("scene"),
-                        body.get("location"),
-                        body.get("capture_date"),
-                        body.get("publish_date"),
-                        body.get("rating"),
-                        body.get("path"),
-                        now,
-                        now,
-                    ),
-                )
-                album_id = cur.lastrowid
-                for m in models:
-                    conn.execute(
-                        """
-                        INSERT INTO album_model (album_id, model_id, age_when_shot, role, remarks)
-                        VALUES (?, ?, ?, ?, ?)
-                        """,
-                        (
-                            album_id,
-                            m.get("model_id"),
-                            m.get("age_when_shot"),
-                            m.get("role"),
-                            m.get("remarks"),
-                        ),
-                    )
-                for r in relations:
-                    conn.execute(
-                        """
-                        INSERT INTO album_relation (album_id, related_album_id, relation_type, remarks)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (
-                            album_id,
-                            r.get("related_album_id"),
-                            r.get("relation_type"),
-                            r.get("remarks"),
-                        ),
-                    )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-        append_log({"timestamp": now, "action": "create_album", "album_id": album_id, "success": True})
+        album_id = album_service.create(body, models, relations)
         self._send_success(201, {"id": album_id})
 
     def _post_album_model(self, album_id: int, body: dict):
@@ -1174,44 +1090,16 @@ class AppHandler(SimpleHTTPRequestHandler):
         if not ids:
             self._send_error(400, "REQUEST_MISSING_FIELD", "The 'ids' field is required.")
             return
-
-        allowed = {
-            "status_id", "studio_name", "album_name", "primary_model",
-            "additional_models", "remark", "expected_path", "ai_result",
-            "belongs_to_album_id", "album_id",
-        }
-        filtered = {k: v for k, v in changes.items() if k in allowed}
-        if not filtered:
-            self._send_error(400, "REQUEST_INVALID", "No valid fields to update were supplied.")
-            return
-
+        workspace_service = svc.WorkspaceAlbumService(
+            db_factory=open_db,
+            snapshot_fn=create_db_snapshot,
+            backup_log_fn=append_backup_log,
+        )
         try:
-            snap = create_db_snapshot("workspace_batch")
-            append_backup_log(
-                {
-                    "timestamp": utc_now_iso(),
-                    "reason": "workspace_batch",
-                    "ok": True,
-                    "snapshot": str(snap),
-                    "tag": "",
-                }
-            )
-        except Exception as ex:
-            append_backup_log(
-                {"timestamp": utc_now_iso(), "reason": "workspace_batch", "ok": False, "error": str(ex), "tag": ""}
-            )
-
-        set_clauses = ", ".join(f"{k} = ?" for k in filtered)
-        set_values = list(filtered.values())
-        updated = 0
-        with open_db() as conn:
-            for wa_id in ids:
-                conn.execute(
-                    f"UPDATE workspace_album SET {set_clauses} WHERE id = ?",
-                    set_values + [wa_id],
-                )
-                updated += 1
-            conn.commit()
+            updated = workspace_service.batch_update(ids, changes)
+        except ValueError as exc:
+            self._send_error(400, "REQUEST_INVALID", str(exc))
+            return
         self._send_success(200, {"updated": updated})
 
     def _post_import_preview(self, body: dict):
@@ -1221,82 +1109,14 @@ class AppHandler(SimpleHTTPRequestHandler):
         archive_root = APP_CONFIG.get("archive_root", "")
         default_studio = APP_CONFIG.get("default_import_studio", "")
 
-        preview_items = []
-        for item in items_in:
-            folder_name = item.get("folder_name", "")
-            studio_name = item.get("studio_name") or default_studio
-            model_name = item.get("model_name", "")
-            album_name = item.get("album_name", "")
-
-            if not model_name and not album_name and folder_name:
-                model_name, album_name = parse_album_folder_name(folder_name)
-
-            expected_path = build_archive_path(model_name, studio_name, album_name)
-            full_path = Path(archive_root) / expected_path
-
-            with open_db() as conn:
-                studio_row = conn.execute(
-                    "SELECT id, name FROM studio WHERE LOWER(name) = LOWER(?)",
-                    (studio_name,),
-                ).fetchone()
-                studio_exists = studio_row is not None
-                studio_id = studio_row["id"] if studio_row else None
-
-                model_row = conn.execute(
-                    "SELECT id FROM model WHERE LOWER(display_name) = LOWER(?) OR LOWER(primary_name) = LOWER(?)",
-                    (model_name, model_name),
-                ).fetchone()
-                model_exists = model_row is not None
-                model_id = model_row["id"] if model_row else None
-
-                album_exists = False
-                album_id = None
-                if studio_id:
-                    album_row = conn.execute(
-                        "SELECT id FROM album WHERE studio_id = ? AND LOWER(title) = LOWER(?)",
-                        (studio_id, album_name),
-                    ).fetchone()
-                    if album_row:
-                        album_exists = True
-                        album_id = album_row["id"]
-
-            path_exists = full_path.exists()
-            can_import = not album_exists and not path_exists
-
-            preview_items.append(
-                {
-                    "folder_name": folder_name,
-                    "model_name": model_name,
-                    "album_name": album_name,
-                    "studio_name": studio_name,
-                    "expected_path": expected_path,
-                    "source_path": item.get("source_path", ""),
-                    "model_exists": model_exists,
-                    "model_id": model_id,
-                    "studio_exists": studio_exists,
-                    "studio_id": studio_id,
-                    "album_exists": album_exists,
-                    "album_id": album_id,
-                    "path_exists": path_exists,
-                    "can_import": can_import,
-                }
-            )
-
-        total = len(preview_items)
-        importable = sum(1 for x in preview_items if x["can_import"])
-        self._send_success(
-            200,
-            {
-                "preview": {
-                    "items": preview_items,
-                    "summary": {
-                        "total": total,
-                        "importable": importable,
-                        "skipped": total - importable,
-                    },
-                },
-            },
+        import_service = svc.ImportService(
+            db_factory=open_db,
+            snapshot_fn=create_db_snapshot,
+            backup_log_fn=append_backup_log,
+            change_log_fn=append_log,
         )
+        preview = import_service.preview(items_in, archive_root, default_studio)
+        self._send_success(200, {"preview": preview})
 
     def _post_import_execute(self, body: dict):
         items_in = body.get("items", [])
@@ -1309,275 +1129,66 @@ class AppHandler(SimpleHTTPRequestHandler):
         archive_root = APP_CONFIG.get("archive_root", "")
         default_studio = APP_CONFIG.get("default_import_studio", "")
 
-        try:
-            snap = create_db_snapshot("import")
-            append_backup_log(
-                {
-                    "timestamp": utc_now_iso(),
-                    "reason": "import",
-                    "ok": True,
-                    "snapshot": str(snap),
-                    "tag": "",
-                }
-            )
-        except Exception as ex:
-            append_backup_log(
-                {"timestamp": utc_now_iso(), "reason": "import", "ok": False, "error": str(ex), "tag": ""}
-            )
-
-        results = []
-        created_albums = 0
-        skipped = 0
-        errors = 0
-
-        for item in items_in:
-            folder_name = item.get("folder_name", "")
-            studio_name = item.get("studio_name") or default_studio
-            model_name = item.get("model_name", "")
-            album_name = item.get("album_name", "")
-            source_path = item.get("source_path", "")
-
-            if not model_name and not album_name and folder_name:
-                model_name, album_name = parse_album_folder_name(folder_name)
-
-            expected_path = build_archive_path(model_name, studio_name, album_name)
-            full_dest = Path(archive_root) / expected_path
-
-            result: dict = {
-                "folder_name": folder_name,
-                "model_name": model_name,
-                "album_name": album_name,
-                "studio_name": studio_name,
-                "expected_path": expected_path,
-                "ok": False,
-                "skipped": False,
-                "error": None,
-            }
-
-            try:
-                now = utc_now_iso()
-                with open_db() as conn:
-                    # Find or create studio
-                    studio_row = conn.execute(
-                        "SELECT id FROM studio WHERE LOWER(name) = LOWER(?)",
-                        (studio_name,),
-                    ).fetchone()
-                    if studio_row:
-                        studio_id = studio_row["id"]
-                    else:
-                        new_uuid = str(uuid.uuid4())
-                        cur = conn.execute(
-                            "INSERT INTO studio (uuid, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                            (new_uuid, studio_name, now, now),
-                        )
-                        studio_id = cur.lastrowid
-
-                    # Find or create model
-                    model_row = conn.execute(
-                        "SELECT id FROM model WHERE LOWER(display_name) = LOWER(?) OR LOWER(primary_name) = LOWER(?)",
-                        (model_name, model_name),
-                    ).fetchone()
-                    if model_row:
-                        model_id = model_row["id"]
-                    else:
-                        new_uuid = str(uuid.uuid4())
-                        cur = conn.execute(
-                            "INSERT INTO model (uuid, display_name, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                            (new_uuid, model_name, now, now),
-                        )
-                        model_id = cur.lastrowid
-
-                    # Check if album exists
-                    album_row = conn.execute(
-                        "SELECT id FROM album WHERE studio_id = ? AND LOWER(title) = LOWER(?)",
-                        (studio_id, album_name),
-                    ).fetchone()
-                    if album_row:
-                        result["skipped"] = True
-                        result["album_id"] = album_row["id"]
-                        skipped += 1
-                        results.append(result)
-                        continue
-
-                    # Create album
-                    new_uuid = str(uuid.uuid4())
-                    cur = conn.execute(
-                        """
-                        INSERT INTO album
-                            (uuid, studio_id, title, path, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (new_uuid, studio_id, album_name, expected_path, now, now),
-                    )
-                    album_id = cur.lastrowid
-
-                    # Create album_model
-                    conn.execute(
-                        "INSERT INTO album_model (album_id, model_id) VALUES (?, ?)",
-                        (album_id, model_id),
-                    )
-                    conn.commit()
-
-                # Move files if source provided
-                if source_path and Path(source_path).exists():
-                    full_dest.mkdir(parents=True, exist_ok=True)
-                    shutil.copytree(source_path, str(full_dest), dirs_exist_ok=True)
-
-                result["ok"] = True
-                result["album_id"] = album_id
-                created_albums += 1
-                append_log(
-                    {
-                        "timestamp": now,
-                        "action": "import_album",
-                        "album_id": album_id,
-                        "model_name": model_name,
-                        "studio_name": studio_name,
-                        "success": True,
-                    }
-                )
-            except Exception as ex:
-                result["error"] = str(ex)
-                errors += 1
-
-            results.append(result)
-
-        self._send_success(
-            200,
-            {
-                "results": results,
-                "summary": {
-                    "total": len(items_in),
-                    "created": created_albums,
-                    "skipped": skipped,
-                    "errors": errors,
-                },
-            },
+        import_service = svc.ImportService(
+            db_factory=open_db,
+            snapshot_fn=create_db_snapshot,
+            backup_log_fn=append_backup_log,
+            change_log_fn=append_log,
         )
+        result = import_service.execute(items_in, archive_root, default_studio)
+        self._send_success(200, result)
 
     def _post_backup(self, body: dict):
         reason = body.get("reason", "manual")
         tag = body.get("tag", "")
+        backup_service = svc.BackupService(
+            snapshot_fn=create_db_snapshot,
+            restore_fn=restore_database_from_snapshot,
+            backup_log_fn=append_backup_log,
+            rollback_log_fn=append_rollback_log,
+            catalog_fn=build_backup_catalog,
+            last_change_fn=get_last_success_change_entry,
+            public_item_fn=public_backup_item,
+            parse_tag_fn=parse_tag_from_name,
+            cleanup_fn=cleanup_expired_snapshots,
+        )
         try:
-            snap = create_db_snapshot(reason, tag)
-            entry = {
-                "timestamp": utc_now_iso(),
-                "reason": reason,
-                "ok": True,
-                "snapshot": str(snap),
-                "tag": tag,
-            }
-            append_backup_log(entry)
-            self._send_success(200, {"snapshot": str(snap), "filename": snap.name})
+            result = backup_service.create(reason, tag)
+            self._send_success(200, result)
         except Exception as ex:
-            append_backup_log(
-                {"timestamp": utc_now_iso(), "reason": reason, "ok": False, "error": str(ex), "tag": tag}
-            )
+            backup_service.create_failed(reason, tag, ex)
             self._send_error(500, "INTERNAL_ERROR", "The backup operation failed.")
 
     def _post_backup_cleanup(self):
         result = cleanup_expired_snapshots(RETENTION_DAYS)
         self._send_success(200, result)
-
     def _post_rollback(self, body: dict):
         mode = body.get("mode", "")
-        selected = None
-
-        if mode == "snapshot":
-            snap_path_str = body.get("snapshot", "")
-            if not snap_path_str:
-                self._send_error(400, "REQUEST_MISSING_FIELD", "The 'snapshot' path is required.")
-                return
-            snap_path = Path(snap_path_str)
-            if not snap_path.exists():
-                self._send_error(404, "NOT_FOUND", "The specified snapshot was not found.")
-                return
-            catalog = build_backup_catalog()
-            for item in catalog:
-                if Path(item["path"]).resolve() == snap_path.resolve():
-                    selected = item
-                    break
-            if selected is None:
-                selected = {
-                    "path": str(snap_path),
-                    "filename": snap_path.name,
-                    "tag": parse_tag_from_name(snap_path),
-                    "created_at": None,
-                }
-        elif mode == "tag":
-            tag = body.get("tag", "").strip()
-            if not tag:
-                self._send_error(400, "REQUEST_MISSING_FIELD", "The 'tag' field is required.")
-                return
-            selected = find_snapshot_by_tag(tag)
-            if selected is None:
-                self._send_error(404, "NOT_FOUND", "No snapshot found with the specified tag.")
-                return
-        elif mode == "before_last_operation":
-            last_entry = get_last_success_change_entry()
-            if last_entry is None:
-                self._send_error(404, "NOT_FOUND", "No successful change entry was found.")
-                return
-            ts_str = last_entry.get("timestamp", "")
-            try:
-                target_dt = parse_iso_datetime(ts_str)
-            except Exception:
-                self._send_error(400, "REQUEST_INVALID", "The timestamp from the last change entry could not be parsed.")
-                return
-            selected = find_snapshot_before_or_at(target_dt)
-            if selected is None:
-                self._send_error(404, "NOT_FOUND", "No snapshot was found before the last operation.")
-                return
-        else:
+        if not mode:
             self._send_error(400, "REQUEST_INVALID", "The rollback mode is not recognised.")
             return
-
-        snap_path = Path(selected["path"])
-        if not snap_path.exists():
-            self._send_error(404, "NOT_FOUND", "The snapshot file no longer exists.")
+        backup_service = svc.BackupService(
+            snapshot_fn=create_db_snapshot,
+            restore_fn=restore_database_from_snapshot,
+            backup_log_fn=append_backup_log,
+            rollback_log_fn=append_rollback_log,
+            catalog_fn=build_backup_catalog,
+            last_change_fn=get_last_success_change_entry,
+            public_item_fn=public_backup_item,
+            parse_tag_fn=parse_tag_from_name,
+        )
+        try:
+            result = backup_service.rollback(mode, body)
+        except ValueError as exc:
+            self._send_error(400, "REQUEST_INVALID", str(exc))
             return
-
-        # Create safety backup before rolling back
-        try:
-            safety = create_db_snapshot("pre_rollback")
-            append_backup_log(
-                {
-                    "timestamp": utc_now_iso(),
-                    "reason": "pre_rollback",
-                    "ok": True,
-                    "snapshot": str(safety),
-                    "tag": "",
-                }
-            )
-        except Exception as ex:
-            append_backup_log(
-                {"timestamp": utc_now_iso(), "reason": "pre_rollback", "ok": False, "error": str(ex), "tag": ""}
-            )
-
-        try:
-            restore_database_from_snapshot(snap_path)
-        except Exception as ex:
-            append_rollback_log(
-                {
-                    "timestamp": utc_now_iso(),
-                    "mode": mode,
-                    "snapshot": str(snap_path),
-                    "ok": False,
-                    "error": str(ex),
-                }
-            )
+        except svc.ServiceNotFound as exc:
+            self._send_error(404, "NOT_FOUND", str(exc))
+            return
+        except Exception:
             self._send_error(500, "INTERNAL_ERROR", "The restore operation failed.")
             return
-
-        append_rollback_log(
-            {
-                "timestamp": utc_now_iso(),
-                "mode": mode,
-                "snapshot": str(snap_path),
-                "ok": True,
-            }
-        )
-        self._send_success(200, {"selected_snapshot": public_backup_item(selected)})
+        self._send_success(200, result)
 
     # ------------------------------------------------------------------
     # PUT handlers
@@ -1634,37 +1245,13 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, {"status": dict(row)})
 
     def _put_model(self, model_id: int, body: dict):
-        now = utc_now_iso()
-        with open_db() as conn:
-            conn.execute(
-                """
-                UPDATE model SET
-                    display_name = ?, primary_name = ?, description = ?,
-                    country = ?, ethnicity = ?, eye_color = ?, natural_hair_color = ?,
-                    updated_at = ?
-                WHERE id = ?
-                """,
-                (
-                    body.get("display_name"),
-                    body.get("primary_name"),
-                    body.get("description"),
-                    body.get("country"),
-                    body.get("ethnicity"),
-                    body.get("eye_color"),
-                    body.get("natural_hair_color"),
-                    now,
-                    model_id,
-                ),
-            )
-            conn.commit()
-            row = conn.execute(
-                "SELECT * FROM model WHERE id = ?", (model_id,)
-            ).fetchone()
-        if row is None:
+        model_service = svc.ModelService(db_factory=open_db, log_fn=append_log)
+        try:
+            row = model_service.update_fields(model_id, body)
+        except svc.ServiceNotFound:
             self._send_error(404, "NOT_FOUND", "Model not found.")
             return
-        append_log({"timestamp": now, "action": "update_model", "model_id": model_id, "success": True})
-        self._send_success(200, {"model": dict(row)})
+        self._send_success(200, {"model": row})
 
     def _put_studio(self, studio_id: int, body: dict):
         now = utc_now_iso()
@@ -1694,52 +1281,10 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, {"studio": dict(row)})
 
     def _put_album(self, album_id: int, body: dict):
-        now = utc_now_iso()
+        album_service = svc.AlbumService(db_factory=open_db, log_fn=append_log)
         models = body.get("models", [])
         relations = body.get("relations", [])
-        with open_db() as conn:
-            try:
-                conn.execute("BEGIN")
-                conn.execute(
-                    """
-                    UPDATE album SET
-                        studio_id = ?, status_id = ?, title = ?, description = ?,
-                        scene = ?, location = ?, capture_date = ?, publish_date = ?,
-                        rating = ?, path = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        body.get("studio_id"),
-                        body.get("status_id"),
-                        body.get("title"),
-                        body.get("description"),
-                        body.get("scene"),
-                        body.get("location"),
-                        body.get("capture_date"),
-                        body.get("publish_date"),
-                        body.get("rating"),
-                        body.get("path"),
-                        now,
-                        album_id,
-                    ),
-                )
-                conn.execute("DELETE FROM album_model WHERE album_id = ?", (album_id,))
-                for m in models:
-                    conn.execute(
-                        "INSERT INTO album_model (album_id, model_id, age_when_shot, role, remarks) VALUES (?, ?, ?, ?, ?)",
-                        (album_id, m.get("model_id"), m.get("age_when_shot"), m.get("role"), m.get("remarks")),
-                    )
-                conn.execute("DELETE FROM album_relation WHERE album_id = ?", (album_id,))
-                for r in relations:
-                    conn.execute(
-                        "INSERT INTO album_relation (album_id, related_album_id, relation_type, remarks) VALUES (?, ?, ?, ?)",
-                        (album_id, r.get("related_album_id"), r.get("relation_type"), r.get("remarks")),
-                    )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-        append_log({"timestamp": now, "action": "update_album", "album_id": album_id, "success": True})
+        album_service.update(album_id, body, models, relations)
         self._send_success(200, None)
 
     def _put_album_model(self, album_id: int, am_id: int, body: dict):
@@ -1787,23 +1332,16 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, None)
 
     def _put_workspace_album(self, wa_id: int, body: dict):
-        allowed = {
-            "current_path", "expected_path", "primary_model", "studio_name",
-            "album_name", "additional_models", "status_id", "remark",
-            "belongs_to_album_id", "ai_result", "album_id",
-        }
-        filtered = {k: v for k, v in body.items() if k in allowed}
-        if not filtered:
-            self._send_error(400, "REQUEST_INVALID", "No valid fields to update were supplied.")
+        workspace_service = svc.WorkspaceAlbumService(
+            db_factory=open_db,
+            snapshot_fn=create_db_snapshot,
+            backup_log_fn=append_backup_log,
+        )
+        try:
+            workspace_service.update(wa_id, body)
+        except ValueError as exc:
+            self._send_error(400, "REQUEST_INVALID", str(exc))
             return
-        set_clauses = ", ".join(f"{k} = ?" for k in filtered)
-        set_values = list(filtered.values())
-        with open_db() as conn:
-            conn.execute(
-                f"UPDATE workspace_album SET {set_clauses} WHERE id = ?",
-                set_values + [wa_id],
-            )
-            conn.commit()
         self._send_success(200, None)
 
     # ------------------------------------------------------------------
@@ -1843,76 +1381,35 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 
     def _delete_status(self, status_id: int):
-        with open_db() as conn:
-            album_refs = conn.execute(
-                "SELECT COUNT(*) FROM album WHERE status_id = ?", (status_id,)
-            ).fetchone()[0]
-            wa_refs = conn.execute(
-                "SELECT COUNT(*) FROM workspace_album WHERE status_id = ?", (status_id,)
-            ).fetchone()[0]
-            if album_refs > 0 or wa_refs > 0:
-                self._send_error(
-                    409,
-                    "BUSINESS_CONFLICT",
-                    "The status is still referenced and cannot be deleted.",
-                    details={"album_refs": album_refs, "workspace_album_refs": wa_refs},
-                )
-                return
-            conn.execute("DELETE FROM status WHERE id = ?", (status_id,))
-            conn.commit()
+        status_service = svc.StatusService(db_factory=open_db)
+        try:
+            status_service.delete(status_id)
+        except svc.ServiceConflict as exc:
+            self._send_error(409, exc.code, str(exc), details=exc.details)
+            return
         self._send_success(200, None)
 
     def _delete_model(self, model_id: int):
-        with open_db() as conn:
-            refs = conn.execute(
-                "SELECT COUNT(*) FROM album_model WHERE model_id = ?", (model_id,)
-            ).fetchone()[0]
-            if refs > 0:
-                self._send_error(
-                    409,
-                    "BUSINESS_CONFLICT",
-                    "The model is still referenced by albums and cannot be deleted.",
-                    details={"album_refs": refs},
-                )
-                return
-            conn.execute("DELETE FROM model WHERE id = ?", (model_id,))
-            conn.commit()
+        model_service = svc.ModelService(db_factory=open_db)
+        try:
+            model_service.delete(model_id)
+        except svc.ServiceConflict as exc:
+            self._send_error(409, exc.code, str(exc), details=exc.details)
+            return
         self._send_success(200, None)
 
     def _delete_studio(self, studio_id: int):
-        with open_db() as conn:
-            refs = conn.execute(
-                "SELECT COUNT(*) FROM album WHERE studio_id = ?", (studio_id,)
-            ).fetchone()[0]
-            if refs > 0:
-                self._send_error(
-                    409,
-                    "BUSINESS_CONFLICT",
-                    "The studio is still referenced by albums and cannot be deleted.",
-                    details={"album_refs": refs},
-                )
-                return
-            conn.execute("DELETE FROM studio WHERE id = ?", (studio_id,))
-            conn.commit()
+        studio_service = svc.StudioService(db_factory=open_db)
+        try:
+            studio_service.delete(studio_id)
+        except svc.ServiceConflict as exc:
+            self._send_error(409, exc.code, str(exc), details=exc.details)
+            return
         self._send_success(200, None)
 
     def _delete_album(self, album_id: int):
-        now = utc_now_iso()
-        with open_db() as conn:
-            try:
-                conn.execute("BEGIN")
-                conn.execute("DELETE FROM album_model WHERE album_id = ?", (album_id,))
-                conn.execute(
-                    "DELETE FROM album_relation WHERE album_id = ? OR related_album_id = ?",
-                    (album_id, album_id),
-                )
-                conn.execute("DELETE FROM photo WHERE album_id = ?", (album_id,))
-                conn.execute("DELETE FROM album WHERE id = ?", (album_id,))
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-        append_log({"timestamp": now, "action": "delete_album", "album_id": album_id, "success": True})
+        album_service = svc.AlbumService(db_factory=open_db, log_fn=append_log)
+        album_service.delete(album_id)
         self._send_success(200, None)
 
     def _delete_album_model(self, album_id: int, am_id: int):
