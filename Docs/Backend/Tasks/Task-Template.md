@@ -1,6 +1,6 @@
-# Backend Task Template
+# BT-[NNN] — [Short task title]
 
-> Copy this file to `BT-<three-digit-sequence>-<short-kebab-case-title>.md`. Replace all bracketed placeholders. Remove guidance that does not apply; do not omit a required section.
+> Copy this file to `BT-<three-digit-sequence>-<short-kebab-case-title>.md`. Replace the top-level title and all bracketed placeholders. Remove guidance that does not apply; do not omit a required section.
 
 ## Task ID
 
