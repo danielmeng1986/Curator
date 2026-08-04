@@ -13,6 +13,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -1282,8 +1283,408 @@ class TestBackupServiceRollback(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# WorkspaceAlbumService — lifecycle transitions (BT-007)
+# Snapshot policy functions (BT-011)
 # ---------------------------------------------------------------------------
+
+class TestAssessOperationRisk(unittest.TestCase):
+    """Module-level assess_operation_risk() pure function."""
+
+    # --- always-high-risk operations ---
+
+    def test_data_migration_always_requires_snapshot(self):
+        required, _ = svc.assess_operation_risk(svc.SNAP_OP_DATA_MIGRATION)
+        self.assertTrue(required)
+
+    def test_data_migration_returns_high_risk_class(self):
+        _, cls = svc.assess_operation_risk(svc.SNAP_OP_DATA_MIGRATION)
+        self.assertEqual(cls, svc.SNAP_RETENTION_HIGH_RISK)
+
+    def test_restore_always_requires_snapshot(self):
+        required, _ = svc.assess_operation_risk(svc.SNAP_OP_RESTORE)
+        self.assertTrue(required)
+
+    def test_restore_returns_high_risk_class(self):
+        _, cls = svc.assess_operation_risk(svc.SNAP_OP_RESTORE)
+        self.assertEqual(cls, svc.SNAP_RETENTION_HIGH_RISK)
+
+    def test_always_high_risk_independent_of_item_count(self):
+        # Even with zero items, always-high-risk operations require a snapshot.
+        required, _ = svc.assess_operation_risk(svc.SNAP_OP_DATA_MIGRATION, item_count=0)
+        self.assertTrue(required)
+
+    # --- conditionally-high-risk: above threshold ---
+
+    def test_bulk_import_above_threshold_requires_snapshot(self):
+        required, _ = svc.assess_operation_risk(
+            svc.SNAP_OP_BULK_IMPORT, item_count=svc.SNAP_BULK_THRESHOLD
+        )
+        self.assertTrue(required)
+
+    def test_bulk_import_above_threshold_returns_high_risk_class(self):
+        _, cls = svc.assess_operation_risk(
+            svc.SNAP_OP_BULK_IMPORT, item_count=svc.SNAP_BULK_THRESHOLD
+        )
+        self.assertEqual(cls, svc.SNAP_RETENTION_HIGH_RISK)
+
+    def test_bulk_delete_above_threshold_requires_snapshot(self):
+        required, _ = svc.assess_operation_risk(
+            svc.SNAP_OP_BULK_DELETE, item_count=svc.SNAP_BULK_THRESHOLD + 1
+        )
+        self.assertTrue(required)
+
+    def test_bulk_rename_above_threshold_requires_snapshot(self):
+        required, _ = svc.assess_operation_risk(
+            svc.SNAP_OP_BULK_RENAME, item_count=svc.SNAP_BULK_THRESHOLD
+        )
+        self.assertTrue(required)
+
+    def test_bulk_quarantine_above_threshold_requires_snapshot(self):
+        required, _ = svc.assess_operation_risk(
+            svc.SNAP_OP_BULK_QUARANTINE, item_count=svc.SNAP_BULK_THRESHOLD
+        )
+        self.assertTrue(required)
+
+    def test_workspace_promotion_above_threshold_requires_snapshot(self):
+        required, _ = svc.assess_operation_risk(
+            svc.SNAP_OP_WORKSPACE_PROMOTION, item_count=svc.SNAP_BULK_THRESHOLD
+        )
+        self.assertTrue(required)
+
+    def test_relationship_rebuild_above_threshold_requires_snapshot(self):
+        required, _ = svc.assess_operation_risk(
+            svc.SNAP_OP_RELATIONSHIP_REBUILD, item_count=svc.SNAP_BULK_THRESHOLD
+        )
+        self.assertTrue(required)
+
+    # --- conditionally-high-risk: below threshold ---
+
+    def test_bulk_import_below_threshold_no_snapshot(self):
+        required, _ = svc.assess_operation_risk(
+            svc.SNAP_OP_BULK_IMPORT, item_count=svc.SNAP_BULK_THRESHOLD - 1
+        )
+        self.assertFalse(required)
+
+    def test_bulk_import_below_threshold_returns_ordinary_class(self):
+        _, cls = svc.assess_operation_risk(
+            svc.SNAP_OP_BULK_IMPORT, item_count=0
+        )
+        self.assertEqual(cls, svc.SNAP_RETENTION_ORDINARY)
+
+    def test_bulk_delete_below_threshold_no_snapshot(self):
+        required, _ = svc.assess_operation_risk(
+            svc.SNAP_OP_BULK_DELETE, item_count=0
+        )
+        self.assertFalse(required)
+
+    # --- ordinary operations ---
+
+    def test_unknown_operation_type_no_snapshot(self):
+        required, _ = svc.assess_operation_risk("crud_update")
+        self.assertFalse(required)
+
+    def test_unknown_operation_type_returns_ordinary_class(self):
+        _, cls = svc.assess_operation_risk("crud_update")
+        self.assertEqual(cls, svc.SNAP_RETENTION_ORDINARY)
+
+    def test_empty_string_operation_type_no_snapshot(self):
+        required, _ = svc.assess_operation_risk("")
+        self.assertFalse(required)
+
+    # --- BackupService.assess() wrapper ---
+
+    def test_service_assess_snapshot_required_key(self):
+        svc_obj = _minimal_backup_service()
+        result = svc_obj.assess(svc.SNAP_OP_DATA_MIGRATION)
+        self.assertIn("snapshot_required", result)
+        self.assertTrue(result["snapshot_required"])
+
+    def test_service_assess_retention_class_key(self):
+        svc_obj = _minimal_backup_service()
+        result = svc_obj.assess(svc.SNAP_OP_DATA_MIGRATION)
+        self.assertIn("retention_class", result)
+        self.assertEqual(result["retention_class"], svc.SNAP_RETENTION_HIGH_RISK)
+
+    def test_service_assess_below_threshold_not_required(self):
+        svc_obj = _minimal_backup_service()
+        result = svc_obj.assess(svc.SNAP_OP_BULK_IMPORT, item_count=0)
+        self.assertFalse(result["snapshot_required"])
+
+
+def _minimal_backup_service():
+    """Return a BackupService with no-op callables for all dependencies."""
+    snap_path = MagicMock()
+    snap_path.name = "Curator_test.db"
+    snap_path.__str__ = lambda s: "/tmp/Curator_test.db"
+    return svc.BackupService(
+        snapshot_fn=lambda r, t="": snap_path,
+        restore_fn=MagicMock(),
+        backup_log_fn=lambda _: None,
+        rollback_log_fn=lambda _: None,
+        catalog_fn=lambda: [],
+        last_change_fn=lambda: None,
+        public_item_fn=lambda x: x,
+        parse_tag_fn=lambda p: "",
+    )
+
+
+class TestIsRetentionEligible(unittest.TestCase):
+    """Module-level is_retention_eligible() pure function."""
+
+    def _record(self, *, created_at, retention_class="ordinary", protection_state="unprotected"):
+        return {
+            "created_at": created_at,
+            "retention_class": retention_class,
+            "protection_state": protection_state,
+        }
+
+    def _now(self):
+        from datetime import timezone
+        return datetime(2024, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+    # --- ordinary retention (30 days) ---
+
+    def test_ordinary_exactly_30_days_is_eligible(self):
+        from datetime import timedelta, timezone
+        created = datetime(2024, 5, 2, 0, 0, 0, tzinfo=timezone.utc)  # 30 days before now
+        record = self._record(created_at=created.isoformat())
+        self.assertTrue(svc.is_retention_eligible(record, now=self._now()))
+
+    def test_ordinary_29_days_is_not_eligible(self):
+        from datetime import timedelta, timezone
+        created = datetime(2024, 5, 3, 0, 0, 0, tzinfo=timezone.utc)  # 29 days before now
+        record = self._record(created_at=created.isoformat())
+        self.assertFalse(svc.is_retention_eligible(record, now=self._now()))
+
+    def test_ordinary_60_days_is_eligible(self):
+        from datetime import timezone
+        created = datetime(2024, 4, 1, 0, 0, 0, tzinfo=timezone.utc)  # 61 days before now
+        record = self._record(created_at=created.isoformat())
+        self.assertTrue(svc.is_retention_eligible(record, now=self._now()))
+
+    # --- high-risk retention (180 days) ---
+
+    def test_high_risk_exactly_180_days_is_eligible(self):
+        from datetime import timezone
+        created = datetime(2023, 12, 4, 0, 0, 0, tzinfo=timezone.utc)  # 179 days before Jun 1 2024
+        # Adjust: 180 days before Jun 1 2024 = Dec 4 2023
+        created = datetime(2023, 12, 4, 0, 0, 0, tzinfo=timezone.utc)
+        # Jun 1 - 180 days = Dec 4, so that should be exactly 179 days. Let me use
+        # a precise computation.
+        from datetime import timedelta
+        created = self._now() - timedelta(days=180)
+        record = self._record(
+            created_at=created.isoformat(),
+            retention_class=svc.SNAP_RETENTION_HIGH_RISK,
+        )
+        self.assertTrue(svc.is_retention_eligible(record, now=self._now()))
+
+    def test_high_risk_179_days_is_not_eligible(self):
+        from datetime import timedelta
+        created = self._now() - timedelta(days=179)
+        record = self._record(
+            created_at=created.isoformat(),
+            retention_class=svc.SNAP_RETENTION_HIGH_RISK,
+        )
+        self.assertFalse(svc.is_retention_eligible(record, now=self._now()))
+
+    def test_high_risk_200_days_is_eligible(self):
+        from datetime import timedelta
+        created = self._now() - timedelta(days=200)
+        record = self._record(
+            created_at=created.isoformat(),
+            retention_class=svc.SNAP_RETENTION_HIGH_RISK,
+        )
+        self.assertTrue(svc.is_retention_eligible(record, now=self._now()))
+
+    # --- protected snapshots (never eligible) ---
+
+    def test_protected_ordinary_expired_is_not_eligible(self):
+        from datetime import timedelta
+        created = self._now() - timedelta(days=60)
+        record = self._record(
+            created_at=created.isoformat(),
+            protection_state=svc.SNAP_PROTECTION_PROTECTED,
+        )
+        self.assertFalse(svc.is_retention_eligible(record, now=self._now()))
+
+    def test_protected_high_risk_expired_is_not_eligible(self):
+        from datetime import timedelta
+        created = self._now() - timedelta(days=200)
+        record = self._record(
+            created_at=created.isoformat(),
+            retention_class=svc.SNAP_RETENTION_HIGH_RISK,
+            protection_state=svc.SNAP_PROTECTION_PROTECTED,
+        )
+        self.assertFalse(svc.is_retention_eligible(record, now=self._now()))
+
+    # --- missing / invalid data ---
+
+    def test_no_created_at_is_not_eligible(self):
+        record = self._record(created_at=None)
+        self.assertFalse(svc.is_retention_eligible(record, now=self._now()))
+
+    def test_invalid_created_at_is_not_eligible(self):
+        record = self._record(created_at="not-a-date")
+        self.assertFalse(svc.is_retention_eligible(record, now=self._now()))
+
+    def test_missing_retention_class_defaults_to_ordinary(self):
+        from datetime import timedelta
+        created = self._now() - timedelta(days=60)
+        record = {"created_at": created.isoformat()}
+        self.assertTrue(svc.is_retention_eligible(record, now=self._now()))
+
+
+class TestBackupServicePurgeEligible(unittest.TestCase):
+    """BackupService.purge_eligible() applies the retention hard gate."""
+
+    def setUp(self):
+        self.service = _minimal_backup_service()
+        from datetime import timedelta, timezone
+        self.now = datetime(2024, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+        self.old_ordinary = {
+            "path": "/snaps/old.db",
+            "created_at": (self.now - timedelta(days=60)).isoformat(),
+            "retention_class": svc.SNAP_RETENTION_ORDINARY,
+            "protection_state": svc.SNAP_PROTECTION_NONE,
+        }
+        self.fresh_ordinary = {
+            "path": "/snaps/fresh.db",
+            "created_at": (self.now - timedelta(days=10)).isoformat(),
+            "retention_class": svc.SNAP_RETENTION_ORDINARY,
+            "protection_state": svc.SNAP_PROTECTION_NONE,
+        }
+        self.old_high_risk = {
+            "path": "/snaps/old_hr.db",
+            "created_at": (self.now - timedelta(days=200)).isoformat(),
+            "retention_class": svc.SNAP_RETENTION_HIGH_RISK,
+            "protection_state": svc.SNAP_PROTECTION_NONE,
+        }
+        self.recent_high_risk = {
+            "path": "/snaps/recent_hr.db",
+            "created_at": (self.now - timedelta(days=100)).isoformat(),
+            "retention_class": svc.SNAP_RETENTION_HIGH_RISK,
+            "protection_state": svc.SNAP_PROTECTION_NONE,
+        }
+        self.protected_old = {
+            "path": "/snaps/protected.db",
+            "created_at": (self.now - timedelta(days=400)).isoformat(),
+            "retention_class": svc.SNAP_RETENTION_ORDINARY,
+            "protection_state": svc.SNAP_PROTECTION_PROTECTED,
+        }
+
+    def test_empty_catalog_returns_empty(self):
+        result = self.service.purge_eligible([], now=self.now)
+        self.assertEqual(result, [])
+
+    def test_expired_ordinary_is_eligible(self):
+        result = self.service.purge_eligible([self.old_ordinary], now=self.now)
+        self.assertIn(self.old_ordinary, result)
+
+    def test_fresh_ordinary_is_not_eligible(self):
+        result = self.service.purge_eligible([self.fresh_ordinary], now=self.now)
+        self.assertNotIn(self.fresh_ordinary, result)
+
+    def test_expired_high_risk_is_eligible(self):
+        result = self.service.purge_eligible([self.old_high_risk], now=self.now)
+        self.assertIn(self.old_high_risk, result)
+
+    def test_recent_high_risk_is_not_eligible(self):
+        result = self.service.purge_eligible([self.recent_high_risk], now=self.now)
+        self.assertNotIn(self.recent_high_risk, result)
+
+    def test_protected_expired_is_not_eligible(self):
+        result = self.service.purge_eligible([self.protected_old], now=self.now)
+        self.assertNotIn(self.protected_old, result)
+
+    def test_mixed_catalog_only_returns_eligible(self):
+        catalog = [
+            self.old_ordinary,    # eligible
+            self.fresh_ordinary,  # not eligible
+            self.old_high_risk,   # eligible
+            self.recent_high_risk,# not eligible
+            self.protected_old,   # not eligible (protected)
+        ]
+        result = self.service.purge_eligible(catalog, now=self.now)
+        self.assertCountEqual(result, [self.old_ordinary, self.old_high_risk])
+
+    def test_all_protected_returns_empty(self):
+        catalog = [
+            {**self.old_ordinary, "protection_state": svc.SNAP_PROTECTION_PROTECTED},
+            {**self.old_high_risk, "protection_state": svc.SNAP_PROTECTION_PROTECTED},
+        ]
+        result = self.service.purge_eligible(catalog, now=self.now)
+        self.assertEqual(result, [])
+
+
+class TestBackupServiceRestoreSuccess(unittest.TestCase):
+    """BackupService.rollback() restore success and safety snapshot behavior."""
+
+    def setUp(self):
+        import tempfile
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.snap_file = self.tmpdir / "Curator_20240101_120000.db"
+        self.snap_file.write_bytes(b"")
+
+        self.restore_calls = []
+        self.backup_log_calls = []
+        self.rollback_log_calls = []
+        safety_snap = self.tmpdir / "Curator_pre_rollback.db"
+        safety_snap.write_bytes(b"")
+
+        self.service = svc.BackupService(
+            snapshot_fn=lambda r, t="": safety_snap,
+            restore_fn=lambda p: self.restore_calls.append(p),
+            backup_log_fn=self.backup_log_calls.append,
+            rollback_log_fn=self.rollback_log_calls.append,
+            catalog_fn=lambda: [],
+            last_change_fn=lambda: None,
+            public_item_fn=lambda x: x,
+            parse_tag_fn=lambda p: "",
+        )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_restore_calls_restore_fn(self):
+        self.service.rollback("snapshot", {"snapshot": str(self.snap_file)})
+        self.assertEqual(len(self.restore_calls), 1)
+        self.assertEqual(self.restore_calls[0], self.snap_file)
+
+    def test_restore_creates_safety_snapshot_before_restore(self):
+        self.service.rollback("snapshot", {"snapshot": str(self.snap_file)})
+        pre_rollback_entries = [
+            c for c in self.backup_log_calls if c.get("reason") == "pre_rollback"
+        ]
+        self.assertGreater(len(pre_rollback_entries), 0)
+
+    def test_restore_logs_success_outcome(self):
+        self.service.rollback("snapshot", {"snapshot": str(self.snap_file)})
+        success_entries = [c for c in self.rollback_log_calls if c.get("ok")]
+        self.assertGreater(len(success_entries), 0)
+
+    def test_restore_returns_selected_snapshot_key(self):
+        result = self.service.rollback("snapshot", {"snapshot": str(self.snap_file)})
+        self.assertIn("selected_snapshot", result)
+
+    def test_restore_failure_logs_failure_outcome(self):
+        def failing_restore(p):
+            raise IOError("disk error")
+
+        failing_service = svc.BackupService(
+            snapshot_fn=lambda r, t="": self.snap_file,
+            restore_fn=failing_restore,
+            backup_log_fn=lambda _: None,
+            rollback_log_fn=self.rollback_log_calls.append,
+            catalog_fn=lambda: [],
+            last_change_fn=lambda: None,
+            public_item_fn=lambda x: x,
+            parse_tag_fn=lambda p: "",
+        )
+        with self.assertRaises(IOError):
+            failing_service.rollback("snapshot", {"snapshot": str(self.snap_file)})
+        failure_entries = [c for c in self.rollback_log_calls if not c.get("ok")]
+        self.assertGreater(len(failure_entries), 0)
 
 def _make_workspace_service(conn):
     """Helper: build a WorkspaceAlbumService with snapshot/log no-ops."""

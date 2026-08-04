@@ -27,6 +27,55 @@ IMPORT_ACTION_DATABASE_ONLY: str = "DATABASE_ONLY"
 IMPORT_ACTION_COPY: str = "COPY"
 IMPORT_ACTION_MOVE: str = "MOVE"
 
+# ---------------------------------------------------------------------------
+# Snapshot policy constants
+# ---------------------------------------------------------------------------
+
+# Retention classes
+SNAP_RETENTION_ORDINARY: str = "ordinary"
+SNAP_RETENTION_HIGH_RISK: str = "high-risk"
+
+# Retention period in days per class
+SNAP_RETENTION_DAYS: dict[str, int] = {
+    SNAP_RETENTION_ORDINARY: 30,
+    SNAP_RETENTION_HIGH_RISK: 180,
+}
+
+# Protection states
+SNAP_PROTECTION_NONE: str = "unprotected"
+SNAP_PROTECTION_PROTECTED: str = "protected"
+
+# Operation-type identifiers used for risk assessment
+SNAP_OP_DATA_MIGRATION: str = "data_migration"
+SNAP_OP_RESTORE: str = "restore"
+SNAP_OP_BULK_IMPORT: str = "bulk_import"
+SNAP_OP_BULK_DELETE: str = "bulk_delete"
+SNAP_OP_BULK_RENAME: str = "bulk_rename"
+SNAP_OP_BULK_QUARANTINE: str = "bulk_quarantine"
+SNAP_OP_WORKSPACE_PROMOTION: str = "workspace_promotion"
+SNAP_OP_RELATIONSHIP_REBUILD: str = "relationship_rebuild"
+
+# Always-high-risk operation types (snapshot always required)
+_SNAP_ALWAYS_HIGH_RISK: frozenset[str] = frozenset({
+    SNAP_OP_DATA_MIGRATION,
+    SNAP_OP_RESTORE,
+})
+
+# Conditionally-high-risk operation types (snapshot required only when
+# the service-side item count meets or exceeds the threshold below)
+_SNAP_CONDITIONALLY_HIGH_RISK: frozenset[str] = frozenset({
+    SNAP_OP_BULK_IMPORT,
+    SNAP_OP_BULK_DELETE,
+    SNAP_OP_BULK_RENAME,
+    SNAP_OP_BULK_QUARANTINE,
+    SNAP_OP_WORKSPACE_PROMOTION,
+    SNAP_OP_RELATIONSHIP_REBUILD,
+})
+
+# Item-count threshold above which a conditionally-high-risk operation is
+# classified as high-risk and a snapshot is required.
+SNAP_BULK_THRESHOLD: int = 50
+
 
 # ---------------------------------------------------------------------------
 # Service exceptions
@@ -809,6 +858,88 @@ def _find_snapshot_before_or_at(catalog: list, target_dt: datetime) -> dict | No
     return candidates[0]  # catalog is already sorted newest-first
 
 
+def assess_operation_risk(
+    operation_type: str,
+    item_count: int = 0,
+) -> tuple[bool, str]:
+    """Determine whether a snapshot is required and which retention class applies.
+
+    Policy:
+    - Always-high-risk operations (``data_migration``, ``restore``) always
+      require a snapshot with retention class ``'high-risk'``.
+    - Conditionally-high-risk operations require a snapshot with retention
+      class ``'high-risk'`` when *item_count* ≥ :data:`SNAP_BULK_THRESHOLD`.
+      Below the threshold no snapshot is required (retention class ``'ordinary'``
+      is returned as an informational default).
+    - All other operations do not require a snapshot.
+
+    Args:
+        operation_type: One of the ``SNAP_OP_*`` constants, or any custom
+            string for operations not listed in the policy table.
+        item_count: Number of entities affected by the operation; used as the
+            service-side signal for conditionally-high-risk operations.
+
+    Returns:
+        ``(snapshot_required, retention_class)`` — a 2-tuple where the first
+        element is ``True`` when a snapshot must be taken before executing the
+        operation and the second is the applicable retention class string.
+    """
+    if operation_type in _SNAP_ALWAYS_HIGH_RISK:
+        return True, SNAP_RETENTION_HIGH_RISK
+    if operation_type in _SNAP_CONDITIONALLY_HIGH_RISK:
+        if item_count >= SNAP_BULK_THRESHOLD:
+            return True, SNAP_RETENTION_HIGH_RISK
+        return False, SNAP_RETENTION_ORDINARY
+    return False, SNAP_RETENTION_ORDINARY
+
+
+def is_retention_eligible(
+    snapshot_record: dict,
+    now: datetime | None = None,
+) -> bool:
+    """Return ``True`` when *snapshot_record* may be deleted by automated cleanup.
+
+    Cleanup eligibility is a hard gate: a snapshot is eligible only when its
+    retention period has expired **and** it is not protected.  Both conditions
+    must be satisfied; neither may be treated as a soft recommendation.
+
+    Args:
+        snapshot_record: A catalog dict with at minimum:
+            - ``created_at`` (ISO 8601 string or ``None``)
+            - ``retention_class`` (``'ordinary'`` | ``'high-risk'`` | ``None``)
+            - ``protection_state`` (``'protected'`` | anything else)
+        now: Reference timestamp for age calculation; defaults to the current
+            UTC time when ``None``.
+
+    Returns:
+        ``True`` when the snapshot may be deleted; ``False`` otherwise.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    # Protected snapshots must never be deleted by automated cleanup.
+    if snapshot_record.get("protection_state") == SNAP_PROTECTION_PROTECTED:
+        return False
+
+    created_at_str = snapshot_record.get("created_at")
+    if not created_at_str:
+        # No creation timestamp → treat as not eligible to avoid silent loss.
+        return False
+
+    try:
+        created_at = _parse_iso_datetime(created_at_str)
+    except Exception:
+        return False
+
+    retention_class = snapshot_record.get("retention_class", SNAP_RETENTION_ORDINARY)
+    retain_days = SNAP_RETENTION_DAYS.get(retention_class, SNAP_RETENTION_DAYS[SNAP_RETENTION_ORDINARY])
+
+    age_days = (now - created_at).total_seconds() / 86400
+    return age_days >= retain_days
+
+
 class BackupService:
     """Workflow owner for snapshot creation, cleanup, and rollback operations.
 
@@ -875,6 +1006,50 @@ class BackupService:
         if self._cleanup is None:
             raise RuntimeError("No cleanup function was provided to BackupService.")
         return self._cleanup(retention_days)
+
+    def assess(self, operation_type: str, item_count: int = 0) -> dict:
+        """Return the snapshot decision for *operation_type* with *item_count* items.
+
+        Delegates to the module-level :func:`assess_operation_risk` pure function
+        and returns the result as a dict suitable for inclusion in an Operation
+        record or API response.
+
+        Args:
+            operation_type: One of the ``SNAP_OP_*`` constants.
+            item_count: Number of entities affected; used for conditionally
+                high-risk threshold evaluation.
+
+        Returns:
+            ``{'snapshot_required': bool, 'retention_class': str}``
+        """
+        required, retention_class = assess_operation_risk(operation_type, item_count)
+        return {"snapshot_required": required, "retention_class": retention_class}
+
+    def purge_eligible(
+        self,
+        catalog_records: list,
+        now: datetime | None = None,
+    ) -> list:
+        """Filter *catalog_records* and return only those eligible for deletion.
+
+        Applies the hard cleanup-eligibility gate defined by the snapshot
+        policy:
+        - A snapshot is eligible only when its retention period has expired
+          **and** it is not protected.
+        - Protected snapshots are never included, regardless of age.
+        - Records with no ``created_at`` value are never included.
+
+        Args:
+            catalog_records: List of snapshot catalog dicts.  Each dict should
+                contain at minimum: ``created_at``, ``retention_class``, and
+                ``protection_state``.
+            now: Reference timestamp; defaults to the current UTC time.
+
+        Returns:
+            Subset of *catalog_records* that may be deleted by automated
+            cleanup.  The order of records is preserved.
+        """
+        return [r for r in catalog_records if is_retention_eligible(r, now)]
 
     def rollback(self, mode: str, body: dict) -> dict:
         """Execute a rollback operation in the requested mode.
