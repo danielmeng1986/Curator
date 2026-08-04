@@ -194,6 +194,22 @@ class AlbumService:
         )
 
 
+# Lifecycle state labels as module-level constants so callers can reference
+# them without importing magic strings.
+LIFECYCLE_ACTIVE: str = "active"
+LIFECYCLE_REVIEW: str = "review"
+LIFECYCLE_CLOSED: str = "closed"
+LIFECYCLE_ARCHIVED_RETIRED: str = "archived_retired"
+
+# Allowed forward and backward transitions: {from_state: frozenset(to_states)}
+_LIFECYCLE_TRANSITIONS: dict[str, frozenset[str]] = {
+    LIFECYCLE_ACTIVE: frozenset({LIFECYCLE_REVIEW}),
+    LIFECYCLE_REVIEW: frozenset({LIFECYCLE_ACTIVE, LIFECYCLE_CLOSED}),
+    LIFECYCLE_CLOSED: frozenset({LIFECYCLE_ARCHIVED_RETIRED}),
+    LIFECYCLE_ARCHIVED_RETIRED: frozenset(),
+}
+
+
 # ---------------------------------------------------------------------------
 # WorkspaceAlbumService
 # ---------------------------------------------------------------------------
@@ -211,6 +227,12 @@ class WorkspaceAlbumService:
         "current_path", "expected_path", "primary_model", "studio_name",
         "album_name", "additional_models", "status_id", "remark",
         "belongs_to_album_id", "ai_result", "album_id",
+    })
+
+    ALLOWED_CREATE_FIELDS: frozenset[str] = frozenset({
+        "studio_name", "album_name", "primary_model", "additional_models",
+        "status_id", "remark", "current_path", "expected_path", "ai_result",
+        "belongs_to_album_id", "album_id",
     })
 
     def __init__(
@@ -254,6 +276,84 @@ class WorkspaceAlbumService:
             ValueError: If ``changes`` contains no allowed fields.
         """
         self._repo.update(wa_id, self.ALLOWED_UPDATE_FIELDS, changes)
+
+    def create(self, fields: dict) -> dict:
+        """Create a new workspace album with initial lifecycle_state ``'active'``.
+
+        Only fields in :attr:`ALLOWED_CREATE_FIELDS` are forwarded to the
+        repository; ``lifecycle_state`` is always set to ``'active'`` by the
+        repository, not by callers.
+
+        Returns:
+            The normalized workspace album read model for the new record.
+        """
+        filtered = {k: v for k, v in fields.items() if k in self.ALLOWED_CREATE_FIELDS}
+        return self._repo.create(filtered)
+
+    def _transition(self, wa_id: int, to_state: str) -> None:
+        """Validate the requested lifecycle transition and persist it.
+
+        Args:
+            wa_id: Integer primary key of the target workspace album.
+            to_state: Lifecycle state string to transition to.
+
+        Raises:
+            ServiceNotFound: When no workspace album with ``wa_id`` exists.
+            ServiceConflict: When the requested transition is not permitted
+                from the workspace album's current lifecycle state.
+        """
+        current = self._repo.get_lifecycle_state(wa_id)
+        if current is None:
+            raise ServiceNotFound(
+                f"Workspace album {wa_id} not found."
+            )
+        allowed_targets = _LIFECYCLE_TRANSITIONS.get(current, frozenset())
+        if to_state not in allowed_targets:
+            raise ServiceConflict(
+                "BUSINESS_CONFLICT",
+                (
+                    f"Cannot transition workspace album {wa_id} "
+                    f"from '{current}' to '{to_state}'."
+                ),
+                {"current_state": current, "requested_state": to_state},
+            )
+        self._repo.set_lifecycle_state(wa_id, to_state)
+
+    def submit_for_review(self, wa_id: int) -> None:
+        """Transition a workspace album from ``active`` to ``review``.
+
+        Raises:
+            ServiceNotFound: When the workspace album does not exist.
+            ServiceConflict: When the current state is not ``active``.
+        """
+        self._transition(wa_id, LIFECYCLE_REVIEW)
+
+    def return_to_active(self, wa_id: int) -> None:
+        """Transition a workspace album from ``review`` back to ``active``.
+
+        Raises:
+            ServiceNotFound: When the workspace album does not exist.
+            ServiceConflict: When the current state is not ``review``.
+        """
+        self._transition(wa_id, LIFECYCLE_ACTIVE)
+
+    def close(self, wa_id: int) -> None:
+        """Transition a workspace album from ``review`` to ``closed``.
+
+        Raises:
+            ServiceNotFound: When the workspace album does not exist.
+            ServiceConflict: When the current state is not ``review``.
+        """
+        self._transition(wa_id, LIFECYCLE_CLOSED)
+
+    def archive(self, wa_id: int) -> None:
+        """Transition a workspace album from ``closed`` to ``archived_retired``.
+
+        Raises:
+            ServiceNotFound: When the workspace album does not exist.
+            ServiceConflict: When the current state is not ``closed``.
+        """
+        self._transition(wa_id, LIFECYCLE_ARCHIVED_RETIRED)
 
 
 # ---------------------------------------------------------------------------

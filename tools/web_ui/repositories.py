@@ -245,6 +245,7 @@ def _norm_workspace_album(row: dict) -> dict:
         "album_id": row.get("album_id"),
         "status_id": row.get("status_id"),
         "status_name": row.get("status_name"),
+        "lifecycle_state": row.get("lifecycle_state", "active"),
     }
 
 
@@ -1295,6 +1296,71 @@ class WorkspaceAlbumRepository:
                 updated += 1
             conn.commit()
         return updated
+    def create(self, fields: dict) -> dict:
+        """Create a new workspace album with lifecycle_state='active'.
+
+        All supplied fields are filtered to the allow-list; ``lifecycle_state``
+        is always set to ``'active'``; ``uuid`` is auto-generated when absent.
+
+        Returns:
+            The normalized workspace album read model for the new record.
+        """
+        _creatable = frozenset({
+            "uuid", "status_id", "studio_name", "album_name", "primary_model",
+            "additional_models", "remark", "current_path", "expected_path",
+            "ai_result", "belongs_to_album_id", "album_id",
+        })
+        filtered = {k: v for k, v in fields.items() if k in _creatable}
+        filtered["lifecycle_state"] = "active"
+        if "uuid" not in filtered:
+            filtered["uuid"] = str(uuid.uuid4())
+        columns = ", ".join(filtered.keys())
+        placeholders = ", ".join("?" * len(filtered))
+        with self._db() as conn:
+            cur = conn.execute(
+                f"INSERT INTO workspace_album ({columns}) VALUES ({placeholders})",
+                list(filtered.values()),
+            )
+            new_id = cur.lastrowid
+            conn.commit()
+            row = conn.execute(
+                """
+                SELECT wa.*, s.name AS status_name
+                FROM workspace_album wa
+                LEFT JOIN status s ON s.id = wa.status_id
+                WHERE wa.id = ?
+                """,
+                (new_id,),
+            ).fetchone()
+        return _norm_workspace_album(dict(row))
+
+    def get_lifecycle_state(self, wa_id: int) -> str | None:
+        """Return the current lifecycle state for a workspace album.
+
+        Returns:
+            The lifecycle state string, or ``None`` when the record does not
+            exist.
+        """
+        with self._db() as conn:
+            row = conn.execute(
+                "SELECT lifecycle_state FROM workspace_album WHERE id = ?",
+                (wa_id,),
+            ).fetchone()
+        return row["lifecycle_state"] if row else None
+
+    def set_lifecycle_state(self, wa_id: int, state: str) -> None:
+        """Persist a lifecycle state transition for a workspace album.
+
+        Args:
+            wa_id: Integer primary key of the workspace album to update.
+            state: The target lifecycle state string to write.
+        """
+        with self._db() as conn:
+            conn.execute(
+                "UPDATE workspace_album SET lifecycle_state = ? WHERE id = ?",
+                (state, wa_id),
+            )
+            conn.commit()
 
 
 # ---------------------------------------------------------------------------

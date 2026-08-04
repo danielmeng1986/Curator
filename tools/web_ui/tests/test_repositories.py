@@ -110,7 +110,8 @@ CREATE TABLE IF NOT EXISTS workspace_album (
     expected_path TEXT,
     ai_result TEXT,
     belongs_to_album_id INTEGER,
-    album_id INTEGER
+    album_id INTEGER,
+    lifecycle_state TEXT NOT NULL DEFAULT 'active'
 );
 """
 
@@ -1454,7 +1455,7 @@ class TestWorkspaceAlbumReadModelShape(unittest.TestCase):
             "id", "uuid", "studio_name", "album_name", "primary_model",
             "additional_models", "remark", "current_path", "expected_path",
             "ai_result", "belongs_to_album_id", "album_id",
-            "status_id", "status_name",
+            "status_id", "status_name", "lifecycle_state",
         }
         for row in rows:
             self.assertEqual(set(row.keys()), expected_keys)
@@ -1477,6 +1478,7 @@ class TestWorkspaceAlbumReadModelShape(unittest.TestCase):
             "additional_models", "remark", "current_path", "expected_path",
             "ai_result", "belongs_to_album_id", "album_id",
             "status_id", "status_name", "belongs_to", "linked_album",
+            "lifecycle_state",
         }
         self.assertEqual(set(result.keys()), expected_keys)
 
@@ -1554,6 +1556,110 @@ class TestStudioReadModelShape(unittest.TestCase):
         expected_album_keys = {"id", "title", "capture_date", "publish_date", "rating", "status_name"}
         for album in result["albums"]:
             self.assertEqual(set(album.keys()), expected_album_keys)
+
+
+# ---------------------------------------------------------------------------
+# WorkspaceAlbumRepository — creation and lifecycle-state persistence (BT-007)
+# ---------------------------------------------------------------------------
+
+class TestWorkspaceAlbumRepositoryCreate(unittest.TestCase):
+    """Tests for WorkspaceAlbumRepository.create()."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.repo = repo.WorkspaceAlbumRepository(db_factory=_db_factory(self.conn))
+
+    def test_create_returns_dict_with_id(self):
+        result = self.repo.create({"studio_name": "Studio A", "album_name": "Album 1"})
+        self.assertIn("id", result)
+        self.assertIsNotNone(result["id"])
+
+    def test_create_persists_lifecycle_state_active(self):
+        result = self.repo.create({"studio_name": "Studio A", "album_name": "Album 1"})
+        self.assertEqual(result["lifecycle_state"], "active")
+
+    def test_create_persists_lifecycle_state_active_in_db(self):
+        self.repo.create({"studio_name": "Studio A"})
+        row = self.conn.execute(
+            "SELECT lifecycle_state FROM workspace_album WHERE id = 1"
+        ).fetchone()
+        self.assertEqual(row["lifecycle_state"], "active")
+
+    def test_create_persists_supplied_fields(self):
+        result = self.repo.create(
+            {"studio_name": "Studio B", "album_name": "Summer", "primary_model": "Alice"}
+        )
+        self.assertEqual(result["studio_name"], "Studio B")
+        self.assertEqual(result["album_name"], "Summer")
+        self.assertEqual(result["primary_model"], "Alice")
+
+    def test_create_auto_generates_uuid(self):
+        result = self.repo.create({"studio_name": "Studio A"})
+        self.assertIsNotNone(result["uuid"])
+        self.assertNotEqual(result["uuid"], "")
+
+    def test_create_accepts_explicit_uuid(self):
+        result = self.repo.create({"studio_name": "Studio A", "uuid": "test-uuid-123"})
+        self.assertEqual(result["uuid"], "test-uuid-123")
+
+    def test_create_read_model_has_lifecycle_state_key(self):
+        result = self.repo.create({"studio_name": "Studio A"})
+        self.assertIn("lifecycle_state", result)
+
+    def test_create_ignores_lifecycle_state_in_caller_fields(self):
+        # lifecycle_state must not be settable by callers at creation time.
+        result = self.repo.create(
+            {"studio_name": "Studio A", "lifecycle_state": "closed"}
+        )
+        self.assertEqual(result["lifecycle_state"], "active")
+
+    def test_create_multiple_records_get_independent_ids(self):
+        r1 = self.repo.create({"studio_name": "S1"})
+        r2 = self.repo.create({"studio_name": "S2"})
+        self.assertNotEqual(r1["id"], r2["id"])
+
+
+class TestWorkspaceAlbumRepositoryLifecyclePersistence(unittest.TestCase):
+    """Tests for WorkspaceAlbumRepository.get_lifecycle_state() and set_lifecycle_state()."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.repo = repo.WorkspaceAlbumRepository(db_factory=_db_factory(self.conn))
+        self.conn.execute(
+            "INSERT INTO workspace_album (studio_name) VALUES ('Studio A')"
+        )
+        self.conn.commit()
+
+    def test_get_lifecycle_state_returns_active_by_default(self):
+        self.assertEqual(self.repo.get_lifecycle_state(1), "active")
+
+    def test_get_lifecycle_state_returns_none_for_missing_id(self):
+        self.assertIsNone(self.repo.get_lifecycle_state(9999))
+
+    def test_set_lifecycle_state_persists_review(self):
+        self.repo.set_lifecycle_state(1, "review")
+        self.assertEqual(self.repo.get_lifecycle_state(1), "review")
+
+    def test_set_lifecycle_state_persists_closed(self):
+        self.repo.set_lifecycle_state(1, "closed")
+        self.assertEqual(self.repo.get_lifecycle_state(1), "closed")
+
+    def test_set_lifecycle_state_persists_archived_retired(self):
+        self.repo.set_lifecycle_state(1, "archived_retired")
+        self.assertEqual(self.repo.get_lifecycle_state(1), "archived_retired")
+
+    def test_set_lifecycle_state_is_durable(self):
+        self.repo.set_lifecycle_state(1, "review")
+        row = self.conn.execute(
+            "SELECT lifecycle_state FROM workspace_album WHERE id = 1"
+        ).fetchone()
+        self.assertEqual(row["lifecycle_state"], "review")
+
+    def test_norm_workspace_album_includes_lifecycle_state(self):
+        self.repo.set_lifecycle_state(1, "review")
+        record = self.repo.get_by_id(1)
+        self.assertIn("lifecycle_state", record)
+        self.assertEqual(record["lifecycle_state"], "review")
 
 
 if __name__ == "__main__":

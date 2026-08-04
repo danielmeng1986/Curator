@@ -112,7 +112,8 @@ CREATE TABLE IF NOT EXISTS workspace_album (
     expected_path TEXT,
     ai_result TEXT,
     belongs_to_album_id INTEGER,
-    album_id INTEGER
+    album_id INTEGER,
+    lifecycle_state TEXT NOT NULL DEFAULT 'active'
 );
 """
 
@@ -951,6 +952,200 @@ class TestBackupServiceRollback(unittest.TestCase):
         result = self.service.rollback("tag", {"tag": "my-tag"})
         self.assertIn("selected_snapshot", result)
         self.assertEqual(self.restore_calls[-1], tagged_file)
+
+
+# ---------------------------------------------------------------------------
+# WorkspaceAlbumService — lifecycle transitions (BT-007)
+# ---------------------------------------------------------------------------
+
+def _make_workspace_service(conn):
+    """Helper: build a WorkspaceAlbumService with snapshot/log no-ops."""
+    workspace_repo = repo.WorkspaceAlbumRepository(db_factory=_db_factory(conn))
+    return svc.WorkspaceAlbumService(
+        workspace_repo=workspace_repo,
+        snapshot_fn=lambda tag: None,
+        backup_log_fn=lambda entry: None,
+    )
+
+
+class TestWorkspaceAlbumServiceCreate(unittest.TestCase):
+    """Tests for WorkspaceAlbumService.create()."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.service = _make_workspace_service(self.conn)
+
+    def test_create_returns_dict_with_id(self):
+        result = self.service.create({"studio_name": "Studio A", "album_name": "Album 1"})
+        self.assertIn("id", result)
+
+    def test_create_sets_lifecycle_state_active(self):
+        result = self.service.create({"studio_name": "Studio A"})
+        self.assertEqual(result["lifecycle_state"], "active")
+
+    def test_create_persists_fields(self):
+        result = self.service.create(
+            {"studio_name": "Studio B", "album_name": "Summer", "primary_model": "Alice"}
+        )
+        self.assertEqual(result["studio_name"], "Studio B")
+        self.assertEqual(result["album_name"], "Summer")
+
+    def test_create_ignores_lifecycle_state_from_caller(self):
+        # lifecycle_state is not in ALLOWED_CREATE_FIELDS; must always be 'active'.
+        result = self.service.create({"studio_name": "S", "lifecycle_state": "closed"})
+        self.assertEqual(result["lifecycle_state"], "active")
+
+    def test_allowed_create_fields_does_not_include_lifecycle_state(self):
+        self.assertNotIn("lifecycle_state", svc.WorkspaceAlbumService.ALLOWED_CREATE_FIELDS)
+
+
+class TestWorkspaceAlbumServiceLifecycleTransitions(unittest.TestCase):
+    """Tests for lifecycle transition methods in WorkspaceAlbumService."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.conn.execute(
+            "INSERT INTO workspace_album (studio_name, lifecycle_state) VALUES ('S', 'active')"
+        )
+        self.conn.commit()
+        self.service = _make_workspace_service(self.conn)
+
+    def _state(self) -> str:
+        return self.conn.execute(
+            "SELECT lifecycle_state FROM workspace_album WHERE id = 1"
+        ).fetchone()[0]
+
+    # --- Valid transitions ---
+
+    def test_submit_for_review_active_to_review(self):
+        self.service.submit_for_review(1)
+        self.assertEqual(self._state(), "review")
+
+    def test_return_to_active_review_to_active(self):
+        self.conn.execute("UPDATE workspace_album SET lifecycle_state='review' WHERE id=1")
+        self.conn.commit()
+        self.service.return_to_active(1)
+        self.assertEqual(self._state(), "active")
+
+    def test_close_review_to_closed(self):
+        self.conn.execute("UPDATE workspace_album SET lifecycle_state='review' WHERE id=1")
+        self.conn.commit()
+        self.service.close(1)
+        self.assertEqual(self._state(), "closed")
+
+    def test_archive_closed_to_archived_retired(self):
+        self.conn.execute("UPDATE workspace_album SET lifecycle_state='closed' WHERE id=1")
+        self.conn.commit()
+        self.service.archive(1)
+        self.assertEqual(self._state(), "archived_retired")
+
+    def test_full_happy_path(self):
+        # active → review → closed → archived_retired
+        self.service.submit_for_review(1)
+        self.service.close(1)
+        self.service.archive(1)
+        self.assertEqual(self._state(), "archived_retired")
+
+    def test_round_trip_active_review_active(self):
+        self.service.submit_for_review(1)
+        self.service.return_to_active(1)
+        self.assertEqual(self._state(), "active")
+
+    # --- Invalid transitions raise ServiceConflict ---
+
+    def test_submit_for_review_from_review_raises_conflict(self):
+        self.conn.execute("UPDATE workspace_album SET lifecycle_state='review' WHERE id=1")
+        self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict) as ctx:
+            self.service.submit_for_review(1)
+        self.assertEqual(ctx.exception.code, "BUSINESS_CONFLICT")
+
+    def test_submit_for_review_from_closed_raises_conflict(self):
+        self.conn.execute("UPDATE workspace_album SET lifecycle_state='closed' WHERE id=1")
+        self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.submit_for_review(1)
+
+    def test_submit_for_review_from_archived_raises_conflict(self):
+        self.conn.execute("UPDATE workspace_album SET lifecycle_state='archived_retired' WHERE id=1")
+        self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.submit_for_review(1)
+
+    def test_return_to_active_from_active_raises_conflict(self):
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.return_to_active(1)
+
+    def test_return_to_active_from_closed_raises_conflict(self):
+        self.conn.execute("UPDATE workspace_album SET lifecycle_state='closed' WHERE id=1")
+        self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.return_to_active(1)
+
+    def test_close_from_active_raises_conflict(self):
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.close(1)
+
+    def test_close_from_closed_raises_conflict(self):
+        self.conn.execute("UPDATE workspace_album SET lifecycle_state='closed' WHERE id=1")
+        self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.close(1)
+
+    def test_archive_from_active_raises_conflict(self):
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.archive(1)
+
+    def test_archive_from_review_raises_conflict(self):
+        self.conn.execute("UPDATE workspace_album SET lifecycle_state='review' WHERE id=1")
+        self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.archive(1)
+
+    def test_archive_from_archived_raises_conflict(self):
+        self.conn.execute("UPDATE workspace_album SET lifecycle_state='archived_retired' WHERE id=1")
+        self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.archive(1)
+
+    # --- Invalid operations do not modify persisted state ---
+
+    def test_invalid_transition_does_not_change_state(self):
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.close(1)  # active → closed is invalid
+        self.assertEqual(self._state(), "active")
+
+    # --- Not-found raises ServiceNotFound ---
+
+    def test_submit_for_review_missing_id_raises_not_found(self):
+        with self.assertRaises(svc.ServiceNotFound):
+            self.service.submit_for_review(9999)
+
+    def test_return_to_active_missing_id_raises_not_found(self):
+        with self.assertRaises(svc.ServiceNotFound):
+            self.service.return_to_active(9999)
+
+    def test_close_missing_id_raises_not_found(self):
+        with self.assertRaises(svc.ServiceNotFound):
+            self.service.close(9999)
+
+    def test_archive_missing_id_raises_not_found(self):
+        with self.assertRaises(svc.ServiceNotFound):
+            self.service.archive(9999)
+
+    # --- Lifecycle state constants are correct ---
+
+    def test_lifecycle_constants_values(self):
+        self.assertEqual(svc.LIFECYCLE_ACTIVE, "active")
+        self.assertEqual(svc.LIFECYCLE_REVIEW, "review")
+        self.assertEqual(svc.LIFECYCLE_CLOSED, "closed")
+        self.assertEqual(svc.LIFECYCLE_ARCHIVED_RETIRED, "archived_retired")
+
+    def test_allowed_update_fields_excludes_lifecycle_state(self):
+        self.assertNotIn("lifecycle_state", svc.WorkspaceAlbumService.ALLOWED_UPDATE_FIELDS)
+
+    def test_allowed_batch_fields_excludes_lifecycle_state(self):
+        self.assertNotIn("lifecycle_state", svc.WorkspaceAlbumService.ALLOWED_BATCH_FIELDS)
 
 
 if __name__ == "__main__":
