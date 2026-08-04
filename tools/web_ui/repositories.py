@@ -1418,6 +1418,29 @@ class ImportRepository:
             "album_id": album_id,
         }
 
+    def lookup_path_collision(self, comparison_key: str) -> bool:
+        """Return ``True`` when any album's stored path matches the comparison key.
+
+        Uses ``LOWER(path) = ?`` for SQL-level filtering (covers ASCII paths),
+        where *comparison_key* is the casefolded canonical path key produced by
+        :func:`canonical_path.comparison_key`. This detects occupied canonical
+        paths that would cause a uniqueness conflict even when the title-based
+        duplicate check (``lookup_preview_item``) does not fire.
+
+        Args:
+            comparison_key: The casefolded canonical path key to check against
+                existing ``album.path`` values.
+
+        Returns:
+            ``True`` when at least one album occupies the same canonical path.
+        """
+        with self._db() as conn:
+            row = conn.execute(
+                "SELECT id FROM album WHERE LOWER(path) = ?",
+                (comparison_key,),
+            ).fetchone()
+        return row is not None
+
     def create_item(
         self,
         studio_name: str,

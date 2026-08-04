@@ -1662,5 +1662,57 @@ class TestWorkspaceAlbumRepositoryLifecyclePersistence(unittest.TestCase):
         self.assertEqual(record["lifecycle_state"], "review")
 
 
+# ---------------------------------------------------------------------------
+# ImportRepository — lookup_path_collision (BT-008)
+# ---------------------------------------------------------------------------
+
+class TestImportRepositoryLookupPathCollision(unittest.TestCase):
+    """Tests for ImportRepository.lookup_path_collision()."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.repo = repo.ImportRepository(db_factory=_db_factory(self.conn))
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_returns_false_when_no_albums(self):
+        self.assertFalse(self.repo.lookup_path_collision("a/alice/p/studio/summer"))
+
+    def test_returns_false_when_no_path_match(self):
+        self.conn.execute(
+            "INSERT INTO album (uuid, title, path, created_at, updated_at)"
+            " VALUES ('a1', 'Shoot', 'A/Alice/p/Studio/Winter', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        self.assertFalse(self.repo.lookup_path_collision("a/alice/p/studio/summer"))
+
+    def test_returns_true_when_path_matches_exactly(self):
+        self.conn.execute(
+            "INSERT INTO album (uuid, title, path, created_at, updated_at)"
+            " VALUES ('a1', 'Shoot', 'A/Alice/p/Studio/Summer', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        # comparison_key is the casefolded form of the canonical path
+        self.assertTrue(self.repo.lookup_path_collision("a/alice/p/studio/summer"))
+
+    def test_returns_true_case_insensitive(self):
+        # album.path stored in original case; comparison_key is casefolded
+        self.conn.execute(
+            "INSERT INTO album (uuid, title, path, created_at, updated_at)"
+            " VALUES ('a1', 'Shoot', 'A/ALICE/p/STUDIO/SUMMER', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        self.assertTrue(self.repo.lookup_path_collision("a/alice/p/studio/summer"))
+
+    def test_returns_false_when_album_has_null_path(self):
+        self.conn.execute(
+            "INSERT INTO album (uuid, title, created_at, updated_at)"
+            " VALUES ('a1', 'Shoot', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        self.assertFalse(self.repo.lookup_path_collision("a/alice/p/studio/summer"))
+
+
 if __name__ == "__main__":
     unittest.main()

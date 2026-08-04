@@ -1148,5 +1148,245 @@ class TestWorkspaceAlbumServiceLifecycleTransitions(unittest.TestCase):
         self.assertNotIn("lifecycle_state", svc.WorkspaceAlbumService.ALLOWED_BATCH_FIELDS)
 
 
+# ---------------------------------------------------------------------------
+# ImportService.preview — structured validation and collision detection (BT-008)
+# ---------------------------------------------------------------------------
+
+class TestImportServicePreviewValidation(unittest.TestCase):
+    """Structured validation outcomes and collision detection in ImportService.preview()."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.conn.execute(
+            "INSERT INTO studio (uuid, name) VALUES ('s1', 'MetArt')"
+        )
+        self.conn.execute(
+            "INSERT INTO model (uuid, display_name, created_at, updated_at)"
+            " VALUES ('m1', 'Alice', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        import_repo = repo.ImportRepository(db_factory=_db_factory(self.conn))
+        self.service = svc.ImportService(
+            import_repo=import_repo,
+            snapshot_fn=lambda *a, **kw: None,
+            backup_log_fn=lambda _: None,
+            change_log_fn=lambda _: None,
+        )
+
+    def tearDown(self):
+        self.conn.close()
+
+    # --- validation_errors field shape ---
+
+    def test_preview_item_has_validation_errors_key(self):
+        items = [{"model_name": "Alice", "album_name": "NewShoot", "studio_name": "MetArt"}]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        self.assertIn("validation_errors", result["items"][0])
+
+    def test_validation_errors_is_empty_for_clean_import(self):
+        items = [{"model_name": "Alice", "album_name": "CleanShoot", "studio_name": "MetArt"}]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        self.assertEqual(result["items"][0]["validation_errors"], [])
+
+    def test_validation_errors_is_list(self):
+        items = [{"model_name": "Alice", "album_name": "S", "studio_name": "MetArt"}]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        self.assertIsInstance(result["items"][0]["validation_errors"], list)
+
+    def test_each_validation_error_has_code_and_message(self):
+        self.conn.execute(
+            "INSERT INTO album (uuid, studio_id, title, created_at, updated_at)"
+            " VALUES ('a1', 1, 'Existing', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        items = [{"model_name": "Alice", "album_name": "Existing", "studio_name": "MetArt"}]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        for err in result["items"][0]["validation_errors"]:
+            self.assertIn("code", err)
+            self.assertIn("message", err)
+
+    # --- ALBUM_EXISTS ---
+
+    def test_album_exists_adds_validation_error_code(self):
+        self.conn.execute(
+            "INSERT INTO album (uuid, studio_id, title, created_at, updated_at)"
+            " VALUES ('a1', 1, 'DupAlbum', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        items = [{"model_name": "Alice", "album_name": "DupAlbum", "studio_name": "MetArt"}]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        codes = [e["code"] for e in result["items"][0]["validation_errors"]]
+        self.assertIn("ALBUM_EXISTS", codes)
+
+    def test_album_exists_sets_can_import_false(self):
+        self.conn.execute(
+            "INSERT INTO album (uuid, studio_id, title, created_at, updated_at)"
+            " VALUES ('a1', 1, 'DupAlbum', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        items = [{"model_name": "Alice", "album_name": "DupAlbum", "studio_name": "MetArt"}]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        self.assertFalse(result["items"][0]["can_import"])
+
+    # --- PATH_EXISTS (filesystem collision) ---
+
+    def test_path_exists_adds_validation_error_code(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Build the directory so full_path.exists() is True
+            expected = "A/Alice/p/MetArt/PathExistShoot"
+            os.makedirs(os.path.join(tmpdir, expected), exist_ok=True)
+            items = [
+                {"model_name": "Alice", "album_name": "PathExistShoot",
+                 "studio_name": "MetArt"}
+            ]
+            result = self.service.preview(items, tmpdir, "MetArt")
+        codes = [e["code"] for e in result["items"][0]["validation_errors"]]
+        self.assertIn("PATH_EXISTS", codes)
+
+    def test_path_exists_sets_can_import_false(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            expected = "A/Alice/p/MetArt/FsCollide"
+            os.makedirs(os.path.join(tmpdir, expected), exist_ok=True)
+            items = [
+                {"model_name": "Alice", "album_name": "FsCollide",
+                 "studio_name": "MetArt"}
+            ]
+            result = self.service.preview(items, tmpdir, "MetArt")
+        self.assertFalse(result["items"][0]["can_import"])
+
+    # --- DUPLICATE_IN_BATCH ---
+
+    def test_duplicate_in_batch_flags_both_items(self):
+        items = [
+            {"model_name": "Alice", "album_name": "Summer", "studio_name": "MetArt"},
+            {"model_name": "Alice", "album_name": "Summer", "studio_name": "MetArt"},
+        ]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        for item in result["items"]:
+            codes = [e["code"] for e in item["validation_errors"]]
+            self.assertIn("DUPLICATE_IN_BATCH", codes)
+
+    def test_duplicate_in_batch_both_items_not_importable(self):
+        items = [
+            {"model_name": "Alice", "album_name": "Summer", "studio_name": "MetArt"},
+            {"model_name": "Alice", "album_name": "Summer", "studio_name": "MetArt"},
+        ]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        for item in result["items"]:
+            self.assertFalse(item["can_import"])
+
+    def test_duplicate_in_batch_does_not_flag_unique_items(self):
+        items = [
+            {"model_name": "Alice", "album_name": "Summer", "studio_name": "MetArt"},
+            {"model_name": "Alice", "album_name": "Winter", "studio_name": "MetArt"},
+        ]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        for item in result["items"]:
+            codes = [e["code"] for e in item["validation_errors"]]
+            self.assertNotIn("DUPLICATE_IN_BATCH", codes)
+
+    def test_duplicate_in_batch_case_insensitive(self):
+        # "SUMMER" and "summer" normalize to same comparison key — both flagged
+        items = [
+            {"model_name": "Alice", "album_name": "SUMMER", "studio_name": "MetArt"},
+            {"model_name": "Alice", "album_name": "summer", "studio_name": "MetArt"},
+        ]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        for item in result["items"]:
+            codes = [e["code"] for e in item["validation_errors"]]
+            self.assertIn("DUPLICATE_IN_BATCH", codes)
+
+    def test_three_items_one_duplicate_one_clean(self):
+        items = [
+            {"model_name": "Alice", "album_name": "Summer", "studio_name": "MetArt"},
+            {"model_name": "Alice", "album_name": "Summer", "studio_name": "MetArt"},
+            {"model_name": "Alice", "album_name": "Winter", "studio_name": "MetArt"},
+        ]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        codes_0 = [e["code"] for e in result["items"][0]["validation_errors"]]
+        codes_1 = [e["code"] for e in result["items"][1]["validation_errors"]]
+        codes_2 = [e["code"] for e in result["items"][2]["validation_errors"]]
+        self.assertIn("DUPLICATE_IN_BATCH", codes_0)
+        self.assertIn("DUPLICATE_IN_BATCH", codes_1)
+        self.assertNotIn("DUPLICATE_IN_BATCH", codes_2)
+        self.assertTrue(result["items"][2]["can_import"])
+
+    # --- PATH_COLLISION (DB canonical-path collision) ---
+
+    def test_path_collision_adds_validation_error_code(self):
+        # Store an album with a path that matches the proposed canonical path.
+        import canonical_path as cp
+        proposed = cp.build_canonical_path("Alice", "MetArt", "PathCollideShoot")
+        self.conn.execute(
+            "INSERT INTO album (uuid, studio_id, title, path, created_at, updated_at)"
+            " VALUES ('a1', 1, 'OtherTitle', ?, '2024-01-01', '2024-01-01')",
+            (proposed,),
+        )
+        self.conn.commit()
+        items = [
+            {"model_name": "Alice", "album_name": "PathCollideShoot",
+             "studio_name": "MetArt"}
+        ]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        codes = [e["code"] for e in result["items"][0]["validation_errors"]]
+        self.assertIn("PATH_COLLISION", codes)
+
+    def test_path_collision_sets_can_import_false(self):
+        import canonical_path as cp
+        proposed = cp.build_canonical_path("Alice", "MetArt", "Collision2")
+        self.conn.execute(
+            "INSERT INTO album (uuid, studio_id, title, path, created_at, updated_at)"
+            " VALUES ('a1', 1, 'OtherTitle2', ?, '2024-01-01', '2024-01-01')",
+            (proposed,),
+        )
+        self.conn.commit()
+        items = [
+            {"model_name": "Alice", "album_name": "Collision2", "studio_name": "MetArt"}
+        ]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        self.assertFalse(result["items"][0]["can_import"])
+
+    def test_no_path_collision_when_path_is_different(self):
+        self.conn.execute(
+            "INSERT INTO album (uuid, studio_id, title, path, created_at, updated_at)"
+            " VALUES ('a1', 1, 'Other', 'A/Alice/p/MetArt/Other', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        items = [
+            {"model_name": "Alice", "album_name": "Unique", "studio_name": "MetArt"}
+        ]
+        result = self.service.preview(items, "/no-such-root", "MetArt")
+        codes = [e["code"] for e in result["items"][0]["validation_errors"]]
+        self.assertNotIn("PATH_COLLISION", codes)
+        self.assertTrue(result["items"][0]["can_import"])
+
+    # --- Determinism ---
+
+    def test_preview_is_deterministic(self):
+        items = [
+            {"model_name": "Alice", "album_name": "Summer", "studio_name": "MetArt"}
+        ]
+        r1 = self.service.preview(items, "/no-such-root", "MetArt")
+        r2 = self.service.preview(items, "/no-such-root", "MetArt")
+        self.assertEqual(r1["items"][0]["expected_path"], r2["items"][0]["expected_path"])
+        self.assertEqual(
+            r1["items"][0]["validation_errors"],
+            r2["items"][0]["validation_errors"],
+        )
+
+    def test_normalized_input_equivalent_to_unnormalized(self):
+        # Whitespace-padded and clean inputs must produce the same preview.
+        items_clean = [{"model_name": "Alice", "album_name": "Summer", "studio_name": "MetArt"}]
+        items_padded = [{"model_name": "  Alice  ", "album_name": " Summer ", "studio_name": " MetArt "}]
+        r_clean = self.service.preview(items_clean, "/no-such-root", "MetArt")
+        r_padded = self.service.preview(items_padded, "/no-such-root", "MetArt")
+        self.assertEqual(
+            r_clean["items"][0]["expected_path"],
+            r_padded["items"][0]["expected_path"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

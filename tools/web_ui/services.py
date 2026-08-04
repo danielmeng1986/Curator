@@ -418,12 +418,33 @@ class ImportService:
     def preview(
         self, items: list, archive_root: str, default_studio: str
     ) -> dict:
-        """Build an import preview for the supplied candidate items.
+        """Build a deterministic import preview for the supplied candidate items.
+
+        Normalizes each candidate's path components, detects within-batch
+        canonical-path duplicates, and checks for database and filesystem
+        collisions — all without mutating any persistent state.
+
+        Each item in the returned ``items`` list includes a ``validation_errors``
+        field containing zero or more structured error dicts, each with a stable
+        machine-readable ``code`` and a human-readable ``message``. The
+        ``can_import`` flag is ``True`` only when ``validation_errors`` is empty.
+
+        Validation error codes:
+        - ``DUPLICATE_IN_BATCH``: Two or more items in this batch share the
+          same canonical path comparison key.
+        - ``ALBUM_EXISTS``: An album with a matching title already exists in
+          the studio in the database.
+        - ``PATH_EXISTS``: The target filesystem path already exists.
+        - ``PATH_COLLISION``: Another album in the database already occupies
+          the same canonical path (caught via ``album.path`` comparison key).
 
         Returns a dict with ``items`` (per-candidate outcome) and ``summary``
         (total / importable / skipped counts).
         """
-        preview_items = []
+        # ---------------------------------------------------------------
+        # Pass 1 — normalize all candidates, compute comparison keys.
+        # ---------------------------------------------------------------
+        normalized: list[dict] = []
         for item in items:
             folder_name = item.get("folder_name", "")
             studio_name = item.get("studio_name") or default_studio
@@ -437,13 +458,9 @@ class ImportService:
             studio_name = cpath.canonicalize_component(studio_name)
             album_name = cpath.canonicalize_component(album_name)
             expected_path = build_archive_path(model_name, studio_name, album_name)
-            full_path = Path(archive_root) / expected_path
+            ck = cpath.comparison_key(expected_path)
 
-            lookup = self._repo.lookup_preview_item(studio_name, model_name, album_name)
-            path_exists = full_path.exists()
-            can_import = not lookup["album_exists"] and not path_exists
-
-            preview_items.append(
+            normalized.append(
                 {
                     "folder_name": folder_name,
                     "model_name": model_name,
@@ -451,6 +468,78 @@ class ImportService:
                     "studio_name": studio_name,
                     "expected_path": expected_path,
                     "source_path": item.get("source_path", ""),
+                    "_ck": ck,
+                    "validation_errors": [],
+                }
+            )
+
+        # Locate all within-batch canonical-path duplicates.
+        ck_indices: dict[str, list[int]] = {}
+        for i, n in enumerate(normalized):
+            ck_indices.setdefault(n["_ck"], []).append(i)
+        batch_duplicate_indices: set[int] = set()
+        for indices in ck_indices.values():
+            if len(indices) > 1:
+                batch_duplicate_indices.update(indices)
+
+        # ---------------------------------------------------------------
+        # Pass 2 — run lookups and assemble per-item validation outcomes.
+        # ---------------------------------------------------------------
+        preview_items: list[dict] = []
+        for i, n in enumerate(normalized):
+            ck = n.pop("_ck")
+            errors: list[dict] = n["validation_errors"]
+
+            if i in batch_duplicate_indices:
+                errors.append(
+                    {
+                        "code": "DUPLICATE_IN_BATCH",
+                        "message": (
+                            "Multiple items in this import batch share the "
+                            "same canonical path."
+                        ),
+                    }
+                )
+
+            lookup = self._repo.lookup_preview_item(
+                n["studio_name"], n["model_name"], n["album_name"]
+            )
+            if lookup["album_exists"]:
+                errors.append(
+                    {
+                        "code": "ALBUM_EXISTS",
+                        "message": (
+                            "An album with this name already exists in the studio."
+                        ),
+                    }
+                )
+            elif self._repo.lookup_path_collision(ck):
+                errors.append(
+                    {
+                        "code": "PATH_COLLISION",
+                        "message": (
+                            "Another album in the database already occupies "
+                            "the same canonical path."
+                        ),
+                    }
+                )
+
+            full_path = Path(archive_root) / n["expected_path"]
+            path_exists = full_path.exists()
+            if path_exists:
+                errors.append(
+                    {
+                        "code": "PATH_EXISTS",
+                        "message": (
+                            f"The target filesystem path already exists: "
+                            f"{n['expected_path']}"
+                        ),
+                    }
+                )
+
+            preview_items.append(
+                {
+                    **n,
                     "model_exists": lookup["model_exists"],
                     "model_id": lookup["model_id"],
                     "studio_exists": lookup["studio_exists"],
@@ -458,7 +547,7 @@ class ImportService:
                     "album_exists": lookup["album_exists"],
                     "album_id": lookup["album_id"],
                     "path_exists": path_exists,
-                    "can_import": can_import,
+                    "can_import": not errors,
                 }
             )
 
