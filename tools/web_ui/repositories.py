@@ -44,6 +44,228 @@ def _utc_now_iso() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Read-model normalization
+#
+# Each function accepts a plain dict (converted from a sqlite3.Row) and
+# returns a canonical read-model dict with a stable, explicit field set.
+# Services and controllers consume these normalized dicts; they never see
+# raw database row objects or database-specific field conventions.
+# ---------------------------------------------------------------------------
+
+def _norm_status(row: dict) -> dict:
+    """Canonical read model for a single status record."""
+    return {
+        "id": row["id"],
+        "name": row.get("name"),
+        "description": row.get("description"),
+    }
+
+
+def _norm_status_with_counts(row: dict) -> dict:
+    """Status read model enriched with album reference counts."""
+    return {
+        "id": row["id"],
+        "name": row.get("name"),
+        "description": row.get("description"),
+        "album_count": row.get("album_count", 0),
+        "workspace_album_count": row.get("workspace_album_count", 0),
+    }
+
+
+def _norm_model(row: dict) -> dict:
+    """Canonical read model for a model entity.
+
+    Adds a computed ``name`` field (COALESCE of display_name and
+    primary_name) so consumers have a single stable display value.
+    """
+    return {
+        "id": row["id"],
+        "uuid": row.get("uuid") or "",
+        "name": row.get("display_name") or row.get("primary_name"),
+        "display_name": row.get("display_name"),
+        "primary_name": row.get("primary_name"),
+        "description": row.get("description"),
+        "country": row.get("country"),
+        "ethnicity": row.get("ethnicity"),
+        "eye_color": row.get("eye_color"),
+        "natural_hair_color": row.get("natural_hair_color"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def _norm_model_album_assoc(row: dict) -> dict:
+    """Albums associated with a model (used in model detail view)."""
+    return {
+        "id": row["id"],
+        "title": row.get("title"),
+        "capture_date": row.get("capture_date"),
+        "age_when_shot": row.get("age_when_shot"),
+        "role": row.get("role"),
+        "remarks": row.get("remarks"),
+        "studio_name": row.get("studio_name"),
+    }
+
+
+def _norm_studio(row: dict) -> dict:
+    """Canonical read model for a studio entity."""
+    return {
+        "id": row["id"],
+        "uuid": row.get("uuid") or "",
+        "name": row.get("name"),
+        "website": row.get("website"),
+        "description": row.get("description"),
+        "media_scope": row.get("media_scope"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def _norm_studio_album_assoc(row: dict) -> dict:
+    """Albums associated with a studio (used in studio detail view)."""
+    return {
+        "id": row["id"],
+        "title": row.get("title"),
+        "capture_date": row.get("capture_date"),
+        "publish_date": row.get("publish_date"),
+        "rating": row.get("rating"),
+        "status_name": row.get("status_name"),
+    }
+
+
+def _norm_album_list(row: dict) -> dict:
+    """Album read model for list/search results.
+
+    Normalizes ``model_names`` from a SQL GROUP_CONCAT string to a
+    Python list so consumers never need to split database-specific
+    aggregate output.
+    """
+    raw_names = row.get("model_names") or ""
+    model_names = [n for n in raw_names.split(",") if n]
+    return {
+        "id": row["id"],
+        "uuid": row.get("uuid") or "",
+        "title": row.get("title"),
+        "description": row.get("description"),
+        "scene": row.get("scene"),
+        "location": row.get("location"),
+        "capture_date": row.get("capture_date"),
+        "publish_date": row.get("publish_date"),
+        "rating": row.get("rating"),
+        "path": row.get("path"),
+        "studio_id": row.get("studio_id"),
+        "status_id": row.get("status_id"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "studio_name": row.get("studio_name"),
+        "status_name": row.get("status_name"),
+        "model_names": model_names,
+    }
+
+
+def _norm_album_detail(row: dict) -> dict:
+    """Album read model for single-record detail views."""
+    return {
+        "id": row["id"],
+        "uuid": row.get("uuid") or "",
+        "title": row.get("title"),
+        "description": row.get("description"),
+        "scene": row.get("scene"),
+        "location": row.get("location"),
+        "capture_date": row.get("capture_date"),
+        "publish_date": row.get("publish_date"),
+        "rating": row.get("rating"),
+        "path": row.get("path"),
+        "studio_id": row.get("studio_id"),
+        "status_id": row.get("status_id"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "studio_name": row.get("studio_name"),
+        "status_name": row.get("status_name"),
+    }
+
+
+def _norm_album_model_assoc(row: dict) -> dict:
+    """Model associations on an album (used in album detail view)."""
+    return {
+        "id": row["id"],
+        "model_id": row.get("model_id"),
+        "age_when_shot": row.get("age_when_shot"),
+        "role": row.get("role"),
+        "remarks": row.get("remarks"),
+        "model_name": row.get("model_name"),
+    }
+
+
+def _norm_album_relation_assoc(row: dict) -> dict:
+    """Relation associations on an album (used in album detail view)."""
+    return {
+        "id": row["id"],
+        "related_album_id": row.get("related_album_id"),
+        "relation_type": row.get("relation_type"),
+        "remarks": row.get("remarks"),
+        "related_title": row.get("related_title"),
+        "related_studio": row.get("related_studio"),
+    }
+
+
+def _norm_photo(row: dict) -> dict:
+    """Canonical read model for a photo.
+
+    The ``hash`` column is an internal file fingerprint and is excluded
+    from all read models.
+    """
+    return {
+        "id": row["id"],
+        "uuid": row.get("uuid") or "",
+        "album_id": row.get("album_id"),
+        "filename": row.get("filename"),
+        "relative_path": row.get("relative_path"),
+        "width": row.get("width"),
+        "height": row.get("height"),
+        "capture_time": row.get("capture_time"),
+        "created_at": row.get("created_at"),
+    }
+
+
+def _norm_workspace_album(row: dict) -> dict:
+    """Canonical read model for a workspace album."""
+    return {
+        "id": row["id"],
+        "uuid": row.get("uuid"),
+        "studio_name": row.get("studio_name"),
+        "album_name": row.get("album_name"),
+        "primary_model": row.get("primary_model"),
+        "additional_models": row.get("additional_models"),
+        "remark": row.get("remark"),
+        "current_path": row.get("current_path"),
+        "expected_path": row.get("expected_path"),
+        "ai_result": row.get("ai_result"),
+        "belongs_to_album_id": row.get("belongs_to_album_id"),
+        "album_id": row.get("album_id"),
+        "status_id": row.get("status_id"),
+        "status_name": row.get("status_name"),
+    }
+
+
+def _norm_workspace_album_belongs_to(row: dict) -> dict:
+    """Parent workspace album reference in a detail read model."""
+    return {
+        "id": row["id"],
+        "album_name": row.get("album_name"),
+        "primary_model": row.get("primary_model"),
+    }
+
+
+def _norm_workspace_album_linked_album(row: dict) -> dict:
+    """Linked permanent album reference in a workspace album detail read model."""
+    return {
+        "id": row["id"],
+        "title": row.get("title"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # StatusRepository
 # ---------------------------------------------------------------------------
 
@@ -66,7 +288,7 @@ class StatusRepository:
                 FROM status s ORDER BY s.id
                 """
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [_norm_status_with_counts(dict(r)) for r in rows]
 
     def create(self, name: str, description: str) -> dict:
         """Insert a new status and return the persisted record."""
@@ -79,7 +301,7 @@ class StatusRepository:
             row = conn.execute(
                 "SELECT * FROM status WHERE id = ?", (cur.lastrowid,)
             ).fetchone()
-        return {"id": cur.lastrowid, "status": dict(row)}
+        return {"id": cur.lastrowid, "status": _norm_status(dict(row))}
 
     def update(self, status_id: int, name: str, description: str) -> dict | None:
         """Update a status and return the refreshed record, or None if not found."""
@@ -92,7 +314,7 @@ class StatusRepository:
             row = conn.execute(
                 "SELECT * FROM status WHERE id = ?", (status_id,)
             ).fetchone()
-        return dict(row) if row is not None else None
+        return _norm_status(dict(row)) if row is not None else None
 
     def delete(self, status_id: int) -> None:
         """Atomically verify no references exist, then delete the status.
@@ -148,7 +370,7 @@ class ModelRepository:
                 " WHERE (display_name LIKE ? OR primary_name LIKE ?)",
                 (pattern, pattern),
             ).fetchone()[0]
-        return [dict(r) for r in rows], total
+        return [_norm_model(dict(r)) for r in rows], total
 
     def get_by_id(self, model_id: int) -> dict | None:
         """Return model record and its album list, or None if not found."""
@@ -171,7 +393,10 @@ class ModelRepository:
                 """,
                 (model_id,),
             ).fetchall()
-        return {"model": dict(row), "albums": [dict(a) for a in albums]}
+        return {
+            "model": _norm_model(dict(row)),
+            "albums": [_norm_model_album_assoc(dict(a)) for a in albums],
+        }
 
     def create(self, data: dict) -> dict:
         """Insert a new model and return a dict with the new id and record."""
@@ -203,7 +428,7 @@ class ModelRepository:
             row = conn.execute(
                 "SELECT * FROM model WHERE id = ?", (cur.lastrowid,)
             ).fetchone()
-        return {"id": cur.lastrowid, "model": dict(row)}
+        return {"id": cur.lastrowid, "model": _norm_model(dict(row))}
 
     def update_fields(
         self, model_id: int, data: dict, now: str
@@ -234,7 +459,7 @@ class ModelRepository:
             row = conn.execute(
                 "SELECT * FROM model WHERE id = ?", (model_id,)
             ).fetchone()
-        return dict(row) if row is not None else None
+        return _norm_model(dict(row)) if row is not None else None
 
     def find_by_name(self, name: str) -> dict | None:
         """Return a model matching the given name (case-insensitive), or None."""
@@ -310,7 +535,7 @@ class StudioRepository:
             total = conn.execute(
                 "SELECT COUNT(*) FROM studio WHERE name LIKE ?", (pattern,)
             ).fetchone()[0]
-        return [dict(r) for r in rows], total
+        return [_norm_studio(dict(r)) for r in rows], total
 
     def get_by_id(self, studio_id: int) -> dict | None:
         """Return studio record and its album list, or None if not found."""
@@ -331,7 +556,10 @@ class StudioRepository:
                 """,
                 (studio_id,),
             ).fetchall()
-        return {"studio": dict(row), "albums": [dict(a) for a in albums]}
+        return {
+            "studio": _norm_studio(dict(row)),
+            "albums": [_norm_studio_album_assoc(dict(a)) for a in albums],
+        }
 
     def create(self, data: dict) -> dict:
         """Insert a new studio and return a dict with the new id and record."""
@@ -359,7 +587,7 @@ class StudioRepository:
             row = conn.execute(
                 "SELECT * FROM studio WHERE id = ?", (cur.lastrowid,)
             ).fetchone()
-        return {"id": cur.lastrowid, "studio": dict(row)}
+        return {"id": cur.lastrowid, "studio": _norm_studio(dict(row))}
 
     def update(self, studio_id: int, data: dict, now: str) -> dict | None:
         """Update a studio and return the refreshed record, or None if not found."""
@@ -384,7 +612,7 @@ class StudioRepository:
             row = conn.execute(
                 "SELECT * FROM studio WHERE id = ?", (studio_id,)
             ).fetchone()
-        return dict(row) if row is not None else None
+        return _norm_studio(dict(row)) if row is not None else None
 
     def find_by_name(self, name: str) -> dict | None:
         """Return a studio matching the given name (case-insensitive), or None."""
@@ -516,7 +744,7 @@ class AlbumRepository:
         with self._db() as conn:
             rows = conn.execute(query, params + [limit, offset]).fetchall()
             total = conn.execute(count_query, params).fetchone()[0]
-        return [dict(r) for r in rows], total
+        return [_norm_album_list(dict(r)) for r in rows], total
 
     def get_by_id(self, album_id: int) -> dict | None:
         """Return album with studio, status, models, relations and photos, or None."""
@@ -556,17 +784,17 @@ class AlbumRepository:
             ).fetchall()
             photos = conn.execute(
                 """
-                SELECT id, uuid, filename, relative_path, width, height,
+                SELECT id, uuid, album_id, filename, relative_path, width, height,
                     capture_time, created_at
                 FROM photo WHERE album_id = ? ORDER BY filename
                 """,
                 (album_id,),
             ).fetchall()
         return {
-            "album": dict(row),
-            "models": [dict(m) for m in models],
-            "relations": [dict(r) for r in relations],
-            "photos": [dict(p) for p in photos],
+            "album": _norm_album_detail(dict(row)),
+            "models": [_norm_album_model_assoc(dict(m)) for m in models],
+            "relations": [_norm_album_relation_assoc(dict(r)) for r in relations],
+            "photos": [_norm_photo(dict(p)) for p in photos],
         }
 
     def create(
@@ -990,7 +1218,7 @@ class WorkspaceAlbumRepository:
         with self._db() as conn:
             rows = conn.execute(query, params + [limit, offset]).fetchall()
             total = conn.execute(count_query, params).fetchone()[0]
-        return [dict(r) for r in rows], total
+        return [_norm_workspace_album(dict(r)) for r in rows], total
 
     def get_by_id(self, wa_id: int) -> dict | None:
         """Return workspace album with belongs_to and linked_album context, or None."""
@@ -1006,24 +1234,29 @@ class WorkspaceAlbumRepository:
             ).fetchone()
             if row is None:
                 return None
-            d = dict(row)
-            if d.get("belongs_to_album_id"):
+            raw = dict(row)
+            normalized = _norm_workspace_album(raw)
+            if raw.get("belongs_to_album_id"):
                 parent = conn.execute(
                     "SELECT id, album_name, primary_model"
                     " FROM workspace_album WHERE id = ?",
-                    (d["belongs_to_album_id"],),
+                    (raw["belongs_to_album_id"],),
                 ).fetchone()
-                d["belongs_to"] = dict(parent) if parent else None
+                normalized["belongs_to"] = (
+                    _norm_workspace_album_belongs_to(dict(parent)) if parent else None
+                )
             else:
-                d["belongs_to"] = None
-            if d.get("album_id"):
+                normalized["belongs_to"] = None
+            if raw.get("album_id"):
                 linked = conn.execute(
-                    "SELECT id, title FROM album WHERE id = ?", (d["album_id"],)
+                    "SELECT id, title FROM album WHERE id = ?", (raw["album_id"],)
                 ).fetchone()
-                d["linked_album"] = dict(linked) if linked else None
+                normalized["linked_album"] = (
+                    _norm_workspace_album_linked_album(dict(linked)) if linked else None
+                )
             else:
-                d["linked_album"] = None
-        return d
+                normalized["linked_album"] = None
+        return normalized
 
     def update(self, wa_id: int, allowed_fields: frozenset, changes: dict) -> None:
         """Apply an allow-listed subset of changes to a single workspace album."""

@@ -1136,5 +1136,425 @@ class TestImportRepositoryCreateItem(unittest.TestCase):
         self.assertEqual(count, 1)
 
 
+# ---------------------------------------------------------------------------
+# Read-model normalization tests
+# ---------------------------------------------------------------------------
+
+class TestModelReadModelShape(unittest.TestCase):
+    """Model read model has stable fields and a computed ``name``."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.conn.execute(
+            "INSERT INTO model (uuid, display_name, primary_name, created_at, updated_at)"
+            " VALUES ('u1', 'Alice', 'Ali', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO model (uuid, display_name, primary_name, created_at, updated_at)"
+            " VALUES ('u2', NULL, 'Noname', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        self.repo = repo.ModelRepository(db_factory=_db_factory(self.conn))
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_search_result_has_exact_expected_keys(self):
+        rows, _ = self.repo.search("", limit=50, offset=0)
+        expected_keys = {
+            "id", "uuid", "name", "display_name", "primary_name",
+            "description", "country", "ethnicity", "eye_color",
+            "natural_hair_color", "created_at", "updated_at",
+        }
+        for row in rows:
+            self.assertEqual(set(row.keys()), expected_keys)
+
+    def test_search_name_is_coalesced_from_display_name(self):
+        rows, _ = self.repo.search("Alice", limit=50, offset=0)
+        self.assertEqual(rows[0]["name"], "Alice")
+
+    def test_search_name_falls_back_to_primary_name_when_display_absent(self):
+        rows, _ = self.repo.search("Noname", limit=50, offset=0)
+        self.assertEqual(rows[0]["name"], "Noname")
+
+    def test_search_optional_fields_are_none_when_absent(self):
+        rows, _ = self.repo.search("Noname", limit=50, offset=0)
+        self.assertIsNone(rows[0]["display_name"])
+        self.assertIsNone(rows[0]["description"])
+        self.assertIsNone(rows[0]["country"])
+
+    def test_update_fields_result_has_name_field(self):
+        result = self.repo.update_fields(1, {"display_name": "Updated"}, "2024-06-01")
+        self.assertIn("name", result)
+        self.assertEqual(result["name"], "Updated")
+
+    def test_update_fields_result_has_exact_expected_keys(self):
+        result = self.repo.update_fields(1, {"display_name": "X"}, "2024-06-01")
+        expected_keys = {
+            "id", "uuid", "name", "display_name", "primary_name",
+            "description", "country", "ethnicity", "eye_color",
+            "natural_hair_color", "created_at", "updated_at",
+        }
+        self.assertEqual(set(result.keys()), expected_keys)
+
+    def test_create_model_result_has_name_field(self):
+        result = self.repo.create({"display_name": "NewModel", "primary_name": "NM"})
+        self.assertIn("name", result["model"])
+        self.assertEqual(result["model"]["name"], "NewModel")
+
+    def test_create_model_name_falls_back_to_primary_name(self):
+        result = self.repo.create({"primary_name": "OnlyPrimary"})
+        self.assertEqual(result["model"]["name"], "OnlyPrimary")
+
+    def test_get_by_id_model_has_name_field(self):
+        result = self.repo.get_by_id(1)
+        self.assertIn("name", result["model"])
+        self.assertEqual(result["model"]["name"], "Alice")
+
+
+class TestModelDetailAlbumAssocShape(unittest.TestCase):
+    """Album associations in a model detail read model have stable fields."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.conn.execute(
+            "INSERT INTO model (uuid, display_name, created_at, updated_at)"
+            " VALUES ('m1', 'Alice', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO studio (uuid, name, created_at, updated_at)"
+            " VALUES ('s1', 'MetArt', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO album (uuid, studio_id, title, capture_date, created_at, updated_at)"
+            " VALUES ('a1', 1, 'Shoot1', '2024-03-01', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO album_model (album_id, model_id, age_when_shot, role)"
+            " VALUES (1, 1, 25.0, 'lead')"
+        )
+        self.conn.commit()
+        self.repo = repo.ModelRepository(db_factory=_db_factory(self.conn))
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_album_assoc_has_exact_expected_keys(self):
+        result = self.repo.get_by_id(1)
+        expected_keys = {
+            "id", "title", "capture_date", "age_when_shot", "role", "remarks", "studio_name",
+        }
+        for album in result["albums"]:
+            self.assertEqual(set(album.keys()), expected_keys)
+
+    def test_album_assoc_studio_name_is_populated(self):
+        result = self.repo.get_by_id(1)
+        self.assertEqual(result["albums"][0]["studio_name"], "MetArt")
+
+    def test_album_assoc_optional_remarks_is_none(self):
+        result = self.repo.get_by_id(1)
+        self.assertIsNone(result["albums"][0]["remarks"])
+
+
+class TestAlbumListReadModelShape(unittest.TestCase):
+    """Album list read model has stable fields and ``model_names`` as a list."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.conn.execute(
+            "INSERT INTO studio (uuid, name, created_at, updated_at)"
+            " VALUES ('s1', 'MetArt', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO model (uuid, display_name, created_at, updated_at)"
+            " VALUES ('m1', 'Alice', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO model (uuid, display_name, created_at, updated_at)"
+            " VALUES ('m2', 'Bob', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO album (uuid, studio_id, title, created_at, updated_at)"
+            " VALUES ('a1', 1, 'Shoot1', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO album_model (album_id, model_id) VALUES (1, 1)"
+        )
+        self.conn.execute(
+            "INSERT INTO album_model (album_id, model_id) VALUES (1, 2)"
+        )
+        self.conn.execute(
+            "INSERT INTO album (uuid, title, created_at, updated_at)"
+            " VALUES ('a2', 'NoModels', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        self.repo = repo.AlbumRepository(db_factory=_db_factory(self.conn))
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_search_result_has_exact_expected_keys(self):
+        rows, _ = self.repo.search()
+        expected_keys = {
+            "id", "uuid", "title", "description", "scene", "location",
+            "capture_date", "publish_date", "rating", "path",
+            "studio_id", "status_id", "created_at", "updated_at",
+            "studio_name", "status_name", "model_names",
+        }
+        for row in rows:
+            self.assertEqual(set(row.keys()), expected_keys)
+
+    def test_model_names_is_always_a_list(self):
+        rows, _ = self.repo.search()
+        for row in rows:
+            self.assertIsInstance(row["model_names"], list)
+
+    def test_model_names_contains_all_associated_names(self):
+        rows, _ = self.repo.search(q="Shoot1")
+        self.assertEqual(len(rows), 1)
+        self.assertIn("Alice", rows[0]["model_names"])
+        self.assertIn("Bob", rows[0]["model_names"])
+
+    def test_model_names_is_empty_list_when_no_models(self):
+        rows, _ = self.repo.search(q="NoModels")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["model_names"], [])
+
+    def test_optional_fields_are_none_when_absent(self):
+        rows, _ = self.repo.search(q="NoModels")
+        self.assertIsNone(rows[0]["description"])
+        self.assertIsNone(rows[0]["studio_id"])
+        self.assertIsNone(rows[0]["status_id"])
+        self.assertIsNone(rows[0]["studio_name"])
+
+
+class TestAlbumDetailReadModelShape(unittest.TestCase):
+    """Album detail read model has stable fields; photo hash is excluded."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.conn.execute(
+            "INSERT INTO studio (uuid, name, created_at, updated_at)"
+            " VALUES ('s1', 'MetArt', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO model (uuid, display_name, created_at, updated_at)"
+            " VALUES ('m1', 'Alice', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO album (uuid, studio_id, title, created_at, updated_at)"
+            " VALUES ('a1', 1, 'Shoot1', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO album_model (album_id, model_id, role) VALUES (1, 1, 'lead')"
+        )
+        self.conn.execute(
+            "INSERT INTO album (uuid, title, created_at, updated_at)"
+            " VALUES ('a2', 'Related', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO album_relation (album_id, related_album_id, relation_type)"
+            " VALUES (1, 2, 'set')"
+        )
+        self.conn.execute(
+            "INSERT INTO photo (uuid, album_id, filename, hash, width, height, created_at)"
+            " VALUES ('p1', 1, 'img.jpg', 'abc123hash', 1920, 1080, '2024-01-01')"
+        )
+        self.conn.commit()
+        self.repo = repo.AlbumRepository(db_factory=_db_factory(self.conn))
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_album_has_exact_expected_keys(self):
+        result = self.repo.get_by_id(1)
+        expected_keys = {
+            "id", "uuid", "title", "description", "scene", "location",
+            "capture_date", "publish_date", "rating", "path",
+            "studio_id", "status_id", "created_at", "updated_at",
+            "studio_name", "status_name",
+        }
+        self.assertEqual(set(result["album"].keys()), expected_keys)
+
+    def test_album_model_assoc_has_exact_expected_keys(self):
+        result = self.repo.get_by_id(1)
+        expected_keys = {"id", "model_id", "age_when_shot", "role", "remarks", "model_name"}
+        for m in result["models"]:
+            self.assertEqual(set(m.keys()), expected_keys)
+
+    def test_album_relation_assoc_has_exact_expected_keys(self):
+        result = self.repo.get_by_id(1)
+        expected_keys = {
+            "id", "related_album_id", "relation_type", "remarks",
+            "related_title", "related_studio",
+        }
+        for r in result["relations"]:
+            self.assertEqual(set(r.keys()), expected_keys)
+
+    def test_photo_does_not_include_hash_field(self):
+        result = self.repo.get_by_id(1)
+        for p in result["photos"]:
+            self.assertNotIn("hash", p)
+
+    def test_photo_has_exact_expected_keys(self):
+        result = self.repo.get_by_id(1)
+        expected_keys = {
+            "id", "uuid", "album_id", "filename", "relative_path",
+            "width", "height", "capture_time", "created_at",
+        }
+        for p in result["photos"]:
+            self.assertEqual(set(p.keys()), expected_keys)
+
+    def test_photo_album_id_matches_parent_album(self):
+        result = self.repo.get_by_id(1)
+        for p in result["photos"]:
+            self.assertEqual(p["album_id"], 1)
+
+    def test_album_model_assoc_model_name_populated(self):
+        result = self.repo.get_by_id(1)
+        self.assertEqual(result["models"][0]["model_name"], "Alice")
+
+    def test_album_relation_assoc_related_title_populated(self):
+        result = self.repo.get_by_id(1)
+        self.assertEqual(result["relations"][0]["related_title"], "Related")
+
+
+class TestWorkspaceAlbumReadModelShape(unittest.TestCase):
+    """Workspace album read model has stable explicit fields."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.conn.execute(
+            "INSERT INTO status (name) VALUES ('Active')"
+        )
+        self.conn.execute(
+            "INSERT INTO workspace_album"
+            " (uuid, studio_name, album_name, primary_model, status_id)"
+            " VALUES ('wa-uuid-1', 'MetArt', 'Shoot1', 'Alice', 1)"
+        )
+        self.conn.execute(
+            "INSERT INTO workspace_album (studio_name, album_name)"
+            " VALUES ('S', 'B')"
+        )
+        self.conn.commit()
+        # Insert a child workspace album that references the first as its parent
+        self.conn.execute(
+            "INSERT INTO workspace_album (studio_name, album_name, belongs_to_album_id)"
+            " VALUES ('S', 'Child', 1)"
+        )
+        self.conn.commit()
+        self.repo = repo.WorkspaceAlbumRepository(db_factory=_db_factory(self.conn))
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_search_result_has_exact_expected_keys(self):
+        rows, _ = self.repo.search(limit=50, offset=0)
+        expected_keys = {
+            "id", "uuid", "studio_name", "album_name", "primary_model",
+            "additional_models", "remark", "current_path", "expected_path",
+            "ai_result", "belongs_to_album_id", "album_id",
+            "status_id", "status_name",
+        }
+        for row in rows:
+            self.assertEqual(set(row.keys()), expected_keys)
+
+    def test_search_status_name_is_populated(self):
+        rows, _ = self.repo.search(status_id="1", limit=50, offset=0)
+        self.assertEqual(rows[0]["status_name"], "Active")
+
+    def test_search_optional_fields_are_none_when_absent(self):
+        rows, _ = self.repo.search(q="B", limit=50, offset=0)
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0]["uuid"])
+        self.assertIsNone(rows[0]["status_id"])
+        self.assertIsNone(rows[0]["status_name"])
+
+    def test_get_by_id_has_exact_expected_keys(self):
+        result = self.repo.get_by_id(1)
+        expected_keys = {
+            "id", "uuid", "studio_name", "album_name", "primary_model",
+            "additional_models", "remark", "current_path", "expected_path",
+            "ai_result", "belongs_to_album_id", "album_id",
+            "status_id", "status_name", "belongs_to", "linked_album",
+        }
+        self.assertEqual(set(result.keys()), expected_keys)
+
+    def test_get_by_id_belongs_to_has_expected_keys_when_present(self):
+        result = self.repo.get_by_id(3)
+        self.assertIsNotNone(result["belongs_to"])
+        self.assertEqual(set(result["belongs_to"].keys()), {"id", "album_name", "primary_model"})
+
+    def test_get_by_id_belongs_to_values_correct(self):
+        result = self.repo.get_by_id(3)
+        self.assertEqual(result["belongs_to"]["id"], 1)
+        self.assertEqual(result["belongs_to"]["album_name"], "Shoot1")
+        self.assertEqual(result["belongs_to"]["primary_model"], "Alice")
+
+    def test_get_by_id_belongs_to_is_none_when_not_set(self):
+        result = self.repo.get_by_id(1)
+        self.assertIsNone(result["belongs_to"])
+
+    def test_get_by_id_linked_album_is_none_when_not_linked(self):
+        result = self.repo.get_by_id(1)
+        self.assertIsNone(result["linked_album"])
+
+
+class TestStudioReadModelShape(unittest.TestCase):
+    """Studio read model has stable explicit fields."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.conn.execute(
+            "INSERT INTO studio (uuid, name, website, description, media_scope,"
+            " created_at, updated_at)"
+            " VALUES ('s-uuid', 'MetArt', 'https://metart.com', 'desc', 'photos',"
+            " '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO studio (uuid, name, created_at, updated_at)"
+            " VALUES ('s2-uuid', 'Minimal', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        self.repo = repo.StudioRepository(db_factory=_db_factory(self.conn))
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_search_result_has_exact_expected_keys(self):
+        rows, _ = self.repo.search("", limit=50, offset=0)
+        expected_keys = {
+            "id", "uuid", "name", "website", "description",
+            "media_scope", "created_at", "updated_at",
+        }
+        for row in rows:
+            self.assertEqual(set(row.keys()), expected_keys)
+
+    def test_search_optional_fields_are_none_when_absent(self):
+        rows, _ = self.repo.search("Minimal", limit=50, offset=0)
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0]["website"])
+        self.assertIsNone(rows[0]["description"])
+
+    def test_update_result_has_exact_expected_keys(self):
+        result = self.repo.update(1, {"name": "MetArt2"}, "2024-06-01")
+        expected_keys = {
+            "id", "uuid", "name", "website", "description",
+            "media_scope", "created_at", "updated_at",
+        }
+        self.assertEqual(set(result.keys()), expected_keys)
+
+    def test_get_by_id_studio_album_assoc_has_exact_expected_keys(self):
+        self.conn.execute(
+            "INSERT INTO album (uuid, studio_id, title, created_at, updated_at)"
+            " VALUES ('a1', 1, 'Shoot1', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        result = self.repo.get_by_id(1)
+        expected_album_keys = {"id", "title", "capture_date", "publish_date", "rating", "status_name"}
+        for album in result["albums"]:
+            self.assertEqual(set(album.keys()), expected_album_keys)
+
+
 if __name__ == "__main__":
     unittest.main()
