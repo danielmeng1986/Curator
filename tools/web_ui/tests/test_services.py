@@ -818,6 +818,304 @@ class TestImportServiceExecute(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# ImportService.execute — filesystem actions and NeedsRepair (BT-009)
+# ---------------------------------------------------------------------------
+
+class TestImportServiceExecuteActions(unittest.TestCase):
+    """Filesystem Import Actions and failure-recovery recording."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.log_calls: list[dict] = []
+        self.backup_calls: list[dict] = []
+        import_repo = repo.ImportRepository(db_factory=_db_factory(self.conn))
+        self.service = svc.ImportService(
+            import_repo=import_repo,
+            snapshot_fn=lambda *a, **kw: MagicMock(),
+            backup_log_fn=self.backup_calls.append,
+            change_log_fn=self.log_calls.append,
+        )
+
+    def tearDown(self):
+        self.conn.close()
+
+    # --- import_uuid in result ---
+
+    def test_execute_returns_import_uuid(self):
+        result = self.service.execute([], "/archive", "S")
+        self.assertIn("import_uuid", result)
+        self.assertIsNotNone(result["import_uuid"])
+
+    def test_import_uuid_differs_per_call(self):
+        r1 = self.service.execute([], "/archive", "S")
+        r2 = self.service.execute([], "/archive", "S")
+        self.assertNotEqual(r1["import_uuid"], r2["import_uuid"])
+
+    def test_import_uuid_in_change_log_entry(self):
+        items = [{"model_name": "Alice", "album_name": "UuidTest", "studio_name": "S"}]
+        result = self.service.execute(items, "/no-such-root", "S")
+        self.assertIn("import_uuid", self.log_calls[0])
+        self.assertEqual(self.log_calls[0]["import_uuid"], result["import_uuid"])
+
+    # --- Import Action constants ---
+
+    def test_import_action_constants(self):
+        self.assertEqual(svc.IMPORT_ACTION_DATABASE_ONLY, "DATABASE_ONLY")
+        self.assertEqual(svc.IMPORT_ACTION_COPY, "COPY")
+        self.assertEqual(svc.IMPORT_ACTION_MOVE, "MOVE")
+
+    # --- Per-item result fields ---
+
+    def test_result_item_has_needs_repair_key(self):
+        items = [{"model_name": "Alice", "album_name": "FieldCheck", "studio_name": "S"}]
+        result = self.service.execute(items, "/no-such-root", "S")
+        self.assertIn("needs_repair", result["results"][0])
+
+    def test_result_item_has_effective_action_key(self):
+        items = [{"model_name": "Alice", "album_name": "EffAction", "studio_name": "S"}]
+        result = self.service.execute(items, "/no-such-root", "S")
+        self.assertIn("effective_action", result["results"][0])
+
+    def test_summary_has_needs_repair_key(self):
+        result = self.service.execute([], "/archive", "S")
+        self.assertIn("needs_repair", result["summary"])
+
+    def test_successful_item_needs_repair_is_false(self):
+        items = [{"model_name": "Alice", "album_name": "Success", "studio_name": "S"}]
+        result = self.service.execute(items, "/no-such-root", "S")
+        self.assertFalse(result["results"][0]["needs_repair"])
+
+    # --- DATABASE_ONLY action ---
+
+    def test_database_only_action_creates_db_record(self):
+        items = [{"model_name": "Alice", "album_name": "DbOnly", "studio_name": "S"}]
+        self.service.execute(
+            items, "/no-such-root", "S",
+            import_action=svc.IMPORT_ACTION_DATABASE_ONLY,
+        )
+        row = self.conn.execute(
+            "SELECT id FROM album WHERE LOWER(title) = 'dbonly'"
+        ).fetchone()
+        self.assertIsNotNone(row)
+
+    def test_database_only_action_does_not_touch_filesystem(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_dir = os.path.join(tmpdir, "source")
+            os.makedirs(src_dir)
+            items = [
+                {"model_name": "Alice", "album_name": "DbOnly2", "studio_name": "S",
+                 "source_path": src_dir}
+            ]
+            result = self.service.execute(
+                items, tmpdir, "S",
+                import_action=svc.IMPORT_ACTION_DATABASE_ONLY,
+            )
+            # Destination should NOT be created by DATABASE_ONLY
+            import canonical_path as cp
+            expected = cp.build_canonical_path("Alice", "S", "DbOnly2")
+            dest = os.path.join(tmpdir, expected)
+            self.assertFalse(os.path.exists(dest))
+        self.assertTrue(result["results"][0]["ok"])
+
+    def test_database_only_effective_action_recorded(self):
+        items = [{"model_name": "Alice", "album_name": "DbEffective", "studio_name": "S"}]
+        result = self.service.execute(
+            items, "/no-such-root", "S",
+            import_action=svc.IMPORT_ACTION_DATABASE_ONLY,
+        )
+        self.assertEqual(result["results"][0]["effective_action"], "DATABASE_ONLY")
+
+    # --- COPY action ---
+
+    def test_copy_action_copies_source_to_dest(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_dir = os.path.join(tmpdir, "source_album")
+            os.makedirs(src_dir)
+            sentinel = os.path.join(src_dir, "photo.jpg")
+            open(sentinel, "w").close()
+            items = [
+                {"model_name": "Alice", "album_name": "CopyShoot", "studio_name": "S",
+                 "source_path": src_dir}
+            ]
+            result = self.service.execute(
+                items, tmpdir, "S",
+                import_action=svc.IMPORT_ACTION_COPY,
+            )
+            import canonical_path as cp
+            expected = cp.build_canonical_path("Alice", "S", "CopyShoot")
+            dest_file = os.path.join(tmpdir, expected, "photo.jpg")
+            self.assertTrue(os.path.isfile(dest_file))
+            # Source still exists after copy
+            self.assertTrue(os.path.exists(src_dir))
+        self.assertTrue(result["results"][0]["ok"])
+
+    def test_copy_effective_action_recorded_in_change_log(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_dir = os.path.join(tmpdir, "src")
+            os.makedirs(src_dir)
+            items = [
+                {"model_name": "Alice", "album_name": "CopyLog", "studio_name": "S",
+                 "source_path": src_dir}
+            ]
+            self.service.execute(
+                items, tmpdir, "S",
+                import_action=svc.IMPORT_ACTION_COPY,
+            )
+        self.assertEqual(self.log_calls[0]["effective_action"], "COPY")
+
+    # --- MOVE action ---
+
+    def test_move_action_moves_source_to_dest(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_dir = os.path.join(tmpdir, "source_move")
+            os.makedirs(src_dir)
+            sentinel = os.path.join(src_dir, "photo.jpg")
+            open(sentinel, "w").close()
+            items = [
+                {"model_name": "Alice", "album_name": "MoveShoot", "studio_name": "S",
+                 "source_path": src_dir}
+            ]
+            result = self.service.execute(
+                items, tmpdir, "S",
+                import_action=svc.IMPORT_ACTION_MOVE,
+            )
+            import canonical_path as cp
+            expected = cp.build_canonical_path("Alice", "S", "MoveShoot")
+            dest_file = os.path.join(tmpdir, expected, "photo.jpg")
+            self.assertTrue(os.path.isfile(dest_file))
+            # Source is gone after move
+            self.assertFalse(os.path.exists(src_dir))
+        self.assertTrue(result["results"][0]["ok"])
+
+    def test_move_effective_action_recorded_in_change_log(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_dir = os.path.join(tmpdir, "src_move")
+            os.makedirs(src_dir)
+            items = [
+                {"model_name": "Alice", "album_name": "MoveLog", "studio_name": "S",
+                 "source_path": src_dir}
+            ]
+            self.service.execute(
+                items, tmpdir, "S",
+                import_action=svc.IMPORT_ACTION_MOVE,
+            )
+        self.assertEqual(self.log_calls[0]["effective_action"], "MOVE")
+
+    # --- Auto DATABASE_ONLY when source is already at destination ---
+
+    def test_auto_database_only_when_source_at_destination(self):
+        import tempfile, os
+        import canonical_path as cp
+        with tempfile.TemporaryDirectory() as tmpdir:
+            expected = cp.build_canonical_path("Alice", "S", "AtDest")
+            dest_dir = os.path.join(tmpdir, expected)
+            os.makedirs(dest_dir)
+            items = [
+                {"model_name": "Alice", "album_name": "AtDest", "studio_name": "S",
+                 "source_path": dest_dir}   # source IS the destination
+            ]
+            result = self.service.execute(
+                items, tmpdir, "S",
+                import_action=svc.IMPORT_ACTION_MOVE,
+            )
+        item_result = result["results"][0]
+        self.assertEqual(item_result["effective_action"], "DATABASE_ONLY")
+        self.assertTrue(item_result["ok"])
+
+    # --- NeedsRepair on filesystem failure after DB success ---
+
+    def test_filesystem_failure_sets_needs_repair(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Use a non-existent source → shutil.move will raise
+            items = [
+                {"model_name": "Alice", "album_name": "RepairMe", "studio_name": "S",
+                 "source_path": os.path.join(tmpdir, "nonexistent")}
+            ]
+            result = self.service.execute(
+                items, tmpdir, "S",
+                import_action=svc.IMPORT_ACTION_MOVE,
+            )
+        item_result = result["results"][0]
+        self.assertTrue(item_result["needs_repair"])
+        self.assertFalse(item_result["ok"])
+        self.assertIsNotNone(item_result["error"])
+
+    def test_filesystem_failure_db_record_still_exists(self):
+        """DB record must persist even when the filesystem step fails."""
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            items = [
+                {"model_name": "Alice", "album_name": "DbPersist", "studio_name": "S",
+                 "source_path": os.path.join(tmpdir, "nonexistent")}
+            ]
+            self.service.execute(
+                items, tmpdir, "S",
+                import_action=svc.IMPORT_ACTION_MOVE,
+            )
+        row = self.conn.execute(
+            "SELECT id FROM album WHERE LOWER(title) = 'dbpersist'"
+        ).fetchone()
+        self.assertIsNotNone(row)
+
+    def test_filesystem_failure_logs_needs_repair_in_change_log(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            items = [
+                {"model_name": "Alice", "album_name": "LogRepair", "studio_name": "S",
+                 "source_path": os.path.join(tmpdir, "nonexistent")}
+            ]
+            self.service.execute(
+                items, tmpdir, "S",
+                import_action=svc.IMPORT_ACTION_MOVE,
+            )
+        self.assertEqual(len(self.log_calls), 1)
+        entry = self.log_calls[0]
+        self.assertTrue(entry["needs_repair"])
+        self.assertFalse(entry["success"])
+
+    def test_needs_repair_increments_summary_counter(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            items = [
+                {"model_name": "Alice", "album_name": "CountRepair", "studio_name": "S",
+                 "source_path": os.path.join(tmpdir, "nonexistent")}
+            ]
+            result = self.service.execute(
+                items, tmpdir, "S",
+                import_action=svc.IMPORT_ACTION_MOVE,
+            )
+        self.assertEqual(result["summary"]["needs_repair"], 1)
+        self.assertEqual(result["summary"]["errors"], 0)
+
+    def test_mixed_success_and_needs_repair(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_dir = os.path.join(tmpdir, "good_source")
+            os.makedirs(src_dir)
+            items = [
+                {"model_name": "Alice", "album_name": "GoodImport", "studio_name": "S",
+                 "source_path": src_dir},
+                {"model_name": "Alice", "album_name": "BadImport", "studio_name": "S",
+                 "source_path": os.path.join(tmpdir, "nonexistent")},
+            ]
+            result = self.service.execute(
+                items, tmpdir, "S",
+                import_action=svc.IMPORT_ACTION_MOVE,
+            )
+        self.assertEqual(result["summary"]["created"], 1)
+        self.assertEqual(result["summary"]["needs_repair"], 1)
+        self.assertEqual(result["summary"]["errors"], 0)
+        self.assertTrue(result["results"][0]["ok"])
+        self.assertTrue(result["results"][1]["needs_repair"])
+
+
+# ---------------------------------------------------------------------------
 # BackupService
 # ---------------------------------------------------------------------------
 

@@ -15,11 +15,17 @@ from __future__ import annotations
 
 import re
 import shutil
+import uuid as _uuid_mod
 from datetime import datetime, timezone
 from pathlib import Path
 
 import canonical_path as cpath
 import repositories as repo
+
+# Import Action constants — passed by callers to ImportService.execute().
+IMPORT_ACTION_DATABASE_ONLY: str = "DATABASE_ONLY"
+IMPORT_ACTION_COPY: str = "COPY"
+IMPORT_ACTION_MOVE: str = "MOVE"
 
 
 # ---------------------------------------------------------------------------
@@ -563,19 +569,58 @@ class ImportService:
         }
 
     def execute(
-        self, items: list, archive_root: str, default_studio: str
+        self,
+        items: list,
+        archive_root: str,
+        default_studio: str,
+        import_action: str = IMPORT_ACTION_MOVE,
     ) -> dict:
         """Execute the import for the supplied items.
 
-        Takes a pre-import snapshot, then processes each item: finds or creates
-        the studio and model, skips albums that already exist, creates the album
-        record and album_model link, and copies files when a source path is
-        provided.
+        Execution stages per item
+        -------------------------
+        1. Normalize path components and derive the canonical destination path.
+        2. Write the Album, Studio, and Model records to the database atomically
+           via the repository.
+        3. Determine the effective Import Action:
+           - When the source directory is already located at the canonical
+             destination, the workflow automatically uses ``DATABASE_ONLY``
+             regardless of the requested action.
+           - Otherwise, the caller-supplied *import_action* governs the
+             filesystem step: ``COPY`` copies the source tree; ``MOVE`` moves
+             it; ``DATABASE_ONLY`` skips any filesystem work.
+        4. Execute the filesystem step (or skip it for ``DATABASE_ONLY``).
+           If persistence succeeded but the filesystem step fails, the item is
+           recorded as ``needs_repair=True`` so the Repair Workflow can resolve
+           the inconsistency. The persisted database record is **not** deleted.
 
-        Returns a dict with ``results`` (per-item outcome) and ``summary``
-        (total / created / skipped / errors counts).
+        Parameters
+        ----------
+        items:
+            List of import candidate dicts. Each may include ``folder_name``,
+            ``model_name``, ``album_name``, ``studio_name``, and
+            ``source_path``.
+        archive_root:
+            Absolute root path of the managed archive.
+        default_studio:
+            Studio name used when an item does not supply one.
+        import_action:
+            The filesystem action to apply: ``"COPY"``, ``"MOVE"`` (default),
+            or ``"DATABASE_ONLY"``.
+
+        Returns
+        -------
+        dict
+            ``{results: [...], summary: {...}, import_uuid: "..."}``
+
+            Per-item result fields include ``ok``, ``skipped``,
+            ``needs_repair``, ``effective_action``, ``error``, and
+            ``album_id``.  Summary counts are ``total``, ``created``,
+            ``skipped``, ``errors``, and ``needs_repair``.
         """
+        import_uuid = str(_uuid_mod.uuid4())
         now = _utc_now_iso()
+
         try:
             snap = self._snapshot("import")
             self._backup_log(
@@ -590,6 +635,7 @@ class ImportService:
         created_albums = 0
         skipped = 0
         errors = 0
+        needs_repair_count = 0
 
         for item in items:
             folder_name = item.get("folder_name", "")
@@ -615,6 +661,8 @@ class ImportService:
                 "expected_path": expected_path,
                 "ok": False,
                 "skipped": False,
+                "needs_repair": False,
+                "effective_action": None,
                 "error": None,
             }
 
@@ -624,31 +672,93 @@ class ImportService:
                     studio_name, model_name, album_name, expected_path, item_now
                 )
                 album_id = item_result["album_id"]
+                result["album_id"] = album_id
 
                 if item_result["status"] == "skipped":
                     result["skipped"] = True
-                    result["album_id"] = album_id
+                    result["effective_action"] = IMPORT_ACTION_DATABASE_ONLY
                     skipped += 1
                     results.append(result)
                     continue
 
-                if source_path and Path(source_path).exists():
-                    full_dest.mkdir(parents=True, exist_ok=True)
-                    shutil.copytree(source_path, str(full_dest), dirs_exist_ok=True)
+                # ----------------------------------------------------------
+                # Determine effective Import Action.
+                # If the source is already at the canonical destination, use
+                # DATABASE_ONLY automatically regardless of the requested action.
+                # ----------------------------------------------------------
+                src = Path(source_path) if source_path else None
+                if src and src.resolve() == full_dest.resolve():
+                    effective_action = IMPORT_ACTION_DATABASE_ONLY
+                else:
+                    effective_action = import_action
+
+                result["effective_action"] = effective_action
+
+                # ----------------------------------------------------------
+                # Filesystem stage.  Any exception here means DB succeeded
+                # but filesystem is inconsistent → NeedsRepair.
+                # ----------------------------------------------------------
+                try:
+                    if effective_action == IMPORT_ACTION_COPY:
+                        if src is None:
+                            pass  # No source given — metadata-only
+                        elif not src.exists():
+                            raise FileNotFoundError(
+                                f"Source path does not exist: {source_path!r}"
+                            )
+                        else:
+                            full_dest.mkdir(parents=True, exist_ok=True)
+                            shutil.copytree(str(src), str(full_dest), dirs_exist_ok=True)
+                    elif effective_action == IMPORT_ACTION_MOVE:
+                        if src is None:
+                            pass  # No source given — metadata-only
+                        elif not src.exists():
+                            raise FileNotFoundError(
+                                f"Source path does not exist: {source_path!r}"
+                            )
+                        else:
+                            full_dest.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.move(str(src), str(full_dest))
+                    # DATABASE_ONLY: no filesystem work
+                except Exception as fs_ex:
+                    # Persistence succeeded; filesystem step failed.
+                    # Record NeedsRepair without deleting the DB record.
+                    result["needs_repair"] = True
+                    result["error"] = str(fs_ex)
+                    needs_repair_count += 1
+                    self._change_log(
+                        {
+                            "timestamp": item_now,
+                            "action": "import_album",
+                            "import_uuid": import_uuid,
+                            "album_id": album_id,
+                            "model_name": model_name,
+                            "studio_name": studio_name,
+                            "effective_action": effective_action,
+                            "success": False,
+                            "needs_repair": True,
+                            "error": str(fs_ex),
+                        }
+                    )
+                    results.append(result)
+                    continue
 
                 result["ok"] = True
-                result["album_id"] = album_id
                 created_albums += 1
                 self._change_log(
                     {
                         "timestamp": item_now,
                         "action": "import_album",
+                        "import_uuid": import_uuid,
                         "album_id": album_id,
                         "model_name": model_name,
                         "studio_name": studio_name,
+                        "effective_action": effective_action,
                         "success": True,
+                        "needs_repair": False,
                     }
                 )
+
             except Exception as ex:
                 result["error"] = str(ex)
                 errors += 1
@@ -656,12 +766,14 @@ class ImportService:
             results.append(result)
 
         return {
+            "import_uuid": import_uuid,
             "results": results,
             "summary": {
                 "total": len(items),
                 "created": created_albums,
                 "skipped": skipped,
                 "errors": errors,
+                "needs_repair": needs_repair_count,
             },
         }
 
