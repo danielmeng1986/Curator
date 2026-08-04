@@ -113,6 +113,35 @@ CREATE TABLE IF NOT EXISTS workspace_album (
     album_id INTEGER,
     lifecycle_state TEXT NOT NULL DEFAULT 'active'
 );
+CREATE TABLE IF NOT EXISTS repair_case (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT NOT NULL,
+    operation_uuid TEXT,
+    album_uuid TEXT,
+    expected_path TEXT,
+    state TEXT NOT NULL DEFAULT 'NeedsRepair',
+    category TEXT NOT NULL DEFAULT 'Assisted',
+    confirmation TEXT,
+    failure_reason TEXT,
+    verification_result TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS issue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT NOT NULL,
+    category TEXT NOT NULL,
+    description TEXT NOT NULL,
+    affected_operation TEXT,
+    suggested_resolution TEXT,
+    state TEXT NOT NULL DEFAULT 'Open',
+    source_workflow TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    priority TEXT DEFAULT 'Normal',
+    owner TEXT,
+    due_date TEXT
+);
 """
 
 
@@ -1716,3 +1745,227 @@ class TestImportRepositoryLookupPathCollision(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# ---------------------------------------------------------------------------
+# RepairRepository — shape and persistence tests
+# ---------------------------------------------------------------------------
+
+class TestRepairRepositoryCreate(unittest.TestCase):
+    """Repair case creation returns a normalised dict with all expected keys."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.repo = repo.RepairRepository(_db_factory(self.conn))
+
+    def _minimal_fields(self):
+        return {
+            "operation_uuid": "op-1",
+            "album_uuid": "album-1",
+            "expected_path": "A/Alice/p/Studio/Summer",
+            "category": "Assisted",
+            "failure_reason": "directory missing",
+        }
+
+    def test_returns_dict(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertIsInstance(result, dict)
+
+    def test_has_id(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertIn("id", result)
+        self.assertIsNotNone(result["id"])
+
+    def test_has_uuid(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertIn("uuid", result)
+        self.assertIsNotNone(result["uuid"])
+
+    def test_default_state_is_needs_repair(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertEqual(result["state"], "NeedsRepair")
+
+    def test_default_category_is_assisted(self):
+        result = self.repo.create({
+            "operation_uuid": "op-1",
+            "description": "test",
+        })
+        self.assertEqual(result["category"], "Assisted")
+
+    def test_operation_uuid_persisted(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertEqual(result["operation_uuid"], "op-1")
+
+    def test_album_uuid_persisted(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertEqual(result["album_uuid"], "album-1")
+
+    def test_expected_path_persisted(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertEqual(result["expected_path"], "A/Alice/p/Studio/Summer")
+
+    def test_failure_reason_persisted(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertEqual(result["failure_reason"], "directory missing")
+
+    def test_confirmation_is_none_by_default(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertIsNone(result["confirmation"])
+
+    def test_verification_result_is_none_by_default(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertIsNone(result["verification_result"])
+
+    def test_created_at_populated(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertIsNotNone(result["created_at"])
+
+    def test_updated_at_populated(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertIsNotNone(result["updated_at"])
+
+    def test_shape_has_all_keys(self):
+        result = self.repo.create(self._minimal_fields())
+        expected_keys = {
+            "id", "uuid", "operation_uuid", "album_uuid", "expected_path",
+            "state", "category", "confirmation", "failure_reason",
+            "verification_result", "created_at", "updated_at",
+        }
+        self.assertEqual(set(result.keys()), expected_keys)
+
+
+class TestRepairRepositoryLifecycle(unittest.TestCase):
+    """Repair case state and field persistence tests."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.repo = repo.RepairRepository(_db_factory(self.conn))
+        self.repair = self.repo.create({
+            "operation_uuid": "op-1",
+            "album_uuid": "album-1",
+            "category": "Assisted",
+        })
+        self.repair_uuid = self.repair["uuid"]
+
+    def test_get_by_uuid_returns_dict(self):
+        result = self.repo.get_by_uuid(self.repair_uuid)
+        self.assertIsInstance(result, dict)
+
+    def test_get_by_uuid_missing_returns_none(self):
+        self.assertIsNone(self.repo.get_by_uuid("nonexistent"))
+
+    def test_get_state_returns_initial_state(self):
+        self.assertEqual(self.repo.get_state(self.repair_uuid), "NeedsRepair")
+
+    def test_get_state_missing_returns_none(self):
+        self.assertIsNone(self.repo.get_state("nonexistent"))
+
+    def test_set_state_persists(self):
+        self.repo.set_state(self.repair_uuid, "Repairing")
+        self.assertEqual(self.repo.get_state(self.repair_uuid), "Repairing")
+
+    def test_set_confirmation_persists(self):
+        self.repo.set_confirmation(self.repair_uuid, "User approved")
+        result = self.repo.get_by_uuid(self.repair_uuid)
+        self.assertEqual(result["confirmation"], "User approved")
+
+    def test_set_verification_result_persists(self):
+        self.repo.set_verification_result(self.repair_uuid, "path validated")
+        result = self.repo.get_by_uuid(self.repair_uuid)
+        self.assertEqual(result["verification_result"], "path validated")
+
+
+# ---------------------------------------------------------------------------
+# IssueRepository — shape and persistence tests
+# ---------------------------------------------------------------------------
+
+class TestIssueRepositoryCreate(unittest.TestCase):
+    """Issue creation returns a normalised dict with all expected keys."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.repo = repo.IssueRepository(_db_factory(self.conn))
+
+    def _minimal_fields(self):
+        return {
+            "category": "Repair",
+            "description": "Album directory missing after import",
+            "source_workflow": "RepairService",
+        }
+
+    def test_returns_dict(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertIsInstance(result, dict)
+
+    def test_has_id(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertIn("id", result)
+        self.assertIsNotNone(result["id"])
+
+    def test_has_uuid(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertIsNotNone(result["uuid"])
+
+    def test_default_state_is_open(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertEqual(result["state"], "Open")
+
+    def test_category_persisted(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertEqual(result["category"], "Repair")
+
+    def test_description_persisted(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertEqual(result["description"], "Album directory missing after import")
+
+    def test_source_workflow_persisted(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertEqual(result["source_workflow"], "RepairService")
+
+    def test_default_priority_is_normal(self):
+        result = self.repo.create(self._minimal_fields())
+        self.assertEqual(result["priority"], "Normal")
+
+    def test_optional_fields_default_to_none(self):
+        result = self.repo.create(self._minimal_fields())
+        for key in ("affected_operation", "suggested_resolution", "owner", "due_date"):
+            self.assertIsNone(result[key])
+
+    def test_shape_has_all_keys(self):
+        result = self.repo.create(self._minimal_fields())
+        expected_keys = {
+            "id", "uuid", "category", "description", "affected_operation",
+            "suggested_resolution", "state", "source_workflow",
+            "created_at", "updated_at", "priority", "owner", "due_date",
+        }
+        self.assertEqual(set(result.keys()), expected_keys)
+
+
+class TestIssueRepositoryLifecycle(unittest.TestCase):
+    """Issue state persistence tests."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.repo = repo.IssueRepository(_db_factory(self.conn))
+        self.issue = self.repo.create({
+            "category": "Repair",
+            "description": "test issue",
+            "source_workflow": "RepairService",
+        })
+        self.issue_uuid = self.issue["uuid"]
+
+    def test_get_by_uuid_returns_dict(self):
+        result = self.repo.get_by_uuid(self.issue_uuid)
+        self.assertIsInstance(result, dict)
+
+    def test_get_by_uuid_missing_returns_none(self):
+        self.assertIsNone(self.repo.get_by_uuid("nonexistent"))
+
+    def test_get_state_returns_open(self):
+        self.assertEqual(self.repo.get_state(self.issue_uuid), "Open")
+
+    def test_get_state_missing_returns_none(self):
+        self.assertIsNone(self.repo.get_state("nonexistent"))
+
+    def test_set_state_persists(self):
+        self.repo.set_state(self.issue_uuid, "InProgress")
+        self.assertEqual(self.repo.get_state(self.issue_uuid), "InProgress")

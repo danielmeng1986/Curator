@@ -998,3 +998,350 @@ class BackupService:
             }
         )
         return {"selected_snapshot": self._public_item(selected)}
+
+
+# ---------------------------------------------------------------------------
+# Repair workflow state machine constants
+# ---------------------------------------------------------------------------
+
+REPAIR_STATE_NEEDS_REPAIR: str = "NeedsRepair"
+REPAIR_STATE_REPAIRING: str = "Repairing"
+REPAIR_STATE_PENDING_VERIFICATION: str = "PendingVerification"
+REPAIR_STATE_RESOLVED: str = "Resolved"
+REPAIR_STATE_MANUAL_CONFLICT: str = "ManualConflict"
+REPAIR_STATE_IGNORED: str = "Ignored"
+
+REPAIR_CATEGORY_AUTOMATIC: str = "Automatic"
+REPAIR_CATEGORY_ASSISTED: str = "Assisted"
+REPAIR_CATEGORY_MANUAL_CONFLICT: str = "ManualConflict"
+
+_REPAIR_TRANSITIONS: dict[str, frozenset[str]] = {
+    REPAIR_STATE_NEEDS_REPAIR: frozenset({
+        REPAIR_STATE_REPAIRING,
+        REPAIR_STATE_MANUAL_CONFLICT,
+        REPAIR_STATE_IGNORED,
+    }),
+    REPAIR_STATE_REPAIRING: frozenset({
+        REPAIR_STATE_PENDING_VERIFICATION,
+    }),
+    REPAIR_STATE_PENDING_VERIFICATION: frozenset({
+        REPAIR_STATE_RESOLVED,
+        REPAIR_STATE_NEEDS_REPAIR,
+    }),
+    REPAIR_STATE_RESOLVED: frozenset(),
+    REPAIR_STATE_MANUAL_CONFLICT: frozenset({
+        REPAIR_STATE_REPAIRING,
+        REPAIR_STATE_IGNORED,
+    }),
+    REPAIR_STATE_IGNORED: frozenset(),
+}
+
+# Issue lifecycle constants
+ISSUE_STATE_OPEN: str = "Open"
+ISSUE_STATE_IN_PROGRESS: str = "InProgress"
+ISSUE_STATE_RESOLVED: str = "Resolved"
+ISSUE_STATE_ARCHIVED: str = "Archived"
+
+_ISSUE_TRANSITIONS: dict[str, frozenset[str]] = {
+    ISSUE_STATE_OPEN: frozenset({
+        ISSUE_STATE_IN_PROGRESS,
+        ISSUE_STATE_ARCHIVED,
+    }),
+    ISSUE_STATE_IN_PROGRESS: frozenset({
+        ISSUE_STATE_OPEN,
+        ISSUE_STATE_RESOLVED,
+        ISSUE_STATE_ARCHIVED,
+    }),
+    ISSUE_STATE_RESOLVED: frozenset({
+        ISSUE_STATE_ARCHIVED,
+    }),
+    ISSUE_STATE_ARCHIVED: frozenset(),
+}
+
+
+# ---------------------------------------------------------------------------
+# RepairService
+# ---------------------------------------------------------------------------
+
+class RepairService:
+    """Orchestrates the repair workflow state machine.
+
+    Transitions (via :meth:`_transition`):
+    - ``NeedsRepair``       → ``Repairing``, ``ManualConflict``, ``Ignored``
+    - ``Repairing``         → ``PendingVerification``
+    - ``PendingVerification`` → ``Resolved`` | ``NeedsRepair``
+    - ``ManualConflict``    → ``Repairing``, ``Ignored``
+    - ``Resolved``          (terminal)
+    - ``Ignored``           (terminal)
+
+    Automatic repairs require no confirmation.
+    Assisted and ManualConflict repairs require :meth:`confirm` before
+    :meth:`start_repair` will succeed.
+    """
+
+    def __init__(self, repair_repo, issue_repo):
+        self._repair = repair_repo
+        self._issue = issue_repo
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def detect(
+        self,
+        operation_uuid: str | None,
+        album_uuid: str | None,
+        expected_path: str | None,
+        category: str = REPAIR_CATEGORY_ASSISTED,
+        failure_reason: str | None = None,
+        issue_fields: dict | None = None,
+    ) -> dict:
+        """Register a new repair case in state ``NeedsRepair``.
+
+        Also creates a linked Issue in state ``Open`` describing the problem.
+
+        Args:
+            operation_uuid: UUID of the import/other operation that triggered
+                the repair need.
+            album_uuid: UUID of the affected album (may be ``None`` if unknown).
+            expected_path: Canonical path the album should occupy.
+            category: One of ``'Automatic'``, ``'Assisted'``,
+                ``'ManualConflict'``.  Defaults to ``'Assisted'``.
+            failure_reason: Short description of what went wrong.
+            issue_fields: Extra fields to merge into the linked Issue record.
+
+        Returns:
+            ``{'repair': <repair_case dict>, 'issue': <issue dict>}``
+        """
+        repair = self._repair.create(
+            {
+                "operation_uuid": operation_uuid,
+                "album_uuid": album_uuid,
+                "expected_path": expected_path,
+                "category": category,
+                "failure_reason": failure_reason,
+            }
+        )
+        base_issue = {
+            "category": "Repair",
+            "description": failure_reason or "Repair case detected",
+            "affected_operation": operation_uuid,
+            "suggested_resolution": "Review the repair case and select an action",
+            "source_workflow": "RepairService",
+        }
+        if issue_fields:
+            base_issue.update(issue_fields)
+        issue = self._issue.create(base_issue)
+        return {"repair": repair, "issue": issue}
+
+    def confirm(self, repair_uuid: str, confirmation: str) -> dict:
+        """Record confirmation text for an Assisted or ManualConflict repair.
+
+        Required before :meth:`start_repair` for non-Automatic categories.
+
+        Args:
+            repair_uuid: UUID of the repair case.
+            confirmation: Free-text confirmation provided by the user.
+
+        Returns:
+            Updated repair case dict.
+
+        Raises:
+            ServiceNotFound: When *repair_uuid* does not exist.
+        """
+        repair = self._repair.get_by_uuid(repair_uuid)
+        if repair is None:
+            raise ServiceNotFound(f"Repair case not found: {repair_uuid}")
+        self._repair.set_confirmation(repair_uuid, confirmation)
+        return self._repair.get_by_uuid(repair_uuid)
+
+    def start_repair(self, repair_uuid: str) -> dict:
+        """Transition a repair case from ``NeedsRepair`` or ``ManualConflict``
+        to ``Repairing``.
+
+        Automatic repairs may start without confirmation.  Assisted and
+        ManualConflict repairs require a non-empty :meth:`confirm` value first.
+
+        Args:
+            repair_uuid: UUID of the repair case.
+
+        Returns:
+            Updated repair case dict.
+
+        Raises:
+            ServiceNotFound: When *repair_uuid* does not exist.
+            ServiceConflict: When confirmation is required but missing, or the
+                transition is not permitted.
+        """
+        repair = self._repair.get_by_uuid(repair_uuid)
+        if repair is None:
+            raise ServiceNotFound(f"Repair case not found: {repair_uuid}")
+        if repair["category"] != REPAIR_CATEGORY_AUTOMATIC:
+            if not repair.get("confirmation"):
+                raise ServiceConflict(
+                    "CONFIRMATION_REQUIRED",
+                    f"Repair {repair_uuid} ({repair['category']}) requires confirmation before starting.",
+                    {"repair_uuid": repair_uuid, "category": repair["category"]},
+                )
+        return self._transition(repair_uuid, REPAIR_STATE_REPAIRING)
+
+    def escalate_to_manual(self, repair_uuid: str) -> dict:
+        """Transition ``NeedsRepair`` → ``ManualConflict``.
+
+        Used when no safe automatic resolution can be determined.
+
+        Args:
+            repair_uuid: UUID of the repair case.
+
+        Returns:
+            Updated repair case dict.
+
+        Raises:
+            ServiceNotFound: When *repair_uuid* does not exist.
+            ServiceConflict: When the transition is not permitted.
+        """
+        return self._transition(repair_uuid, REPAIR_STATE_MANUAL_CONFLICT)
+
+    def complete_action(self, repair_uuid: str) -> dict:
+        """Transition ``Repairing`` → ``PendingVerification``.
+
+        Called once the repair action (file move / rename / DB update) is done.
+
+        Args:
+            repair_uuid: UUID of the repair case.
+
+        Returns:
+            Updated repair case dict.
+
+        Raises:
+            ServiceNotFound: When *repair_uuid* does not exist.
+            ServiceConflict: When the transition is not permitted.
+        """
+        return self._transition(repair_uuid, REPAIR_STATE_PENDING_VERIFICATION)
+
+    def verify(self, repair_uuid: str, passed: bool, result: str | None = None) -> dict:
+        """Transition ``PendingVerification`` → ``Resolved`` or back to
+        ``NeedsRepair`` when validation fails.
+
+        Args:
+            repair_uuid: UUID of the repair case.
+            passed: ``True`` → ``Resolved``; ``False`` → ``NeedsRepair``.
+            result: Optional textual verification result to persist.
+
+        Returns:
+            Updated repair case dict.
+
+        Raises:
+            ServiceNotFound: When *repair_uuid* does not exist.
+            ServiceConflict: When the transition is not permitted.
+        """
+        if result is not None:
+            self._repair.set_verification_result(repair_uuid, result)
+        target = REPAIR_STATE_RESOLVED if passed else REPAIR_STATE_NEEDS_REPAIR
+        return self._transition(repair_uuid, target)
+
+    def ignore(self, repair_uuid: str) -> dict:
+        """Transition ``NeedsRepair`` or ``ManualConflict`` → ``Ignored``.
+
+        Records an explicit decision to skip remediation.
+
+        Args:
+            repair_uuid: UUID of the repair case.
+
+        Returns:
+            Updated repair case dict.
+
+        Raises:
+            ServiceNotFound: When *repair_uuid* does not exist.
+            ServiceConflict: When the transition is not permitted.
+        """
+        return self._transition(repair_uuid, REPAIR_STATE_IGNORED)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _transition(self, repair_uuid: str, to_state: str) -> dict:
+        """Validate and apply a state transition.
+
+        Raises:
+            ServiceNotFound: When *repair_uuid* does not exist.
+            ServiceConflict: When *to_state* is not reachable from the current
+                state.
+        """
+        repair = self._repair.get_by_uuid(repair_uuid)
+        if repair is None:
+            raise ServiceNotFound(f"Repair case not found: {repair_uuid}")
+        from_state = repair["state"]
+        allowed = _REPAIR_TRANSITIONS.get(from_state, frozenset())
+        if to_state not in allowed:
+            raise ServiceConflict(
+                "INVALID_TRANSITION",
+                f"Cannot transition repair {repair_uuid} from '{from_state}' to '{to_state}'.",
+                {"from": from_state, "to": to_state, "allowed": sorted(allowed)},
+            )
+        self._repair.set_state(repair_uuid, to_state)
+        return self._repair.get_by_uuid(repair_uuid)
+
+
+# ---------------------------------------------------------------------------
+# IssueService
+# ---------------------------------------------------------------------------
+
+class IssueService:
+    """Orchestrates the issue management lifecycle.
+
+    Transitions:
+    - ``Open``        → ``InProgress``, ``Archived``
+    - ``InProgress``  → ``Open``, ``Resolved``, ``Archived``
+    - ``Resolved``    → ``Archived``
+    - ``Archived``    (terminal)
+    """
+
+    def __init__(self, issue_repo):
+        self._issue = issue_repo
+
+    def create(self, fields: dict) -> dict:
+        """Create a new issue in state ``Open``.
+
+        Args:
+            fields: Must include ``category``, ``description``, and
+                ``source_workflow``; all other columns are optional.
+
+        Returns:
+            Normalised issue dict.
+        """
+        fields = dict(fields)
+        fields.setdefault("state", ISSUE_STATE_OPEN)
+        return self._issue.create(fields)
+
+    def begin_work(self, issue_uuid: str) -> dict:
+        """Transition ``Open`` → ``InProgress``."""
+        return self._transition(issue_uuid, ISSUE_STATE_IN_PROGRESS)
+
+    def reopen(self, issue_uuid: str) -> dict:
+        """Transition ``InProgress`` → ``Open``."""
+        return self._transition(issue_uuid, ISSUE_STATE_OPEN)
+
+    def resolve(self, issue_uuid: str) -> dict:
+        """Transition ``InProgress`` → ``Resolved``."""
+        return self._transition(issue_uuid, ISSUE_STATE_RESOLVED)
+
+    def archive(self, issue_uuid: str) -> dict:
+        """Transition ``Open``, ``InProgress``, or ``Resolved`` → ``Archived``."""
+        return self._transition(issue_uuid, ISSUE_STATE_ARCHIVED)
+
+    def _transition(self, issue_uuid: str, to_state: str) -> dict:
+        issue = self._issue.get_by_uuid(issue_uuid)
+        if issue is None:
+            raise ServiceNotFound(f"Issue not found: {issue_uuid}")
+        from_state = issue["state"]
+        allowed = _ISSUE_TRANSITIONS.get(from_state, frozenset())
+        if to_state not in allowed:
+            raise ServiceConflict(
+                "INVALID_TRANSITION",
+                f"Cannot transition issue {issue_uuid} from '{from_state}' to '{to_state}'.",
+                {"from": from_state, "to": to_state, "allowed": sorted(allowed)},
+            )
+        self._issue.set_state(issue_uuid, to_state)
+        return self._issue.get_by_uuid(issue_uuid)

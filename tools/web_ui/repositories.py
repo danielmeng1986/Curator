@@ -1521,3 +1521,226 @@ class ImportRepository:
             except Exception:
                 conn.rollback()
                 raise
+
+
+# ---------------------------------------------------------------------------
+# Normalizers — repair_case and issue
+# ---------------------------------------------------------------------------
+
+def _norm_repair_case(row: dict) -> dict:
+    """Canonical read model for a repair case."""
+    return {
+        "id": row["id"],
+        "uuid": row.get("uuid"),
+        "operation_uuid": row.get("operation_uuid"),
+        "album_uuid": row.get("album_uuid"),
+        "expected_path": row.get("expected_path"),
+        "state": row.get("state", "NeedsRepair"),
+        "category": row.get("category", "Assisted"),
+        "confirmation": row.get("confirmation"),
+        "failure_reason": row.get("failure_reason"),
+        "verification_result": row.get("verification_result"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def _norm_issue(row: dict) -> dict:
+    """Canonical read model for an issue."""
+    return {
+        "id": row["id"],
+        "uuid": row.get("uuid"),
+        "category": row.get("category"),
+        "description": row.get("description"),
+        "affected_operation": row.get("affected_operation"),
+        "suggested_resolution": row.get("suggested_resolution"),
+        "state": row.get("state", "Open"),
+        "source_workflow": row.get("source_workflow"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "priority": row.get("priority", "Normal"),
+        "owner": row.get("owner"),
+        "due_date": row.get("due_date"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# RepairRepository
+# ---------------------------------------------------------------------------
+
+class RepairRepository:
+    """Persistence operations for the repair workflow state machine."""
+
+    def __init__(self, db_factory):
+        self._db = db_factory
+
+    def create(self, fields: dict) -> dict:
+        """Create a new repair case and return the normalised record.
+
+        The caller supplies all required fields.  ``uuid`` defaults to a new
+        UUID4 if not provided.  ``state`` defaults to ``'NeedsRepair'``.
+
+        Args:
+            fields: Any subset of repair_case columns (excluding ``id``).
+
+        Returns:
+            Normalised repair case dict.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        repair_uuid = fields.get("uuid") or str(uuid.uuid4())
+        category = fields.get("category", "Assisted")
+        state = fields.get("state", "NeedsRepair")
+        with self._db() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO repair_case
+                    (uuid, operation_uuid, album_uuid, expected_path,
+                     state, category, confirmation, failure_reason,
+                     verification_result, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    repair_uuid,
+                    fields.get("operation_uuid"),
+                    fields.get("album_uuid"),
+                    fields.get("expected_path"),
+                    state,
+                    category,
+                    fields.get("confirmation"),
+                    fields.get("failure_reason"),
+                    fields.get("verification_result"),
+                    fields.get("created_at") or now,
+                    fields.get("updated_at") or now,
+                ),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM repair_case WHERE id = ?", (cur.lastrowid,)
+            ).fetchone()
+        return _norm_repair_case(dict(row))
+
+    def get_by_uuid(self, repair_uuid: str) -> dict | None:
+        """Return the normalised repair case for *repair_uuid*, or ``None``."""
+        with self._db() as conn:
+            row = conn.execute(
+                "SELECT * FROM repair_case WHERE uuid = ?", (repair_uuid,)
+            ).fetchone()
+        return _norm_repair_case(dict(row)) if row else None
+
+    def get_state(self, repair_uuid: str) -> str | None:
+        """Return the current state string for *repair_uuid*, or ``None``."""
+        with self._db() as conn:
+            row = conn.execute(
+                "SELECT state FROM repair_case WHERE uuid = ?", (repair_uuid,)
+            ).fetchone()
+        return row["state"] if row else None
+
+    def set_state(self, repair_uuid: str, state: str) -> None:
+        """Persist a state transition for *repair_uuid*."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._db() as conn:
+            conn.execute(
+                "UPDATE repair_case SET state = ?, updated_at = ? WHERE uuid = ?",
+                (state, now, repair_uuid),
+            )
+            conn.commit()
+
+    def set_confirmation(self, repair_uuid: str, confirmation: str) -> None:
+        """Persist a confirmation text for an Assisted or ManualConflict repair."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._db() as conn:
+            conn.execute(
+                "UPDATE repair_case SET confirmation = ?, updated_at = ? WHERE uuid = ?",
+                (confirmation, now, repair_uuid),
+            )
+            conn.commit()
+
+    def set_verification_result(self, repair_uuid: str, result: str) -> None:
+        """Persist the post-action verification result."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._db() as conn:
+            conn.execute(
+                "UPDATE repair_case"
+                " SET verification_result = ?, updated_at = ? WHERE uuid = ?",
+                (result, now, repair_uuid),
+            )
+            conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# IssueRepository
+# ---------------------------------------------------------------------------
+
+class IssueRepository:
+    """Persistence operations for the issue management lifecycle."""
+
+    def __init__(self, db_factory):
+        self._db = db_factory
+
+    def create(self, fields: dict) -> dict:
+        """Create a new issue and return the normalised record.
+
+        Args:
+            fields: Must include ``category``, ``description``, and
+                ``source_workflow``; all other columns are optional.
+
+        Returns:
+            Normalised issue dict.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        issue_uuid = fields.get("uuid") or str(uuid.uuid4())
+        with self._db() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO issue
+                    (uuid, category, description, affected_operation,
+                     suggested_resolution, state, source_workflow,
+                     created_at, updated_at, priority, owner, due_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    issue_uuid,
+                    fields["category"],
+                    fields["description"],
+                    fields.get("affected_operation"),
+                    fields.get("suggested_resolution"),
+                    fields.get("state", "Open"),
+                    fields["source_workflow"],
+                    fields.get("created_at") or now,
+                    fields.get("updated_at") or now,
+                    fields.get("priority", "Normal"),
+                    fields.get("owner"),
+                    fields.get("due_date"),
+                ),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM issue WHERE id = ?", (cur.lastrowid,)
+            ).fetchone()
+        return _norm_issue(dict(row))
+
+    def get_by_uuid(self, issue_uuid: str) -> dict | None:
+        """Return the normalised issue for *issue_uuid*, or ``None``."""
+        with self._db() as conn:
+            row = conn.execute(
+                "SELECT * FROM issue WHERE uuid = ?", (issue_uuid,)
+            ).fetchone()
+        return _norm_issue(dict(row)) if row else None
+
+    def get_state(self, issue_uuid: str) -> str | None:
+        """Return the current state string for *issue_uuid*, or ``None``."""
+        with self._db() as conn:
+            row = conn.execute(
+                "SELECT state FROM issue WHERE uuid = ?", (issue_uuid,)
+            ).fetchone()
+        return row["state"] if row else None
+
+    def set_state(self, issue_uuid: str, state: str) -> None:
+        """Persist a state transition for *issue_uuid*."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._db() as conn:
+            conn.execute(
+                "UPDATE issue SET state = ?, updated_at = ? WHERE uuid = ?",
+                (state, now, issue_uuid),
+            )
+            conn.commit()

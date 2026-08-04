@@ -115,6 +115,35 @@ CREATE TABLE IF NOT EXISTS workspace_album (
     album_id INTEGER,
     lifecycle_state TEXT NOT NULL DEFAULT 'active'
 );
+CREATE TABLE IF NOT EXISTS repair_case (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT NOT NULL,
+    operation_uuid TEXT,
+    album_uuid TEXT,
+    expected_path TEXT,
+    state TEXT NOT NULL DEFAULT 'NeedsRepair',
+    category TEXT NOT NULL DEFAULT 'Assisted',
+    confirmation TEXT,
+    failure_reason TEXT,
+    verification_result TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS issue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT NOT NULL,
+    category TEXT NOT NULL,
+    description TEXT NOT NULL,
+    affected_operation TEXT,
+    suggested_resolution TEXT,
+    state TEXT NOT NULL DEFAULT 'Open',
+    source_workflow TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    priority TEXT DEFAULT 'Normal',
+    owner TEXT,
+    due_date TEXT
+);
 """
 
 
@@ -1688,3 +1717,327 @@ class TestImportServicePreviewValidation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# RepairService — lifecycle and validation tests
+# ---------------------------------------------------------------------------
+
+class TestRepairServiceDetect(unittest.TestCase):
+    """RepairService.detect() creates a repair case + linked Issue."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        factory = lambda: self.conn
+        self.repair_repo = repo.RepairRepository(factory)
+        self.issue_repo = repo.IssueRepository(factory)
+        self.service = svc.RepairService(self.repair_repo, self.issue_repo)
+
+    def test_detect_returns_repair_and_issue(self):
+        result = self.service.detect("op-1", "album-1", "/path/to/album")
+        self.assertIn("repair", result)
+        self.assertIn("issue", result)
+
+    def test_repair_state_is_needs_repair(self):
+        result = self.service.detect("op-1", "album-1", "/path")
+        self.assertEqual(result["repair"]["state"], "NeedsRepair")
+
+    def test_issue_state_is_open(self):
+        result = self.service.detect("op-1", "album-1", "/path")
+        self.assertEqual(result["issue"]["state"], "Open")
+
+    def test_repair_operation_uuid_stored(self):
+        result = self.service.detect("op-xyz", "album-1", "/path")
+        self.assertEqual(result["repair"]["operation_uuid"], "op-xyz")
+
+    def test_repair_album_uuid_stored(self):
+        result = self.service.detect("op-1", "alb-abc", "/path")
+        self.assertEqual(result["repair"]["album_uuid"], "alb-abc")
+
+    def test_repair_expected_path_stored(self):
+        result = self.service.detect("op-1", "album-1", "/expected/path")
+        self.assertEqual(result["repair"]["expected_path"], "/expected/path")
+
+    def test_failure_reason_stored(self):
+        result = self.service.detect(
+            "op-1", "album-1", "/path", failure_reason="dir missing"
+        )
+        self.assertEqual(result["repair"]["failure_reason"], "dir missing")
+
+    def test_default_category_is_assisted(self):
+        result = self.service.detect("op-1", "album-1", "/path")
+        self.assertEqual(result["repair"]["category"], "Assisted")
+
+    def test_category_automatic_stored(self):
+        result = self.service.detect(
+            "op-1", "album-1", "/path", category="Automatic"
+        )
+        self.assertEqual(result["repair"]["category"], "Automatic")
+
+    def test_issue_source_workflow_is_repair_service(self):
+        result = self.service.detect("op-1", "album-1", "/path")
+        self.assertEqual(result["issue"]["source_workflow"], "RepairService")
+
+    def test_issue_category_is_repair(self):
+        result = self.service.detect("op-1", "album-1", "/path")
+        self.assertEqual(result["issue"]["category"], "Repair")
+
+
+class TestRepairServiceLifecycleAutomatic(unittest.TestCase):
+    """Automatic repairs require no confirmation."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        factory = lambda: self.conn
+        self.repair_repo = repo.RepairRepository(factory)
+        self.issue_repo = repo.IssueRepository(factory)
+        self.service = svc.RepairService(self.repair_repo, self.issue_repo)
+        result = self.service.detect(
+            "op-1", "album-1", "/path", category="Automatic"
+        )
+        self.repair_uuid = result["repair"]["uuid"]
+
+    def test_start_repair_without_confirmation(self):
+        updated = self.service.start_repair(self.repair_uuid)
+        self.assertEqual(updated["state"], "Repairing")
+
+    def test_complete_action_to_pending_verification(self):
+        self.service.start_repair(self.repair_uuid)
+        updated = self.service.complete_action(self.repair_uuid)
+        self.assertEqual(updated["state"], "PendingVerification")
+
+    def test_verify_passed_to_resolved(self):
+        self.service.start_repair(self.repair_uuid)
+        self.service.complete_action(self.repair_uuid)
+        updated = self.service.verify(self.repair_uuid, passed=True)
+        self.assertEqual(updated["state"], "Resolved")
+
+    def test_verify_failed_back_to_needs_repair(self):
+        self.service.start_repair(self.repair_uuid)
+        self.service.complete_action(self.repair_uuid)
+        updated = self.service.verify(self.repair_uuid, passed=False)
+        self.assertEqual(updated["state"], "NeedsRepair")
+
+    def test_verify_stores_result(self):
+        self.service.start_repair(self.repair_uuid)
+        self.service.complete_action(self.repair_uuid)
+        updated = self.service.verify(self.repair_uuid, True, result="all checks passed")
+        self.assertEqual(updated["verification_result"], "all checks passed")
+
+    def test_ignore_from_needs_repair(self):
+        updated = self.service.ignore(self.repair_uuid)
+        self.assertEqual(updated["state"], "Ignored")
+
+
+class TestRepairServiceLifecycleAssisted(unittest.TestCase):
+    """Assisted repairs require confirmation before start."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        factory = lambda: self.conn
+        self.repair_repo = repo.RepairRepository(factory)
+        self.issue_repo = repo.IssueRepository(factory)
+        self.service = svc.RepairService(self.repair_repo, self.issue_repo)
+        result = self.service.detect("op-1", "album-1", "/path", category="Assisted")
+        self.repair_uuid = result["repair"]["uuid"]
+
+    def test_start_repair_without_confirmation_raises(self):
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.start_repair(self.repair_uuid)
+
+    def test_confirm_stores_text(self):
+        updated = self.service.confirm(self.repair_uuid, "I agree to rename")
+        self.assertEqual(updated["confirmation"], "I agree to rename")
+
+    def test_start_repair_after_confirm_succeeds(self):
+        self.service.confirm(self.repair_uuid, "Confirmed")
+        updated = self.service.start_repair(self.repair_uuid)
+        self.assertEqual(updated["state"], "Repairing")
+
+    def test_full_assisted_flow(self):
+        self.service.confirm(self.repair_uuid, "OK")
+        self.service.start_repair(self.repair_uuid)
+        self.service.complete_action(self.repair_uuid)
+        updated = self.service.verify(self.repair_uuid, True)
+        self.assertEqual(updated["state"], "Resolved")
+
+
+class TestRepairServiceManualConflict(unittest.TestCase):
+    """ManualConflict path through the state machine."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        factory = lambda: self.conn
+        self.repair_repo = repo.RepairRepository(factory)
+        self.issue_repo = repo.IssueRepository(factory)
+        self.service = svc.RepairService(self.repair_repo, self.issue_repo)
+        result = self.service.detect("op-1", "album-1", "/path")
+        self.repair_uuid = result["repair"]["uuid"]
+
+    def test_escalate_to_manual_from_needs_repair(self):
+        updated = self.service.escalate_to_manual(self.repair_uuid)
+        self.assertEqual(updated["state"], "ManualConflict")
+
+    def test_ignore_from_manual_conflict(self):
+        self.service.escalate_to_manual(self.repair_uuid)
+        updated = self.service.ignore(self.repair_uuid)
+        self.assertEqual(updated["state"], "Ignored")
+
+    def test_start_repair_from_manual_conflict_requires_confirmation(self):
+        self.service.escalate_to_manual(self.repair_uuid)
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.start_repair(self.repair_uuid)
+
+    def test_full_manual_conflict_flow(self):
+        self.service.escalate_to_manual(self.repair_uuid)
+        self.service.confirm(self.repair_uuid, "User resolved conflict")
+        self.service.start_repair(self.repair_uuid)
+        self.service.complete_action(self.repair_uuid)
+        updated = self.service.verify(self.repair_uuid, True)
+        self.assertEqual(updated["state"], "Resolved")
+
+
+class TestRepairServiceInvalidTransitions(unittest.TestCase):
+    """Invalid state transitions raise ServiceConflict."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        factory = lambda: self.conn
+        self.repair_repo = repo.RepairRepository(factory)
+        self.issue_repo = repo.IssueRepository(factory)
+        self.service = svc.RepairService(self.repair_repo, self.issue_repo)
+        result = self.service.detect("op-1", "album-1", "/path", category="Automatic")
+        self.repair_uuid = result["repair"]["uuid"]
+
+    def test_complete_action_from_needs_repair_raises(self):
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.complete_action(self.repair_uuid)
+
+    def test_verify_from_needs_repair_raises(self):
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.verify(self.repair_uuid, True)
+
+    def test_start_repair_from_repairing_raises(self):
+        self.service.start_repair(self.repair_uuid)
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.start_repair(self.repair_uuid)
+
+    def test_ignore_from_resolved_raises(self):
+        self.service.start_repair(self.repair_uuid)
+        self.service.complete_action(self.repair_uuid)
+        self.service.verify(self.repair_uuid, True)
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.ignore(self.repair_uuid)
+
+    def test_start_repair_nonexistent_raises(self):
+        with self.assertRaises(svc.ServiceNotFound):
+            self.service.start_repair("nonexistent")
+
+    def test_ignore_nonexistent_raises(self):
+        with self.assertRaises(svc.ServiceNotFound):
+            self.service.ignore("nonexistent")
+
+    def test_verify_from_repairing_raises(self):
+        self.service.start_repair(self.repair_uuid)
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.verify(self.repair_uuid, True)
+
+
+# ---------------------------------------------------------------------------
+# IssueService — lifecycle tests
+# ---------------------------------------------------------------------------
+
+class TestIssueServiceCreate(unittest.TestCase):
+    """IssueService.create() returns an Open issue."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        factory = lambda: self.conn
+        self.issue_repo = repo.IssueRepository(factory)
+        self.service = svc.IssueService(self.issue_repo)
+
+    def _minimal(self):
+        return {
+            "category": "Repair",
+            "description": "Album directory missing",
+            "source_workflow": "RepairService",
+        }
+
+    def test_returns_dict(self):
+        result = self.service.create(self._minimal())
+        self.assertIsInstance(result, dict)
+
+    def test_default_state_is_open(self):
+        result = self.service.create(self._minimal())
+        self.assertEqual(result["state"], "Open")
+
+    def test_category_persisted(self):
+        result = self.service.create(self._minimal())
+        self.assertEqual(result["category"], "Repair")
+
+    def test_description_persisted(self):
+        result = self.service.create(self._minimal())
+        self.assertEqual(result["description"], "Album directory missing")
+
+
+class TestIssueServiceLifecycle(unittest.TestCase):
+    """IssueService state transitions."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        factory = lambda: self.conn
+        self.issue_repo = repo.IssueRepository(factory)
+        self.service = svc.IssueService(self.issue_repo)
+        self.issue = self.service.create({
+            "category": "Repair",
+            "description": "test",
+            "source_workflow": "RepairService",
+        })
+        self.issue_uuid = self.issue["uuid"]
+
+    def test_begin_work_transitions_to_in_progress(self):
+        updated = self.service.begin_work(self.issue_uuid)
+        self.assertEqual(updated["state"], "InProgress")
+
+    def test_reopen_transitions_to_open(self):
+        self.service.begin_work(self.issue_uuid)
+        updated = self.service.reopen(self.issue_uuid)
+        self.assertEqual(updated["state"], "Open")
+
+    def test_resolve_transitions_to_resolved(self):
+        self.service.begin_work(self.issue_uuid)
+        updated = self.service.resolve(self.issue_uuid)
+        self.assertEqual(updated["state"], "Resolved")
+
+    def test_archive_from_open(self):
+        updated = self.service.archive(self.issue_uuid)
+        self.assertEqual(updated["state"], "Archived")
+
+    def test_archive_from_resolved(self):
+        self.service.begin_work(self.issue_uuid)
+        self.service.resolve(self.issue_uuid)
+        updated = self.service.archive(self.issue_uuid)
+        self.assertEqual(updated["state"], "Archived")
+
+    def test_full_happy_path(self):
+        self.service.begin_work(self.issue_uuid)
+        self.service.resolve(self.issue_uuid)
+        updated = self.service.archive(self.issue_uuid)
+        self.assertEqual(updated["state"], "Archived")
+
+    def test_begin_work_nonexistent_raises(self):
+        with self.assertRaises(svc.ServiceNotFound):
+            self.service.begin_work("nonexistent")
+
+    def test_archive_from_archived_raises(self):
+        self.service.archive(self.issue_uuid)
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.archive(self.issue_uuid)
+
+    def test_resolve_from_open_raises(self):
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.resolve(self.issue_uuid)
+
+    def test_reopen_from_open_raises(self):
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.reopen(self.issue_uuid)
