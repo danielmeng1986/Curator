@@ -18,6 +18,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+import canonical_path as cpath
 import repositories as repo
 
 
@@ -276,21 +277,23 @@ def parse_album_folder_name(folder_name: str) -> tuple[str, str]:
 
 
 def alphabet_for_model(model_name: str) -> str:
-    """Return the single-letter (or ``"0-9"`` / ``"_"``) archive bucket."""
-    if not model_name:
-        return "_"
-    first = model_name[0]
-    if first.isalpha():
-        return first.upper()
-    if first.isdigit():
-        return "0-9"
-    return "_"
+    """Return the single-letter (or ``"0-9"`` / ``"_"``) archive bucket.
+
+    Delegates to :func:`canonical_path.alphabet_for_model`. Kept here for
+    backward compatibility; new callers should use the canonical_path module
+    directly.
+    """
+    return cpath.alphabet_for_model(cpath.canonicalize_component(model_name))
 
 
 def build_archive_path(model_name: str, studio_name: str, album_name: str) -> str:
-    """Build the relative archive path for an album."""
-    alpha = alphabet_for_model(model_name)
-    return f"{alpha}/{model_name}/p/{studio_name}/{album_name}"
+    """Build the canonical relative archive path for an album.
+
+    Delegates to :func:`canonical_path.build_canonical_path`, which applies
+    per-component whitespace trimming, Unicode NFC normalization, and the
+    archive bucket derivation rule.
+    """
+    return cpath.build_canonical_path(model_name, studio_name, album_name)
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +333,9 @@ class ImportService:
             if not model_name and not album_name and folder_name:
                 model_name, album_name = parse_album_folder_name(folder_name)
 
+            model_name = cpath.canonicalize_component(model_name)
+            studio_name = cpath.canonicalize_component(studio_name)
+            album_name = cpath.canonicalize_component(album_name)
             expected_path = build_archive_path(model_name, studio_name, album_name)
             full_path = Path(archive_root) / expected_path
 
@@ -406,6 +412,9 @@ class ImportService:
             if not model_name and not album_name and folder_name:
                 model_name, album_name = parse_album_folder_name(folder_name)
 
+            model_name = cpath.canonicalize_component(model_name)
+            studio_name = cpath.canonicalize_component(studio_name)
+            album_name = cpath.canonicalize_component(album_name)
             expected_path = build_archive_path(model_name, studio_name, album_name)
             full_dest = Path(archive_root) / expected_path
 
