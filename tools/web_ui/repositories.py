@@ -1744,3 +1744,179 @@ class IssueRepository:
                 (state, now, issue_uuid),
             )
             conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Normalizer — operation
+# ---------------------------------------------------------------------------
+
+def _norm_operation(row: dict) -> dict:
+    """Canonical read model for an Operation record."""
+    return {
+        "id": row["id"],
+        "uuid": row.get("uuid"),
+        "operation_type": row.get("operation_type"),
+        "initiator": row.get("initiator"),
+        "status": row.get("status", "Pending"),
+        "summary": row.get("summary"),
+        "started_at": row.get("started_at"),
+        "ended_at": row.get("ended_at"),
+        "entity_uuid": row.get("entity_uuid"),
+        "import_uuid": row.get("import_uuid"),
+        "batch_uuid": row.get("batch_uuid"),
+        "repair_uuid": row.get("repair_uuid"),
+        "related_operation_uuid": row.get("related_operation_uuid"),
+        "parent_operation_uuid": row.get("parent_operation_uuid"),
+        "issue_uuid": row.get("issue_uuid"),
+        "error_category": row.get("error_category"),
+        "error_code": row.get("error_code"),
+        "error_details": row.get("error_details"),
+        "repair_state": row.get("repair_state"),
+        "recovery_context": row.get("recovery_context"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# OperationRepository
+# ---------------------------------------------------------------------------
+
+class OperationRepository:
+    """Persistence operations for the Operation history record.
+
+    All material backend writes that require a durable Operation record use
+    this repository to create and update their records.  Supporting log output
+    (JSONL) is the caller's responsibility; this repository owns only the
+    database-backed record.
+    """
+
+    def __init__(self, db_factory):
+        self._db = db_factory
+
+    def create(self, fields: dict) -> dict:
+        """Create a new Operation record and return the normalised result.
+
+        Required fields: ``operation_type``, ``initiator``.
+        ``uuid`` defaults to a new UUID4 when not supplied.
+        ``status`` defaults to ``'Pending'``.
+        ``started_at`` defaults to the current UTC time.
+
+        Args:
+            fields: Subset of operation columns (excluding ``id``).
+
+        Returns:
+            Normalised operation dict.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        op_uuid = fields.get("uuid") or str(uuid.uuid4())
+        status = fields.get("status", "Pending")
+        with self._db() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO operation (
+                    uuid, operation_type, initiator, status, summary,
+                    started_at, ended_at,
+                    entity_uuid, import_uuid, batch_uuid, repair_uuid,
+                    related_operation_uuid, parent_operation_uuid, issue_uuid,
+                    error_category, error_code, error_details,
+                    repair_state, recovery_context
+                ) VALUES (
+                    ?, ?, ?, ?, ?,
+                    ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?
+                )
+                """,
+                (
+                    op_uuid,
+                    fields["operation_type"],
+                    fields["initiator"],
+                    status,
+                    fields.get("summary"),
+                    fields.get("started_at") or now,
+                    fields.get("ended_at"),
+                    fields.get("entity_uuid"),
+                    fields.get("import_uuid"),
+                    fields.get("batch_uuid"),
+                    fields.get("repair_uuid"),
+                    fields.get("related_operation_uuid"),
+                    fields.get("parent_operation_uuid"),
+                    fields.get("issue_uuid"),
+                    fields.get("error_category"),
+                    fields.get("error_code"),
+                    fields.get("error_details"),
+                    fields.get("repair_state"),
+                    fields.get("recovery_context"),
+                ),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM operation WHERE id = ?", (cur.lastrowid,)
+            ).fetchone()
+        return _norm_operation(dict(row))
+
+    def get_by_uuid(self, op_uuid: str) -> dict | None:
+        """Return the normalised Operation for *op_uuid*, or ``None``."""
+        with self._db() as conn:
+            row = conn.execute(
+                "SELECT * FROM operation WHERE uuid = ?", (op_uuid,)
+            ).fetchone()
+        return _norm_operation(dict(row)) if row else None
+
+    def set_status(
+        self,
+        op_uuid: str,
+        status: str,
+        *,
+        summary: str | None = None,
+        ended_at: str | None = None,
+        error_category: str | None = None,
+        error_code: str | None = None,
+        error_details: str | None = None,
+        repair_state: str | None = None,
+        recovery_context: str | None = None,
+    ) -> None:
+        """Update the status and optional terminal fields for *op_uuid*.
+
+        Args:
+            op_uuid: UUID of the operation to update.
+            status: New status string (one of the ``OP_STATUS_*`` constants).
+            summary: Optional human-readable outcome summary to persist.
+            ended_at: ISO 8601 end timestamp; defaults to current UTC time
+                when ``None`` and the operation has reached a terminal state.
+            error_category: Coarse error category (e.g. ``'filesystem'``).
+            error_code: Stable error code (e.g. ``'filesystem.write-failed'``).
+            error_details: Free-text error detail for diagnostic use.
+            repair_state: Repair-state string when a filesystem repair is
+                relevant.
+            recovery_context: Recovery instructions or context.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._db() as conn:
+            conn.execute(
+                """
+                UPDATE operation SET
+                    status = ?,
+                    summary = COALESCE(?, summary),
+                    ended_at = COALESCE(?, ended_at, ?),
+                    error_category = COALESCE(?, error_category),
+                    error_code = COALESCE(?, error_code),
+                    error_details = COALESCE(?, error_details),
+                    repair_state = COALESCE(?, repair_state),
+                    recovery_context = COALESCE(?, recovery_context)
+                WHERE uuid = ?
+                """,
+                (
+                    status,
+                    summary,
+                    ended_at, now,
+                    error_category,
+                    error_code,
+                    error_details,
+                    repair_state,
+                    recovery_context,
+                    op_uuid,
+                ),
+            )
+            conn.commit()

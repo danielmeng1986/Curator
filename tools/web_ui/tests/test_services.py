@@ -145,6 +145,28 @@ CREATE TABLE IF NOT EXISTS issue (
     owner TEXT,
     due_date TEXT
 );
+CREATE TABLE IF NOT EXISTS operation (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT NOT NULL,
+    operation_type TEXT NOT NULL,
+    initiator TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Pending',
+    summary TEXT,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    entity_uuid TEXT,
+    import_uuid TEXT,
+    batch_uuid TEXT,
+    repair_uuid TEXT,
+    related_operation_uuid TEXT,
+    parent_operation_uuid TEXT,
+    issue_uuid TEXT,
+    error_category TEXT,
+    error_code TEXT,
+    error_details TEXT,
+    repair_state TEXT,
+    recovery_context TEXT
+);
 """
 
 
@@ -2442,3 +2464,365 @@ class TestIssueServiceLifecycle(unittest.TestCase):
     def test_reopen_from_open_raises(self):
         with self.assertRaises(svc.ServiceConflict):
             self.service.reopen(self.issue_uuid)
+
+
+# ---------------------------------------------------------------------------
+# OperationService — operation logging tests (BT-012)
+# ---------------------------------------------------------------------------
+
+def _make_op_service(conn):
+    op_repo = repo.OperationRepository(_db_factory(conn))
+    return svc.OperationService(op_repo), op_repo
+
+
+class TestOperationServiceBegin(unittest.TestCase):
+    """OperationService.begin() creates a durable Operation record."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.service, self.op_repo = _make_op_service(self.conn)
+
+    def test_returns_dict(self):
+        result = self.service.begin("import_execution", svc.OP_INITIATOR_WEB_UI)
+        self.assertIsInstance(result, dict)
+
+    def test_default_status_is_running(self):
+        result = self.service.begin("import_execution", svc.OP_INITIATOR_WEB_UI)
+        self.assertEqual(result["status"], svc.OP_STATUS_RUNNING)
+
+    def test_pending_status_stored(self):
+        result = self.service.begin(
+            "import_execution", svc.OP_INITIATOR_WEB_UI,
+            status=svc.OP_STATUS_PENDING,
+        )
+        self.assertEqual(result["status"], svc.OP_STATUS_PENDING)
+
+    def test_operation_type_stored(self):
+        result = self.service.begin("bulk_delete", svc.OP_INITIATOR_WEB_UI)
+        self.assertEqual(result["operation_type"], "bulk_delete")
+
+    def test_initiator_stored(self):
+        result = self.service.begin("import_execution", svc.OP_INITIATOR_AI_WORKER)
+        self.assertEqual(result["initiator"], svc.OP_INITIATOR_AI_WORKER)
+
+    def test_uuid_assigned(self):
+        result = self.service.begin("import_execution", svc.OP_INITIATOR_WEB_UI)
+        self.assertIsNotNone(result["uuid"])
+
+    def test_started_at_populated(self):
+        result = self.service.begin("import_execution", svc.OP_INITIATOR_WEB_UI)
+        self.assertIsNotNone(result["started_at"])
+
+    def test_ended_at_none(self):
+        result = self.service.begin("import_execution", svc.OP_INITIATOR_WEB_UI)
+        self.assertIsNone(result["ended_at"])
+
+    def test_import_uuid_stored(self):
+        result = self.service.begin(
+            "import_execution", svc.OP_INITIATOR_WEB_UI,
+            import_uuid="imp-123",
+        )
+        self.assertEqual(result["import_uuid"], "imp-123")
+
+    def test_entity_uuid_stored(self):
+        result = self.service.begin(
+            "album_create", svc.OP_INITIATOR_WEB_UI,
+            entity_uuid="alb-abc",
+        )
+        self.assertEqual(result["entity_uuid"], "alb-abc")
+
+    def test_repair_uuid_stored(self):
+        result = self.service.begin(
+            "repair_action", svc.OP_INITIATOR_WEB_UI,
+            repair_uuid="rep-xyz",
+        )
+        self.assertEqual(result["repair_uuid"], "rep-xyz")
+
+    def test_related_operation_uuid_stored(self):
+        result = self.service.begin(
+            "repair_action", svc.OP_INITIATOR_WEB_UI,
+            related_operation_uuid="op-original",
+        )
+        self.assertEqual(result["related_operation_uuid"], "op-original")
+
+    def test_record_is_durable(self):
+        result = self.service.begin("import_execution", svc.OP_INITIATOR_WEB_UI)
+        fetched = self.op_repo.get_by_uuid(result["uuid"])
+        self.assertIsNotNone(fetched)
+        self.assertEqual(fetched["operation_type"], "import_execution")
+
+    def test_shape_has_all_required_keys(self):
+        result = self.service.begin("import_execution", svc.OP_INITIATOR_WEB_UI)
+        for key in (
+            "uuid", "operation_type", "initiator", "status",
+            "started_at", "ended_at", "summary",
+            "entity_uuid", "import_uuid", "batch_uuid",
+            "error_category", "error_code", "error_details",
+        ):
+            self.assertIn(key, result)
+
+
+class TestOperationServiceSucceed(unittest.TestCase):
+    """OperationService.succeed() marks the Operation Succeeded."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.service, self.op_repo = _make_op_service(self.conn)
+        self.op = self.service.begin("import_execution", svc.OP_INITIATOR_WEB_UI)
+        self.op_uuid = self.op["uuid"]
+
+    def test_status_becomes_succeeded(self):
+        result = self.service.succeed(self.op_uuid)
+        self.assertEqual(result["status"], svc.OP_STATUS_SUCCEEDED)
+
+    def test_summary_stored(self):
+        result = self.service.succeed(self.op_uuid, summary="Imported 5 albums")
+        self.assertEqual(result["summary"], "Imported 5 albums")
+
+    def test_ended_at_populated(self):
+        result = self.service.succeed(self.op_uuid)
+        self.assertIsNotNone(result["ended_at"])
+
+    def test_not_found_raises(self):
+        with self.assertRaises(svc.ServiceNotFound):
+            self.service.succeed("nonexistent")
+
+    def test_already_failed_raises_conflict(self):
+        self.service.fail(
+            self.op_uuid, "filesystem", "filesystem.write-failed"
+        )
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.succeed(self.op_uuid)
+
+    def test_already_needs_repair_raises_conflict(self):
+        self.service.mark_needs_repair(
+            self.op_uuid, "filesystem", "filesystem.write-failed"
+        )
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.succeed(self.op_uuid)
+
+    def test_already_cancelled_raises_conflict(self):
+        self.service.cancel(self.op_uuid)
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.succeed(self.op_uuid)
+
+
+class TestOperationServiceFail(unittest.TestCase):
+    """OperationService.fail() marks the Operation Failed with error fields."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.service, _ = _make_op_service(self.conn)
+        self.op = self.service.begin("bulk_import", svc.OP_INITIATOR_WEB_UI)
+        self.op_uuid = self.op["uuid"]
+
+    def test_status_becomes_failed(self):
+        result = self.service.fail(self.op_uuid, "filesystem", "filesystem.write-failed")
+        self.assertEqual(result["status"], svc.OP_STATUS_FAILED)
+
+    def test_error_category_stored(self):
+        result = self.service.fail(self.op_uuid, "filesystem", "filesystem.write-failed")
+        self.assertEqual(result["error_category"], "filesystem")
+
+    def test_error_code_stored(self):
+        result = self.service.fail(self.op_uuid, "filesystem", "filesystem.write-failed")
+        self.assertEqual(result["error_code"], "filesystem.write-failed")
+
+    def test_error_details_stored(self):
+        result = self.service.fail(
+            self.op_uuid, "database", "database.transaction-failed",
+            error_details="UNIQUE constraint failed"
+        )
+        self.assertEqual(result["error_details"], "UNIQUE constraint failed")
+
+    def test_summary_stored(self):
+        result = self.service.fail(
+            self.op_uuid, "filesystem", "filesystem.write-failed",
+            summary="Could not write to archive"
+        )
+        self.assertEqual(result["summary"], "Could not write to archive")
+
+    def test_ended_at_populated(self):
+        result = self.service.fail(self.op_uuid, "filesystem", "filesystem.write-failed")
+        self.assertIsNotNone(result["ended_at"])
+
+    def test_not_found_raises(self):
+        with self.assertRaises(svc.ServiceNotFound):
+            self.service.fail("nonexistent", "filesystem", "filesystem.write-failed")
+
+
+class TestOperationServiceNeedsRepair(unittest.TestCase):
+    """OperationService.mark_needs_repair() marks NeedsRepair and stores repair context."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.service, _ = _make_op_service(self.conn)
+        self.op = self.service.begin("import_execution", svc.OP_INITIATOR_WEB_UI)
+        self.op_uuid = self.op["uuid"]
+
+    def test_status_becomes_needs_repair(self):
+        result = self.service.mark_needs_repair(
+            self.op_uuid, "filesystem", "filesystem.write-failed"
+        )
+        self.assertEqual(result["status"], svc.OP_STATUS_NEEDS_REPAIR)
+
+    def test_error_category_stored(self):
+        result = self.service.mark_needs_repair(
+            self.op_uuid, "filesystem", "filesystem.write-failed"
+        )
+        self.assertEqual(result["error_category"], "filesystem")
+
+    def test_repair_state_stored(self):
+        result = self.service.mark_needs_repair(
+            self.op_uuid, "filesystem", "filesystem.write-failed",
+            repair_state="NeedsRepair",
+        )
+        self.assertEqual(result["repair_state"], "NeedsRepair")
+
+    def test_recovery_context_stored(self):
+        result = self.service.mark_needs_repair(
+            self.op_uuid, "filesystem", "filesystem.write-failed",
+            recovery_context="Check disk permissions then retry",
+        )
+        self.assertEqual(result["recovery_context"], "Check disk permissions then retry")
+
+    def test_ended_at_populated(self):
+        result = self.service.mark_needs_repair(
+            self.op_uuid, "filesystem", "filesystem.write-failed"
+        )
+        self.assertIsNotNone(result["ended_at"])
+
+    def test_not_found_raises(self):
+        with self.assertRaises(svc.ServiceNotFound):
+            self.service.mark_needs_repair("nonexistent", "filesystem", "filesystem.write-failed")
+
+
+class TestOperationServiceCancel(unittest.TestCase):
+    """OperationService.cancel() marks the Operation Cancelled."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.service, _ = _make_op_service(self.conn)
+        self.op = self.service.begin("workspace_promotion", svc.OP_INITIATOR_WEB_UI)
+        self.op_uuid = self.op["uuid"]
+
+    def test_status_becomes_cancelled(self):
+        result = self.service.cancel(self.op_uuid)
+        self.assertEqual(result["status"], svc.OP_STATUS_CANCELLED)
+
+    def test_summary_stored(self):
+        result = self.service.cancel(self.op_uuid, summary="User cancelled the operation")
+        self.assertEqual(result["summary"], "User cancelled the operation")
+
+    def test_ended_at_populated(self):
+        result = self.service.cancel(self.op_uuid)
+        self.assertIsNotNone(result["ended_at"])
+
+    def test_not_found_raises(self):
+        with self.assertRaises(svc.ServiceNotFound):
+            self.service.cancel("nonexistent")
+
+
+class TestOperationServiceWorkflowIntegration(unittest.TestCase):
+    """OperationService records represent material write workflows."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.service, self.op_repo = _make_op_service(self.conn)
+
+    def test_import_execution_workflow(self):
+        """Import execution creates a Running operation and succeeds."""
+        import_uuid = "imp-001"
+        op = self.service.begin(
+            "import_execution",
+            svc.OP_INITIATOR_WEB_UI,
+            import_uuid=import_uuid,
+            summary="Importing 3 albums",
+        )
+        op_uuid = op["uuid"]
+        self.assertEqual(op["status"], svc.OP_STATUS_RUNNING)
+        self.assertEqual(op["import_uuid"], import_uuid)
+
+        result = self.service.succeed(op_uuid, summary="Successfully imported 3 albums")
+        self.assertEqual(result["status"], svc.OP_STATUS_SUCCEEDED)
+        self.assertEqual(result["import_uuid"], import_uuid)
+
+    def test_import_execution_filesystem_failure(self):
+        """Filesystem failure after DB write becomes NeedsRepair, not Failed."""
+        op = self.service.begin(
+            "import_execution",
+            svc.OP_INITIATOR_WEB_UI,
+            import_uuid="imp-002",
+        )
+        op_uuid = op["uuid"]
+
+        result = self.service.mark_needs_repair(
+            op_uuid,
+            "filesystem",
+            "filesystem.write-failed",
+            summary="Album directory could not be created",
+            repair_state="NeedsRepair",
+            recovery_context="Retry after checking disk permissions",
+        )
+        self.assertEqual(result["status"], svc.OP_STATUS_NEEDS_REPAIR)
+        self.assertIsNotNone(result["error_category"])
+
+    def test_bulk_import_workflow_with_batch_uuid(self):
+        """Bulk import uses batch_uuid contextual UUID."""
+        batch_uuid = "batch-abc"
+        op = self.service.begin(
+            "bulk_import",
+            svc.OP_INITIATOR_WEB_UI,
+            batch_uuid=batch_uuid,
+        )
+        self.assertEqual(op["batch_uuid"], batch_uuid)
+
+    def test_repair_operation_references_original(self):
+        """Repair operation links back to the original failed operation."""
+        original = self.service.begin("import_execution", svc.OP_INITIATOR_WEB_UI)
+        self.service.mark_needs_repair(
+            original["uuid"], "filesystem", "filesystem.write-failed"
+        )
+
+        # Record the follow-up repair operation referencing the original.
+        repair_op = self.service.begin(
+            "repair_action",
+            svc.OP_INITIATOR_WEB_UI,
+            repair_uuid="rep-123",
+            related_operation_uuid=original["uuid"],
+        )
+        self.assertEqual(repair_op["related_operation_uuid"], original["uuid"])
+
+        # Completing repair does NOT change the original Operation to Succeeded.
+        self.service.succeed(repair_op["uuid"])
+        original_fetched = self.op_repo.get_by_uuid(original["uuid"])
+        self.assertEqual(original_fetched["status"], svc.OP_STATUS_NEEDS_REPAIR)
+
+    def test_snapshot_operation_records_outcome(self):
+        """Snapshot and restore operations create Operation records."""
+        op = self.service.begin(
+            "snapshot",
+            svc.OP_INITIATOR_SYSTEM,
+            summary="Pre-import safety snapshot",
+        )
+        result = self.service.succeed(op["uuid"], summary="Snapshot created successfully")
+        self.assertEqual(result["status"], svc.OP_STATUS_SUCCEEDED)
+        self.assertEqual(result["initiator"], svc.OP_INITIATOR_SYSTEM)
+
+    def test_operation_history_independent_per_record(self):
+        """Each material write gets its own independent Operation record."""
+        op1 = self.service.begin("import_execution", svc.OP_INITIATOR_WEB_UI)
+        op2 = self.service.begin("import_execution", svc.OP_INITIATOR_WEB_UI)
+        self.assertNotEqual(op1["uuid"], op2["uuid"])
+
+        self.service.succeed(op1["uuid"])
+        self.service.fail(op2["uuid"], "database", "database.transaction-failed")
+
+        self.assertEqual(
+            self.op_repo.get_by_uuid(op1["uuid"])["status"],
+            svc.OP_STATUS_SUCCEEDED,
+        )
+        self.assertEqual(
+            self.op_repo.get_by_uuid(op2["uuid"])["status"],
+            svc.OP_STATUS_FAILED,
+        )

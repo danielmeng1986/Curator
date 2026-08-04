@@ -142,6 +142,28 @@ CREATE TABLE IF NOT EXISTS issue (
     owner TEXT,
     due_date TEXT
 );
+CREATE TABLE IF NOT EXISTS operation (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT NOT NULL,
+    operation_type TEXT NOT NULL,
+    initiator TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Pending',
+    summary TEXT,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    entity_uuid TEXT,
+    import_uuid TEXT,
+    batch_uuid TEXT,
+    repair_uuid TEXT,
+    related_operation_uuid TEXT,
+    parent_operation_uuid TEXT,
+    issue_uuid TEXT,
+    error_category TEXT,
+    error_code TEXT,
+    error_details TEXT,
+    repair_state TEXT,
+    recovery_context TEXT
+);
 """
 
 
@@ -1969,3 +1991,156 @@ class TestIssueRepositoryLifecycle(unittest.TestCase):
     def test_set_state_persists(self):
         self.repo.set_state(self.issue_uuid, "InProgress")
         self.assertEqual(self.repo.get_state(self.issue_uuid), "InProgress")
+
+
+# ---------------------------------------------------------------------------
+# OperationRepository — shape and persistence tests (BT-012)
+# ---------------------------------------------------------------------------
+
+class TestOperationRepositoryCreate(unittest.TestCase):
+    """Operation record creation returns a normalised dict with all required keys."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.repo = repo.OperationRepository(_db_factory(self.conn))
+
+    def _minimal(self):
+        return {
+            "operation_type": "import_execution",
+            "initiator": "WebUI",
+        }
+
+    def test_returns_dict(self):
+        result = self.repo.create(self._minimal())
+        self.assertIsInstance(result, dict)
+
+    def test_has_id(self):
+        result = self.repo.create(self._minimal())
+        self.assertIsNotNone(result["id"])
+
+    def test_has_uuid(self):
+        result = self.repo.create(self._minimal())
+        self.assertIsNotNone(result["uuid"])
+
+    def test_default_status_is_pending(self):
+        result = self.repo.create(self._minimal())
+        self.assertEqual(result["status"], "Pending")
+
+    def test_operation_type_persisted(self):
+        result = self.repo.create(self._minimal())
+        self.assertEqual(result["operation_type"], "import_execution")
+
+    def test_initiator_persisted(self):
+        result = self.repo.create(self._minimal())
+        self.assertEqual(result["initiator"], "WebUI")
+
+    def test_started_at_populated(self):
+        result = self.repo.create(self._minimal())
+        self.assertIsNotNone(result["started_at"])
+
+    def test_ended_at_none_by_default(self):
+        result = self.repo.create(self._minimal())
+        self.assertIsNone(result["ended_at"])
+
+    def test_error_fields_none_by_default(self):
+        result = self.repo.create(self._minimal())
+        for key in ("error_category", "error_code", "error_details"):
+            self.assertIsNone(result[key])
+
+    def test_contextual_uuids_none_by_default(self):
+        result = self.repo.create(self._minimal())
+        for key in (
+            "entity_uuid", "import_uuid", "batch_uuid", "repair_uuid",
+            "related_operation_uuid", "parent_operation_uuid", "issue_uuid",
+        ):
+            self.assertIsNone(result[key])
+
+    def test_import_uuid_persisted(self):
+        fields = {**self._minimal(), "import_uuid": "imp-1"}
+        result = self.repo.create(fields)
+        self.assertEqual(result["import_uuid"], "imp-1")
+
+    def test_entity_uuid_persisted(self):
+        fields = {**self._minimal(), "entity_uuid": "ent-1"}
+        result = self.repo.create(fields)
+        self.assertEqual(result["entity_uuid"], "ent-1")
+
+    def test_repair_uuid_persisted(self):
+        fields = {**self._minimal(), "repair_uuid": "rep-1"}
+        result = self.repo.create(fields)
+        self.assertEqual(result["repair_uuid"], "rep-1")
+
+    def test_custom_uuid_used_when_provided(self):
+        fields = {**self._minimal(), "uuid": "my-custom-uuid"}
+        result = self.repo.create(fields)
+        self.assertEqual(result["uuid"], "my-custom-uuid")
+
+    def test_shape_has_all_keys(self):
+        result = self.repo.create(self._minimal())
+        expected = {
+            "id", "uuid", "operation_type", "initiator", "status", "summary",
+            "started_at", "ended_at",
+            "entity_uuid", "import_uuid", "batch_uuid", "repair_uuid",
+            "related_operation_uuid", "parent_operation_uuid", "issue_uuid",
+            "error_category", "error_code", "error_details",
+            "repair_state", "recovery_context",
+        }
+        self.assertEqual(set(result.keys()), expected)
+
+    def test_get_by_uuid_returns_dict(self):
+        result = self.repo.create(self._minimal())
+        fetched = self.repo.get_by_uuid(result["uuid"])
+        self.assertIsInstance(fetched, dict)
+
+    def test_get_by_uuid_missing_returns_none(self):
+        self.assertIsNone(self.repo.get_by_uuid("nonexistent"))
+
+
+class TestOperationRepositorySetStatus(unittest.TestCase):
+    """set_status() updates status and terminal fields."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.repo = repo.OperationRepository(_db_factory(self.conn))
+        self.op = self.repo.create({
+            "operation_type": "bulk_import",
+            "initiator": "WebUI",
+        })
+        self.op_uuid = self.op["uuid"]
+
+    def test_set_status_persists_new_status(self):
+        self.repo.set_status(self.op_uuid, "Succeeded")
+        result = self.repo.get_by_uuid(self.op_uuid)
+        self.assertEqual(result["status"], "Succeeded")
+
+    def test_set_status_with_summary(self):
+        self.repo.set_status(self.op_uuid, "Succeeded", summary="Imported 10 albums")
+        result = self.repo.get_by_uuid(self.op_uuid)
+        self.assertEqual(result["summary"], "Imported 10 albums")
+
+    def test_set_status_populates_ended_at(self):
+        self.repo.set_status(self.op_uuid, "Failed")
+        result = self.repo.get_by_uuid(self.op_uuid)
+        self.assertIsNotNone(result["ended_at"])
+
+    def test_set_status_with_error_fields(self):
+        self.repo.set_status(
+            self.op_uuid, "Failed",
+            error_category="filesystem",
+            error_code="filesystem.write-failed",
+            error_details="Permission denied on /archive",
+        )
+        result = self.repo.get_by_uuid(self.op_uuid)
+        self.assertEqual(result["error_category"], "filesystem")
+        self.assertEqual(result["error_code"], "filesystem.write-failed")
+        self.assertEqual(result["error_details"], "Permission denied on /archive")
+
+    def test_set_status_with_repair_state(self):
+        self.repo.set_status(
+            self.op_uuid, "NeedsRepair",
+            repair_state="NeedsRepair",
+            recovery_context="Re-run import after fixing disk permissions",
+        )
+        result = self.repo.get_by_uuid(self.op_uuid)
+        self.assertEqual(result["repair_state"], "NeedsRepair")
+        self.assertEqual(result["recovery_context"], "Re-run import after fixing disk permissions")

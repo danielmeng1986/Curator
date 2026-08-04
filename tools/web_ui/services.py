@@ -1520,3 +1520,263 @@ class IssueService:
             )
         self._issue.set_state(issue_uuid, to_state)
         return self._issue.get_by_uuid(issue_uuid)
+
+
+# ---------------------------------------------------------------------------
+# Operation logging constants
+# ---------------------------------------------------------------------------
+
+# Status vocabulary — every Operation has exactly one of these at any time.
+OP_STATUS_PENDING: str = "Pending"
+OP_STATUS_RUNNING: str = "Running"
+OP_STATUS_SUCCEEDED: str = "Succeeded"
+OP_STATUS_FAILED: str = "Failed"
+OP_STATUS_NEEDS_REPAIR: str = "NeedsRepair"
+OP_STATUS_CANCELLED: str = "Cancelled"
+
+# Initiator vocabulary — who or what triggered the operation.
+OP_INITIATOR_WEB_UI: str = "WebUI"
+OP_INITIATOR_AI_WORKER: str = "AIWorker"
+OP_INITIATOR_CLI: str = "CLI"
+OP_INITIATOR_SYSTEM: str = "System"
+
+# Terminal statuses — operations in these states must not be transitioned
+# to a success status after the fact.
+_OP_TERMINAL_STATUSES: frozenset[str] = frozenset({
+    OP_STATUS_SUCCEEDED,
+    OP_STATUS_FAILED,
+    OP_STATUS_NEEDS_REPAIR,
+    OP_STATUS_CANCELLED,
+})
+
+
+# ---------------------------------------------------------------------------
+# OperationService
+# ---------------------------------------------------------------------------
+
+class OperationService:
+    """Records durable Operation history for material backend writes.
+
+    This service is the single path for creating and completing Operation
+    records.  All material writes that require a database-backed Operation
+    record (imports, bulk actions, snapshots, restores, repairs, etc.) call
+    this service to open and close their records.
+
+    Supporting log output (JSONL) remains the responsibility of the caller;
+    this service owns only the database-backed record.
+
+    Lifecycle
+    ---------
+    1. Call :meth:`begin` at the start of the material work (or just before
+       it starts) to create the Operation in ``Pending`` or ``Running`` state.
+    2. Call one of :meth:`succeed`, :meth:`fail`, :meth:`mark_needs_repair`,
+       or :meth:`cancel` when the work completes or is stopped.
+
+    The service does not enforce the status transition graph because the
+    Operation record is append-only in business meaning: corrections and
+    follow-up are recorded as linked subsequent activity, not by erasing the
+    original outcome.  It does enforce the prohibition on moving a terminal
+    Operation to ``Succeeded``.
+    """
+
+    def __init__(self, operation_repo):
+        self._repo = operation_repo
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def begin(
+        self,
+        operation_type: str,
+        initiator: str,
+        *,
+        status: str = OP_STATUS_RUNNING,
+        summary: str | None = None,
+        entity_uuid: str | None = None,
+        import_uuid: str | None = None,
+        batch_uuid: str | None = None,
+        repair_uuid: str | None = None,
+        related_operation_uuid: str | None = None,
+        parent_operation_uuid: str | None = None,
+        issue_uuid: str | None = None,
+        recovery_context: str | None = None,
+    ) -> dict:
+        """Create and persist a new Operation record.
+
+        Sets ``started_at`` to the current UTC time.  The initial status
+        defaults to ``'Running'``.
+
+        Args:
+            operation_type: Stable type identifier for the operation family.
+            initiator: One of the ``OP_INITIATOR_*`` constants.
+            status: Initial status; usually ``'Pending'`` (work has been
+                accepted but not started) or ``'Running'`` (work is in
+                progress).
+            summary: Optional short human-readable description.
+            entity_uuid: UUID of the primary entity affected, when applicable.
+            import_uuid: UUID of the import batch, for import operations.
+            batch_uuid: UUID of the batch, for batch and promotion operations.
+            repair_uuid: UUID of the repair case, for repair operations.
+            related_operation_uuid: UUID of a non-parent related Operation.
+            parent_operation_uuid: UUID of the direct parent Operation.
+            issue_uuid: UUID of the tracking Issue, for issue-driven workflows.
+            recovery_context: Instructions or context for recovery.
+
+        Returns:
+            Normalised Operation dict.
+        """
+        return self._repo.create(
+            {
+                "operation_type": operation_type,
+                "initiator": initiator,
+                "status": status,
+                "summary": summary,
+                "entity_uuid": entity_uuid,
+                "import_uuid": import_uuid,
+                "batch_uuid": batch_uuid,
+                "repair_uuid": repair_uuid,
+                "related_operation_uuid": related_operation_uuid,
+                "parent_operation_uuid": parent_operation_uuid,
+                "issue_uuid": issue_uuid,
+                "recovery_context": recovery_context,
+            }
+        )
+
+    def succeed(self, op_uuid: str, summary: str | None = None) -> dict:
+        """Mark an Operation as ``Succeeded`` and return its updated record.
+
+        Args:
+            op_uuid: UUID of the Operation to complete.
+            summary: Optional outcome summary to persist.
+
+        Returns:
+            Updated normalised Operation dict.
+
+        Raises:
+            ServiceNotFound: When *op_uuid* does not exist.
+            ServiceConflict: When the Operation is already in a terminal
+                status and cannot be moved to ``Succeeded``.
+        """
+        op = self._repo.get_by_uuid(op_uuid)
+        if op is None:
+            raise ServiceNotFound(f"Operation not found: {op_uuid}")
+        if op["status"] in _OP_TERMINAL_STATUSES and op["status"] != OP_STATUS_SUCCEEDED:
+            raise ServiceConflict(
+                "TERMINAL_STATUS",
+                (
+                    f"Operation {op_uuid} is already in terminal status "
+                    f"'{op['status']}' and cannot be moved to Succeeded."
+                ),
+                {"current_status": op["status"]},
+            )
+        self._repo.set_status(op_uuid, OP_STATUS_SUCCEEDED, summary=summary)
+        return self._repo.get_by_uuid(op_uuid)
+
+    def fail(
+        self,
+        op_uuid: str,
+        error_category: str,
+        error_code: str,
+        summary: str | None = None,
+        error_details: str | None = None,
+        recovery_context: str | None = None,
+    ) -> dict:
+        """Mark an Operation as ``Failed`` and return its updated record.
+
+        Args:
+            op_uuid: UUID of the Operation.
+            error_category: Coarse error category from the permitted set
+                (e.g. ``'filesystem'``, ``'database'``, ``'validation'``).
+            error_code: Stable error code refining the category
+                (e.g. ``'filesystem.write-failed'``).
+            summary: Human-readable failure summary.
+            error_details: Free-text diagnostic detail (not for API exposure
+                to unprivileged clients).
+            recovery_context: Recovery instructions or context.
+
+        Returns:
+            Updated normalised Operation dict.
+
+        Raises:
+            ServiceNotFound: When *op_uuid* does not exist.
+        """
+        op = self._repo.get_by_uuid(op_uuid)
+        if op is None:
+            raise ServiceNotFound(f"Operation not found: {op_uuid}")
+        self._repo.set_status(
+            op_uuid,
+            OP_STATUS_FAILED,
+            summary=summary,
+            error_category=error_category,
+            error_code=error_code,
+            error_details=error_details,
+            recovery_context=recovery_context,
+        )
+        return self._repo.get_by_uuid(op_uuid)
+
+    def mark_needs_repair(
+        self,
+        op_uuid: str,
+        error_category: str,
+        error_code: str,
+        summary: str | None = None,
+        error_details: str | None = None,
+        repair_state: str | None = None,
+        recovery_context: str | None = None,
+    ) -> dict:
+        """Mark an Operation as ``NeedsRepair`` and return its updated record.
+
+        Use this when material work ended unsuccessfully and a filesystem
+        repair workflow is required before the affected state is resolved.
+        The original Operation remains intact; follow-up repair is recorded
+        as linked subsequent activity.
+
+        Args:
+            op_uuid: UUID of the Operation.
+            error_category: Coarse error category.
+            error_code: Stable error code.
+            summary: Human-readable summary.
+            error_details: Free-text diagnostic detail.
+            repair_state: Current state of the associated repair case.
+            recovery_context: Instructions for recovery.
+
+        Returns:
+            Updated normalised Operation dict.
+
+        Raises:
+            ServiceNotFound: When *op_uuid* does not exist.
+        """
+        op = self._repo.get_by_uuid(op_uuid)
+        if op is None:
+            raise ServiceNotFound(f"Operation not found: {op_uuid}")
+        self._repo.set_status(
+            op_uuid,
+            OP_STATUS_NEEDS_REPAIR,
+            summary=summary,
+            error_category=error_category,
+            error_code=error_code,
+            error_details=error_details,
+            repair_state=repair_state,
+            recovery_context=recovery_context,
+        )
+        return self._repo.get_by_uuid(op_uuid)
+
+    def cancel(self, op_uuid: str, summary: str | None = None) -> dict:
+        """Mark an Operation as ``Cancelled`` and return its updated record.
+
+        Args:
+            op_uuid: UUID of the Operation.
+            summary: Optional cancellation reason.
+
+        Returns:
+            Updated normalised Operation dict.
+
+        Raises:
+            ServiceNotFound: When *op_uuid* does not exist.
+        """
+        op = self._repo.get_by_uuid(op_uuid)
+        if op is None:
+            raise ServiceNotFound(f"Operation not found: {op_uuid}")
+        self._repo.set_status(op_uuid, OP_STATUS_CANCELLED, summary=summary)
+        return self._repo.get_by_uuid(op_uuid)
