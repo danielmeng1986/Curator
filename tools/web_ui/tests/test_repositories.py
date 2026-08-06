@@ -1958,6 +1958,7 @@ class TestIssueRepositoryCreate(unittest.TestCase):
             "id", "uuid", "category", "description", "affected_operation",
             "suggested_resolution", "state", "source_workflow",
             "created_at", "updated_at", "priority", "owner", "due_date",
+            "resolution_verification", "resolved_by", "resolved_at",
         }
         self.assertEqual(set(result.keys()), expected_keys)
 
@@ -1991,6 +1992,27 @@ class TestIssueRepositoryLifecycle(unittest.TestCase):
     def test_set_state_persists(self):
         self.repo.set_state(self.issue_uuid, "InProgress")
         self.assertEqual(self.repo.get_state(self.issue_uuid), "InProgress")
+
+    def test_resolution_tracking_persists(self):
+        self.repo.set_state(
+            self.issue_uuid, "Resolved",
+            resolution_verification="Validated archive path",
+            resolved_by="admin",
+        )
+        result = self.repo.get_by_uuid(self.issue_uuid)
+        self.assertEqual(result["resolution_verification"], "Validated archive path")
+        self.assertEqual(result["resolved_by"], "admin")
+        self.assertIsNotNone(result["resolved_at"])
+
+    def test_owner_and_links_persist(self):
+        self.repo.set_owner(self.issue_uuid, "Local Administrator")
+        self.repo.add_link(self.issue_uuid, "triggering_operation", "operation-01")
+        self.repo.add_link(self.issue_uuid, "affected_entity", "album-01")
+        self.assertEqual(self.repo.get_by_uuid(self.issue_uuid)["owner"], "Local Administrator")
+        self.assertEqual(
+            {(link["relationship"], link["target_uuid"]) for link in self.repo.list_links(self.issue_uuid)},
+            {("triggering_operation", "operation-01"), ("affected_entity", "album-01")},
+        )
 
 
 # ---------------------------------------------------------------------------

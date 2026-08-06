@@ -1787,6 +1787,9 @@ def _norm_issue(row: dict) -> dict:
         "priority": row.get("priority", "Normal"),
         "owner": row.get("owner"),
         "due_date": row.get("due_date"),
+        "resolution_verification": row.get("resolution_verification"),
+        "resolved_by": row.get("resolved_by"),
+        "resolved_at": row.get("resolved_at"),
     }
 
 
@@ -1903,6 +1906,48 @@ class IssueRepository:
     def __init__(self, db_factory):
         self._db = db_factory
 
+    @staticmethod
+    def _ensure_schema(conn) -> None:
+        """Provide additive Issue persistence for existing Curator databases."""
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS issue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid TEXT NOT NULL UNIQUE,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL,
+                affected_operation TEXT,
+                suggested_resolution TEXT,
+                state TEXT NOT NULL DEFAULT 'Open',
+                source_workflow TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                priority TEXT DEFAULT 'Normal',
+                owner TEXT,
+                due_date TEXT,
+                resolution_verification TEXT,
+                resolved_by TEXT,
+                resolved_at TEXT
+            )"""
+        )
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(issue)")}
+        for column, declaration in (
+            ("resolution_verification", "TEXT"),
+            ("resolved_by", "TEXT"),
+            ("resolved_at", "TEXT"),
+        ):
+            if column not in existing:
+                conn.execute(f"ALTER TABLE issue ADD COLUMN {column} {declaration}")
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS issue_link (
+                issue_uuid TEXT NOT NULL,
+                relationship TEXT NOT NULL,
+                target_uuid TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(issue_uuid, relationship, target_uuid)
+            )"""
+        )
+        conn.commit()
+
     def create(self, fields: dict) -> dict:
         """Create a new issue and return the normalised record.
 
@@ -1916,6 +1961,7 @@ class IssueRepository:
         now = datetime.now(timezone.utc).isoformat()
         issue_uuid = fields.get("uuid") or str(uuid.uuid4())
         with self._db() as conn:
+            self._ensure_schema(conn)
             cur = conn.execute(
                 """
                 INSERT INTO issue
@@ -1948,6 +1994,7 @@ class IssueRepository:
     def get_by_uuid(self, issue_uuid: str) -> dict | None:
         """Return the normalised issue for *issue_uuid*, or ``None``."""
         with self._db() as conn:
+            self._ensure_schema(conn)
             row = conn.execute(
                 "SELECT * FROM issue WHERE uuid = ?", (issue_uuid,)
             ).fetchone()
@@ -1956,20 +2003,78 @@ class IssueRepository:
     def get_state(self, issue_uuid: str) -> str | None:
         """Return the current state string for *issue_uuid*, or ``None``."""
         with self._db() as conn:
+            self._ensure_schema(conn)
             row = conn.execute(
                 "SELECT state FROM issue WHERE uuid = ?", (issue_uuid,)
             ).fetchone()
         return row["state"] if row else None
 
-    def set_state(self, issue_uuid: str, state: str) -> None:
+    def set_state(
+        self,
+        issue_uuid: str,
+        state: str,
+        *,
+        resolution_verification: str | None = None,
+        resolved_by: str | None = None,
+    ) -> None:
         """Persist a state transition for *issue_uuid*."""
         now = datetime.now(timezone.utc).isoformat()
         with self._db() as conn:
+            self._ensure_schema(conn)
             conn.execute(
-                "UPDATE issue SET state = ?, updated_at = ? WHERE uuid = ?",
-                (state, now, issue_uuid),
+                """UPDATE issue SET state = ?, updated_at = ?,
+                resolution_verification = COALESCE(?, resolution_verification),
+                resolved_by = COALESCE(?, resolved_by),
+                resolved_at = CASE WHEN ? = 'Resolved' THEN ? ELSE resolved_at END
+                WHERE uuid = ?""",
+                (state, now, resolution_verification, resolved_by, state, now, issue_uuid),
             )
             conn.commit()
+
+    def set_owner(self, issue_uuid: str, owner: str | None) -> None:
+        """Persist an administrator-selected Issue owner."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                "UPDATE issue SET owner = ?, updated_at = ? WHERE uuid = ?",
+                (owner, now, issue_uuid),
+            )
+            conn.commit()
+
+    def set_category(self, issue_uuid: str, category: str) -> None:
+        """Persist a service-validated category change."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                "UPDATE issue SET category = ?, updated_at = ? WHERE uuid = ?",
+                (category, now, issue_uuid),
+            )
+            conn.commit()
+
+    def add_link(self, issue_uuid: str, relationship: str, target_uuid: str) -> None:
+        """Record one durable Issue-to-operation or Issue-to-entity link."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                """INSERT OR IGNORE INTO issue_link
+                (issue_uuid, relationship, target_uuid, created_at) VALUES (?, ?, ?, ?)""",
+                (issue_uuid, relationship, target_uuid, now),
+            )
+            conn.commit()
+
+    def list_links(self, issue_uuid: str) -> list[dict]:
+        """Return the stable links associated with an Issue."""
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """SELECT relationship, target_uuid, created_at FROM issue_link
+                WHERE issue_uuid = ? ORDER BY created_at, relationship, target_uuid""",
+                (issue_uuid,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
 
 # ---------------------------------------------------------------------------

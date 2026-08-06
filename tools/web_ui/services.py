@@ -153,10 +153,12 @@ class AuthenticationService:
         *,
         registration_secret: str | None = None,
         now_fn=None,
+        issue_service=None,
     ):
         self._repo = auth_repo
         self._registration_secret = registration_secret
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
+        self._issues = issue_service
 
     def _now_utc(self) -> datetime:
         value = self._now()
@@ -191,10 +193,19 @@ class AuthenticationService:
             raise AuthenticationFailure("AUTHENTICATION_INVALID_REGISTRATION_PROOF", "The registration proof is invalid.")
         role, scopes = self._validate_role_and_scopes(requested_role, requested_scopes)
         try:
-            return self._repo.create_registration({
+            registration = self._repo.create_registration({
                 "device_name": device_name.strip(), "device_identity": device_identity.strip(),
                 "requested_role": role, "requested_scopes": scopes,
             })
+            if self._issues is not None:
+                issue = self._issues.create({
+                    "category": "Device Registration",
+                    "description": f"Device registration requires administrator review: {registration['device_name']}",
+                    "suggested_resolution": "Review and approve or reject the registration request.",
+                    "source_workflow": "AuthenticationService",
+                })
+                self._issues.link(issue["uuid"], "affected_entity", registration["uuid"])
+            return registration
         except repo.PersistenceConflict as exc:
             raise ServiceConflict("BUSINESS_CONFLICT", "A registration already exists for this device identity.", exc.details)
 
@@ -1424,6 +1435,16 @@ _ISSUE_TRANSITIONS: dict[str, frozenset[str]] = {
     ISSUE_STATE_ARCHIVED: frozenset(),
 }
 
+ISSUE_CATEGORIES: frozenset[str] = frozenset({
+    "Validation", "Filesystem", "Import", "Repair", "AI Processing",
+    "Security", "Device Registration",
+})
+ISSUE_PRIORITIES: frozenset[str] = frozenset({"Normal", "High", "Critical"})
+ISSUE_LINK_RELATIONSHIPS: frozenset[str] = frozenset({
+    "triggering_operation", "related_operation", "affected_entity",
+})
+ISSUE_ADMIN_ROLE = "admin"
+
 
 # ---------------------------------------------------------------------------
 # RepairService
@@ -1447,7 +1468,9 @@ class RepairService:
 
     def __init__(self, repair_repo, issue_repo):
         self._repair = repair_repo
-        self._issue = issue_repo
+        # Repair is an Issue integration point; category validation and Issue
+        # lifecycle policy remain owned by the shared Issue service.
+        self._issues = IssueService(issue_repo)
 
     # ------------------------------------------------------------------
     # Public API
@@ -1497,7 +1520,7 @@ class RepairService:
         }
         if issue_fields:
             base_issue.update(issue_fields)
-        issue = self._issue.create(base_issue)
+        issue = self._issues.create(base_issue)
         return {"repair": repair, "issue": issue}
 
     def confirm(self, repair_uuid: str, confirmation: str) -> dict:
@@ -1678,8 +1701,37 @@ class IssueService:
             Normalised issue dict.
         """
         fields = dict(fields)
+        category = fields.get("category")
+        if category not in ISSUE_CATEGORIES:
+            raise ValueError("The Issue category is not supported.")
+        if not isinstance(fields.get("description"), str) or not fields["description"].strip():
+            raise ValueError("Issue description is required.")
+        if not isinstance(fields.get("source_workflow"), str) or not fields["source_workflow"].strip():
+            raise ValueError("Issue source workflow is required.")
+        if fields.get("priority", "Normal") not in ISSUE_PRIORITIES:
+            raise ValueError("The Issue priority is not supported.")
+        # Ownership is an administrative action even when supplied alongside
+        # creation; integrations create unowned Issues by default.
+        fields.pop("owner", None)
         fields.setdefault("state", ISSUE_STATE_OPEN)
         return self._issue.create(fields)
+
+    def categorize(self, issue_uuid: str, category: str) -> dict:
+        """Apply one of the documented cross-cutting Issue categories."""
+        if category not in ISSUE_CATEGORIES:
+            raise ValueError("The Issue category is not supported.")
+        self._require_issue(issue_uuid)
+        self._issue.set_category(issue_uuid, category)
+        return self._issue.get_by_uuid(issue_uuid)
+
+    def assign(self, issue_uuid: str, owner: str | None, *, actor_role: str) -> dict:
+        """Assign or clear ownership; only administrators may do this."""
+        self._require_admin(actor_role)
+        self._require_issue(issue_uuid)
+        if owner is not None and (not isinstance(owner, str) or not owner.strip()):
+            raise ValueError("Issue owner must be a non-empty name or null.")
+        self._issue.set_owner(issue_uuid, owner.strip() if owner else None)
+        return self._issue.get_by_uuid(issue_uuid)
 
     def begin_work(self, issue_uuid: str) -> dict:
         """Transition ``Open`` → ``InProgress``."""
@@ -1689,18 +1741,49 @@ class IssueService:
         """Transition ``InProgress`` → ``Open``."""
         return self._transition(issue_uuid, ISSUE_STATE_OPEN)
 
-    def resolve(self, issue_uuid: str) -> dict:
-        """Transition ``InProgress`` → ``Resolved``."""
-        return self._transition(issue_uuid, ISSUE_STATE_RESOLVED)
+    def resolve(self, issue_uuid: str, verification: str, *, actor_role: str) -> dict:
+        """Transition ``InProgress`` → ``Resolved`` after verified resolution."""
+        self._require_admin(actor_role)
+        if not isinstance(verification, str) or not verification.strip():
+            raise ValueError("Resolution requires workflow verification.")
+        return self._transition(
+            issue_uuid, ISSUE_STATE_RESOLVED,
+            resolution_verification=verification.strip(), resolved_by=actor_role,
+        )
 
-    def archive(self, issue_uuid: str) -> dict:
+    def archive(self, issue_uuid: str, *, actor_role: str) -> dict:
         """Transition ``Open``, ``InProgress``, or ``Resolved`` → ``Archived``."""
+        self._require_admin(actor_role)
         return self._transition(issue_uuid, ISSUE_STATE_ARCHIVED)
 
-    def _transition(self, issue_uuid: str, to_state: str) -> dict:
+    def link(self, issue_uuid: str, relationship: str, target_uuid: str) -> list[dict]:
+        """Link an Issue to the triggering Operation or affected entity."""
+        self._require_issue(issue_uuid)
+        if relationship not in ISSUE_LINK_RELATIONSHIPS:
+            raise ValueError("The Issue link relationship is not supported.")
+        if not isinstance(target_uuid, str) or not target_uuid.strip():
+            raise ValueError("Issue link target must be a stable identifier.")
+        self._issue.add_link(issue_uuid, relationship, target_uuid.strip())
+        return self._issue.list_links(issue_uuid)
+
+    def links(self, issue_uuid: str) -> list[dict]:
+        """Return links after confirming the Issue exists."""
+        self._require_issue(issue_uuid)
+        return self._issue.list_links(issue_uuid)
+
+    def _require_issue(self, issue_uuid: str) -> dict:
         issue = self._issue.get_by_uuid(issue_uuid)
         if issue is None:
             raise ServiceNotFound(f"Issue not found: {issue_uuid}")
+        return issue
+
+    @staticmethod
+    def _require_admin(actor_role: str) -> None:
+        if actor_role != ISSUE_ADMIN_ROLE:
+            raise AuthorizationFailure("admin")
+
+    def _transition(self, issue_uuid: str, to_state: str, **state_fields) -> dict:
+        issue = self._require_issue(issue_uuid)
         from_state = issue["state"]
         allowed = _ISSUE_TRANSITIONS.get(from_state, frozenset())
         if to_state not in allowed:
@@ -1709,7 +1792,7 @@ class IssueService:
                 f"Cannot transition issue {issue_uuid} from '{from_state}' to '{to_state}'.",
                 {"from": from_state, "to": to_state, "allowed": sorted(allowed)},
             )
-        self._issue.set_state(issue_uuid, to_state)
+        self._issue.set_state(issue_uuid, to_state, **state_fields)
         return self._issue.get_by_uuid(issue_uuid)
 
 

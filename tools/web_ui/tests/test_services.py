@@ -2402,6 +2402,44 @@ class TestIssueServiceCreate(unittest.TestCase):
         result = self.service.create(self._minimal())
         self.assertEqual(result["description"], "Album directory missing")
 
+    def test_all_documented_categories_can_be_created(self):
+        for category in svc.ISSUE_CATEGORIES:
+            issue = self.service.create({
+                "category": category,
+                "description": f"{category} issue",
+                "source_workflow": "IntegrationTest",
+            })
+            self.assertEqual(issue["category"], category)
+
+    def test_unsupported_category_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.service.create({
+                "category": "Other",
+                "description": "unsupported",
+                "source_workflow": "IntegrationTest",
+            })
+
+    def test_device_registration_can_create_a_linked_issue(self):
+        auth = svc.AuthenticationService(
+            repo.AuthRepository(lambda: self.conn),
+            registration_secret="registration-proof",
+            issue_service=self.service,
+        )
+        registration = auth.request_registration(
+            device_name="AI Worker",
+            device_identity="ai-worker-issue-test",
+            requested_role="writer",
+            requested_scopes=None,
+            registration_proof="registration-proof",
+        )
+        rows = self.conn.execute(
+            "SELECT uuid FROM issue WHERE category = 'Device Registration'"
+        ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            self.issue_repo.list_links(rows[0]["uuid"])[0]["target_uuid"], registration["uuid"]
+        )
+
 
 class TestIssueServiceLifecycle(unittest.TestCase):
     """IssueService state transitions."""
@@ -2429,23 +2467,26 @@ class TestIssueServiceLifecycle(unittest.TestCase):
 
     def test_resolve_transitions_to_resolved(self):
         self.service.begin_work(self.issue_uuid)
-        updated = self.service.resolve(self.issue_uuid)
+        updated = self.service.resolve(
+            self.issue_uuid, "Validated by the originating workflow", actor_role="admin"
+        )
         self.assertEqual(updated["state"], "Resolved")
+        self.assertEqual(updated["resolved_by"], "admin")
 
     def test_archive_from_open(self):
-        updated = self.service.archive(self.issue_uuid)
+        updated = self.service.archive(self.issue_uuid, actor_role="admin")
         self.assertEqual(updated["state"], "Archived")
 
     def test_archive_from_resolved(self):
         self.service.begin_work(self.issue_uuid)
-        self.service.resolve(self.issue_uuid)
-        updated = self.service.archive(self.issue_uuid)
+        self.service.resolve(self.issue_uuid, "verified", actor_role="admin")
+        updated = self.service.archive(self.issue_uuid, actor_role="admin")
         self.assertEqual(updated["state"], "Archived")
 
     def test_full_happy_path(self):
         self.service.begin_work(self.issue_uuid)
-        self.service.resolve(self.issue_uuid)
-        updated = self.service.archive(self.issue_uuid)
+        self.service.resolve(self.issue_uuid, "verified", actor_role="admin")
+        updated = self.service.archive(self.issue_uuid, actor_role="admin")
         self.assertEqual(updated["state"], "Archived")
 
     def test_begin_work_nonexistent_raises(self):
@@ -2453,17 +2494,70 @@ class TestIssueServiceLifecycle(unittest.TestCase):
             self.service.begin_work("nonexistent")
 
     def test_archive_from_archived_raises(self):
-        self.service.archive(self.issue_uuid)
+        self.service.archive(self.issue_uuid, actor_role="admin")
         with self.assertRaises(svc.ServiceConflict):
-            self.service.archive(self.issue_uuid)
+            self.service.archive(self.issue_uuid, actor_role="admin")
 
     def test_resolve_from_open_raises(self):
         with self.assertRaises(svc.ServiceConflict):
-            self.service.resolve(self.issue_uuid)
+            self.service.resolve(self.issue_uuid, "verified", actor_role="admin")
 
     def test_reopen_from_open_raises(self):
         with self.assertRaises(svc.ServiceConflict):
             self.service.reopen(self.issue_uuid)
+
+    def test_only_administrator_can_assign_resolve_or_archive(self):
+        with self.assertRaises(svc.AuthorizationFailure):
+            self.service.assign(self.issue_uuid, "Owner", actor_role="writer")
+        self.service.begin_work(self.issue_uuid)
+        with self.assertRaises(svc.AuthorizationFailure):
+            self.service.resolve(self.issue_uuid, "verified", actor_role="writer")
+        with self.assertRaises(svc.AuthorizationFailure):
+            self.service.archive(self.issue_uuid, actor_role="writer")
+
+    def test_assign_and_clear_owner_as_administrator(self):
+        assigned = self.service.assign(self.issue_uuid, "Local Administrator", actor_role="admin")
+        self.assertEqual(assigned["owner"], "Local Administrator")
+        cleared = self.service.assign(self.issue_uuid, None, actor_role="admin")
+        self.assertIsNone(cleared["owner"])
+
+    def test_resolve_requires_verification(self):
+        self.service.begin_work(self.issue_uuid)
+        with self.assertRaises(ValueError):
+            self.service.resolve(self.issue_uuid, "", actor_role="admin")
+
+    def test_categorize_and_link_representative_cross_cutting_records(self):
+        categorized = self.service.categorize(self.issue_uuid, "Security")
+        self.assertEqual(categorized["category"], "Security")
+        links = self.service.link(self.issue_uuid, "triggering_operation", "validation-op")
+        links = self.service.link(self.issue_uuid, "affected_entity", "device-registration")
+        self.assertEqual(
+            {(link["relationship"], link["target_uuid"]) for link in links},
+            {("triggering_operation", "validation-op"), ("affected_entity", "device-registration")},
+        )
+
+    def test_invalid_link_relationship_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.service.link(self.issue_uuid, "unknown", "target")
+
+    def test_cross_cutting_workflows_can_create_and_link_issues(self):
+        workflows = {
+            "Validation": "validation-operation",
+            "Filesystem": "filesystem-operation",
+            "Import": "import-operation",
+            "Repair": "repair-operation",
+            "AI Processing": "ai-operation",
+            "Security": "security-operation",
+            "Device Registration": "device-registration-operation",
+        }
+        for category, operation_uuid in workflows.items():
+            issue = self.service.create({
+                "category": category,
+                "description": f"{category} requires review",
+                "source_workflow": category,
+            })
+            links = self.service.link(issue["uuid"], "triggering_operation", operation_uuid)
+            self.assertEqual(links[0]["target_uuid"], operation_uuid)
 
 
 # ---------------------------------------------------------------------------
