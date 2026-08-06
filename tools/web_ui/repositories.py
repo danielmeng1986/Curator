@@ -12,6 +12,7 @@ that have no corresponding service call repository methods directly.
 from __future__ import annotations
 
 import uuid
+import json
 from datetime import datetime, timezone
 
 
@@ -33,6 +34,231 @@ class PersistenceConflict(Exception):
 
 class PersistenceNotFound(Exception):
     """Raised when a required record cannot be located."""
+
+
+# ---------------------------------------------------------------------------
+# Device authentication persistence
+# ---------------------------------------------------------------------------
+
+class AuthRepository:
+    """Persistence contract for device registration and bearer-token state.
+
+    Token plaintext is intentionally not accepted by this repository.  The
+    service supplies a one-way token hash and is the only layer that ever sees
+    a newly generated credential.
+    """
+
+    def __init__(self, db_factory):
+        self._db = db_factory
+
+    @staticmethod
+    def _ensure_schema(conn) -> None:
+        """Install the independent authentication tables when first used.
+
+        Authentication is additive to the existing Curator schema, so this
+        also makes the repository usable with an older database file.
+        """
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS device_registration (
+                uuid TEXT PRIMARY KEY,
+                device_name TEXT NOT NULL,
+                device_identity TEXT NOT NULL UNIQUE,
+                requested_role TEXT NOT NULL,
+                requested_scopes TEXT NOT NULL,
+                approved_role TEXT,
+                approved_scopes TEXT,
+                status TEXT NOT NULL,
+                trusted INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                approved_at TEXT,
+                rejected_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS auth_token (
+                uuid TEXT PRIMARY KEY,
+                token_hash TEXT NOT NULL UNIQUE,
+                registration_uuid TEXT NOT NULL,
+                device_name TEXT NOT NULL,
+                scopes TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT,
+                replaced_by_uuid TEXT,
+                FOREIGN KEY(registration_uuid) REFERENCES device_registration(uuid)
+            );
+            CREATE TABLE IF NOT EXISTS token_renewal_request (
+                uuid TEXT PRIMARY KEY,
+                registration_uuid TEXT NOT NULL,
+                previous_token_uuid TEXT NOT NULL,
+                requested_role TEXT NOT NULL,
+                requested_scopes TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                approved_at TEXT,
+                rejected_at TEXT,
+                FOREIGN KEY(registration_uuid) REFERENCES device_registration(uuid),
+                FOREIGN KEY(previous_token_uuid) REFERENCES auth_token(uuid)
+            );
+            """
+        )
+        conn.commit()
+
+    @staticmethod
+    def _registration(row: dict) -> dict:
+        result = dict(row)
+        for key in ("requested_scopes", "approved_scopes"):
+            result[key] = json.loads(result[key]) if result[key] else []
+        result["trusted"] = bool(result["trusted"])
+        return result
+
+    @staticmethod
+    def _token(row: dict) -> dict:
+        result = dict(row)
+        result["scopes"] = json.loads(result["scopes"])
+        return result
+
+    @staticmethod
+    def _renewal(row: dict) -> dict:
+        result = dict(row)
+        result["requested_scopes"] = json.loads(result["requested_scopes"])
+        return result
+
+    def create_registration(self, fields: dict) -> dict:
+        now = _utc_now_iso()
+        registration_uuid = fields.get("uuid") or str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            try:
+                conn.execute(
+                    """INSERT INTO device_registration
+                    (uuid, device_name, device_identity, requested_role,
+                     requested_scopes, status, trusted, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 'PendingApproval', 0, ?, ?)""",
+                    (registration_uuid, fields["device_name"], fields["device_identity"],
+                     fields["requested_role"], json.dumps(fields["requested_scopes"]), now, now),
+                )
+                conn.commit()
+            except Exception as exc:
+                # The service turns this deliberately small persistence signal
+                # into a stable business outcome.
+                raise PersistenceConflict({"device_identity": fields["device_identity"]}) from exc
+            row = conn.execute("SELECT * FROM device_registration WHERE uuid = ?", (registration_uuid,)).fetchone()
+        return self._registration(dict(row))
+
+    def get_registration(self, registration_uuid: str) -> dict | None:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute("SELECT * FROM device_registration WHERE uuid = ?", (registration_uuid,)).fetchone()
+        return self._registration(dict(row)) if row else None
+
+    def get_registration_by_identity(self, device_identity: str) -> dict | None:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute("SELECT * FROM device_registration WHERE device_identity = ?", (device_identity,)).fetchone()
+        return self._registration(dict(row)) if row else None
+
+    def approve_registration(self, registration_uuid: str, role: str, scopes: list[str], trusted: bool) -> dict | None:
+        now = _utc_now_iso()
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                """UPDATE device_registration SET status = 'Approved', approved_role = ?,
+                approved_scopes = ?, trusted = ?, approved_at = ?, updated_at = ?
+                WHERE uuid = ? AND status = 'PendingApproval'""",
+                (role, json.dumps(scopes), int(trusted), now, now, registration_uuid),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM device_registration WHERE uuid = ?", (registration_uuid,)).fetchone()
+        return self._registration(dict(row)) if row else None
+
+    def reject_registration(self, registration_uuid: str) -> dict | None:
+        now = _utc_now_iso()
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                """UPDATE device_registration SET status = 'Rejected', rejected_at = ?, updated_at = ?
+                WHERE uuid = ? AND status = 'PendingApproval'""",
+                (now, now, registration_uuid),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM device_registration WHERE uuid = ?", (registration_uuid,)).fetchone()
+        return self._registration(dict(row)) if row else None
+
+    def create_token(self, fields: dict) -> dict:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                """INSERT INTO auth_token
+                (uuid, token_hash, registration_uuid, device_name, scopes, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (fields["uuid"], fields["token_hash"], fields["registration_uuid"],
+                 fields["device_name"], json.dumps(fields["scopes"]),
+                 fields["created_at"], fields["expires_at"]),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM auth_token WHERE uuid = ?", (fields["uuid"],)).fetchone()
+        return self._token(dict(row))
+
+    def get_token_by_hash(self, token_hash: str) -> dict | None:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute("SELECT * FROM auth_token WHERE token_hash = ?", (token_hash,)).fetchone()
+        return self._token(dict(row)) if row else None
+
+    def touch_token(self, token_uuid: str, used_at: str) -> None:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute("UPDATE auth_token SET last_used_at = ? WHERE uuid = ?", (used_at, token_uuid))
+            conn.commit()
+
+    def revoke_token(self, token_uuid: str, *, replaced_by_uuid: str | None = None) -> bool:
+        now = _utc_now_iso()
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            cur = conn.execute(
+                "UPDATE auth_token SET revoked_at = ?, replaced_by_uuid = ? WHERE uuid = ? AND revoked_at IS NULL",
+                (now, replaced_by_uuid, token_uuid),
+            )
+            conn.commit()
+        return cur.rowcount == 1
+
+    def create_renewal_request(self, fields: dict) -> dict:
+        now = _utc_now_iso()
+        request_uuid = fields.get("uuid") or str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                """INSERT INTO token_renewal_request
+                (uuid, registration_uuid, previous_token_uuid, requested_role, requested_scopes,
+                 status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'PendingApproval', ?, ?)""",
+                (request_uuid, fields["registration_uuid"], fields["previous_token_uuid"],
+                 fields["requested_role"], json.dumps(fields["requested_scopes"]), now, now),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM token_renewal_request WHERE uuid = ?", (request_uuid,)).fetchone()
+        return self._renewal(dict(row))
+
+    def get_renewal_request(self, request_uuid: str) -> dict | None:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute("SELECT * FROM token_renewal_request WHERE uuid = ?", (request_uuid,)).fetchone()
+        return self._renewal(dict(row)) if row else None
+
+    def approve_renewal(self, request_uuid: str) -> dict | None:
+        now = _utc_now_iso()
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                """UPDATE token_renewal_request SET status = 'Approved', approved_at = ?, updated_at = ?
+                WHERE uuid = ? AND status = 'PendingApproval'""", (now, now, request_uuid)
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM token_renewal_request WHERE uuid = ?", (request_uuid,)).fetchone()
+        return self._renewal(dict(row)) if row else None
 
 
 # ---------------------------------------------------------------------------

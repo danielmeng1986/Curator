@@ -16,7 +16,10 @@ from __future__ import annotations
 import re
 import shutil
 import uuid as _uuid_mod
-from datetime import datetime, timezone
+import hashlib
+import hmac
+import secrets
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import canonical_path as cpath
@@ -99,12 +102,200 @@ class ServiceNotFound(Exception):
     """Raised when a required resource cannot be located."""
 
 
+class AuthenticationFailure(Exception):
+    """Credential failure that the API adapter maps to a 401 response."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+class AuthorizationFailure(Exception):
+    """Scope failure that the API adapter maps to a 403 response."""
+
+    def __init__(self, required_scope: str):
+        super().__init__("The token does not have the required permission.")
+        self.code = "AUTHORIZATION_INSUFFICIENT_SCOPE"
+        self.required_scope = required_scope
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Device authentication lifecycle
+# ---------------------------------------------------------------------------
+
+AUTH_ROLE_SCOPES: dict[str, frozenset[str]] = {
+    "reader": frozenset({"read"}),
+    "writer": frozenset({"read", "write"}),
+    "admin": frozenset({"read", "write", "admin"}),
+}
+AUTH_DEFAULT_TOKEN_VALIDITY = timedelta(days=365)
+
+
+class AuthenticationService:
+    """Own the approved-device and bearer-token lifecycle.
+
+    The service never persists plaintext credentials.  Token plaintext exists
+    only in the return value from the two administrator-approved issuance
+    methods, allowing the API/UI to display it exactly once.
+    """
+
+    def __init__(
+        self,
+        auth_repo: repo.AuthRepository,
+        *,
+        registration_secret: str | None = None,
+        now_fn=None,
+    ):
+        self._repo = auth_repo
+        self._registration_secret = registration_secret
+        self._now = now_fn or (lambda: datetime.now(timezone.utc))
+
+    def _now_utc(self) -> datetime:
+        value = self._now()
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+    @staticmethod
+    def _validate_role_and_scopes(role: str, scopes: list[str] | None) -> tuple[str, list[str]]:
+        if role not in AUTH_ROLE_SCOPES:
+            raise ValueError("The requested role is not supported.")
+        requested = list(scopes or AUTH_ROLE_SCOPES[role])
+        if not requested or any(not isinstance(scope, str) or scope not in AUTH_ROLE_SCOPES[role] for scope in requested):
+            raise ValueError("The requested scopes are not permitted for the role.")
+        return role, sorted(set(requested))
+
+    @staticmethod
+    def _hash_token(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def request_registration(
+        self,
+        *,
+        device_name: str,
+        device_identity: str,
+        requested_role: str,
+        requested_scopes: list[str] | None,
+        registration_proof: str,
+    ) -> dict:
+        """Record a reviewable registration request; this never grants access."""
+        if not all(isinstance(value, str) and value.strip() for value in (device_name, device_identity, registration_proof)):
+            raise ValueError("Device name, stable device identity, and registration proof are required.")
+        if not self._registration_secret or not hmac.compare_digest(registration_proof, self._registration_secret):
+            raise AuthenticationFailure("AUTHENTICATION_INVALID_REGISTRATION_PROOF", "The registration proof is invalid.")
+        role, scopes = self._validate_role_and_scopes(requested_role, requested_scopes)
+        try:
+            return self._repo.create_registration({
+                "device_name": device_name.strip(), "device_identity": device_identity.strip(),
+                "requested_role": role, "requested_scopes": scopes,
+            })
+        except repo.PersistenceConflict as exc:
+            raise ServiceConflict("BUSINESS_CONFLICT", "A registration already exists for this device identity.", exc.details)
+
+    def approve_registration(
+        self,
+        registration_uuid: str,
+        *,
+        approved_role: str | None = None,
+        approved_scopes: list[str] | None = None,
+        validity: timedelta | None = None,
+        trusted: bool = True,
+    ) -> dict:
+        registration = self._repo.get_registration(registration_uuid)
+        if registration is None:
+            raise ServiceNotFound("Registration request not found.")
+        if registration["status"] != "PendingApproval":
+            raise ServiceConflict("BUSINESS_CONFLICT", "The registration request is no longer awaiting approval.")
+        role, scopes = self._validate_role_and_scopes(
+            approved_role or registration["requested_role"],
+            approved_scopes if approved_scopes is not None else registration["requested_scopes"],
+        )
+        registration = self._repo.approve_registration(registration_uuid, role, scopes, trusted)
+        if registration is None:
+            raise ServiceNotFound("Registration request not found.")
+        return self._issue_token(registration, scopes, validity)
+
+    def reject_registration(self, registration_uuid: str) -> None:
+        registration = self._repo.get_registration(registration_uuid)
+        if registration is None:
+            raise ServiceNotFound("Registration request not found.")
+        if registration["status"] != "PendingApproval":
+            raise ServiceConflict("BUSINESS_CONFLICT", "The registration request is no longer awaiting approval.")
+        self._repo.reject_registration(registration_uuid)
+
+    def _issue_token(self, registration: dict, scopes: list[str], validity: timedelta | None) -> dict:
+        if registration["status"] != "Approved" or not registration["trusted"]:
+            raise ServiceConflict("BUSINESS_CONFLICT", "Only approved trusted devices can receive tokens.")
+        lifetime = validity or AUTH_DEFAULT_TOKEN_VALIDITY
+        if lifetime <= timedelta(0):
+            raise ValueError("Token validity must be positive.")
+        now = self._now_utc()
+        plaintext = secrets.token_urlsafe(32)
+        token = self._repo.create_token({
+            "uuid": str(_uuid_mod.uuid4()), "token_hash": self._hash_token(plaintext),
+            "registration_uuid": registration["uuid"], "device_name": registration["device_name"],
+            "scopes": scopes, "created_at": now.isoformat(),
+            "expires_at": (now + lifetime).isoformat(),
+        })
+        # The persisted shape deliberately excludes token_hash from caller data.
+        token.pop("token_hash", None)
+        return {"token": plaintext, "token_record": token}
+
+    def authenticate(self, token_plaintext: str, required_scope: str | None = None) -> dict:
+        if not isinstance(token_plaintext, str) or not token_plaintext:
+            raise AuthenticationFailure("AUTHENTICATION_MISSING_TOKEN", "A bearer token is required.")
+        token = self._repo.get_token_by_hash(self._hash_token(token_plaintext))
+        if token is None:
+            raise AuthenticationFailure("AUTHENTICATION_INVALID_TOKEN", "The bearer token is invalid.")
+        if token["revoked_at"] is not None:
+            raise AuthenticationFailure("AUTHENTICATION_REVOKED_TOKEN", "The bearer token has been revoked.")
+        expires_at = datetime.fromisoformat(token["expires_at"])
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= self._now_utc():
+            raise AuthenticationFailure("AUTHENTICATION_EXPIRED_TOKEN", "The bearer token has expired.")
+        registration = self._repo.get_registration(token["registration_uuid"])
+        if registration is None or registration["status"] != "Approved" or not registration["trusted"]:
+            raise AuthenticationFailure("AUTHENTICATION_UNAPPROVED_DEVICE", "The device is not approved for access.")
+        if required_scope is not None and required_scope not in token["scopes"]:
+            raise AuthorizationFailure(required_scope)
+        self._repo.touch_token(token["uuid"], self._now_utc().isoformat())
+        return {"device_name": token["device_name"], "registration_uuid": token["registration_uuid"], "scopes": token["scopes"]}
+
+    def request_renewal(self, token_plaintext: str, *, device_identity: str) -> dict:
+        principal = self.authenticate(token_plaintext)
+        registration = self._repo.get_registration(principal["registration_uuid"])
+        if registration is None or registration["device_identity"] != device_identity:
+            raise AuthenticationFailure("AUTHENTICATION_INVALID_DEVICE", "The device identity does not match the token.")
+        old_token = self._repo.get_token_by_hash(self._hash_token(token_plaintext))
+        return self._repo.create_renewal_request({
+            "registration_uuid": registration["uuid"], "previous_token_uuid": old_token["uuid"],
+            "requested_role": registration["approved_role"], "requested_scopes": registration["approved_scopes"],
+        })
+
+    def approve_renewal(self, renewal_uuid: str, *, validity: timedelta | None = None) -> dict:
+        renewal = self._repo.get_renewal_request(renewal_uuid)
+        if renewal is None:
+            raise ServiceNotFound("Token renewal request not found.")
+        if renewal["status"] != "PendingApproval":
+            raise ServiceConflict("BUSINESS_CONFLICT", "The token renewal request is no longer awaiting approval.")
+        registration = self._repo.get_registration(renewal["registration_uuid"])
+        if registration is None:
+            raise ServiceNotFound("Registered device not found.")
+        approved = self._repo.approve_renewal(renewal_uuid)
+        issued = self._issue_token(registration, approved["requested_scopes"], validity)
+        self._repo.revoke_token(renewal["previous_token_uuid"], replaced_by_uuid=issued["token_record"]["uuid"])
+        return issued
+
+    def revoke_token(self, token_uuid: str) -> None:
+        if not self._repo.revoke_token(token_uuid):
+            raise ServiceNotFound("Active token not found.")
 
 
 # ---------------------------------------------------------------------------

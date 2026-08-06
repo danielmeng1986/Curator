@@ -449,6 +449,40 @@ class AppHandler(SimpleHTTPRequestHandler):
             ),
         )
 
+    @staticmethod
+    def _required_scope(path: str, method: str) -> str:
+        """Return the least privilege required by a versioned API route."""
+        if path in {"/api/backup", "/api/backup/cleanup", "/api/rollback"} or path.startswith("/api/backups"):
+            return "admin"
+        return "read" if method == "GET" else "write"
+
+    def _authorize_versioned_api(self, path: str, method: str) -> bool:
+        """Authenticate before dispatching any normal ``/api/v1`` operation."""
+        header = self.headers.get("Authorization", "")
+        if not header.startswith("Bearer ") or not header[7:].strip():
+            self._send_error(401, "AUTHENTICATION_MISSING_TOKEN", "A bearer token is required.")
+            return False
+        auth_service = svc.AuthenticationService(repo.AuthRepository(open_db))
+        try:
+            self._principal = auth_service.authenticate(
+                header[7:].strip(), self._required_scope(path, method)
+            )
+        except svc.AuthenticationFailure as exc:
+            self._send_error(401, exc.code, str(exc))
+            return False
+        except svc.AuthorizationFailure as exc:
+            self._send_error(
+                403, exc.code, str(exc), details={"required_scope": exc.required_scope}
+            )
+            return False
+        return True
+
+    @staticmethod
+    def _versioned_path_to_legacy(path: str) -> str:
+        """Map the established resource handlers onto the versioned boundary."""
+        suffix = path[len("/api/v1"):]
+        return "/api" + suffix
+
     # ------------------------------------------------------------------
     # Routing
     # ------------------------------------------------------------------
@@ -458,6 +492,12 @@ class AppHandler(SimpleHTTPRequestHandler):
         path = parsed.path
         qs = parse_qs(parsed.query)
 
+        if path.startswith("/api/v1/"):
+            legacy_path = self._versioned_path_to_legacy(path)
+            if not self._authorize_versioned_api(legacy_path, "GET"):
+                return
+            self._handle_api_get(legacy_path, qs)
+            return
         if path.startswith("/api/"):
             self._handle_api_get(path, qs)
             return
@@ -470,6 +510,11 @@ class AppHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/v1/"):
+            legacy_path = self._versioned_path_to_legacy(path)
+            if not self._authorize_versioned_api(legacy_path, "POST"):
+                return
+            path = legacy_path
         try:
             body = self._read_json_body()
         except Exception:
@@ -480,6 +525,11 @@ class AppHandler(SimpleHTTPRequestHandler):
     def do_PUT(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/v1/"):
+            legacy_path = self._versioned_path_to_legacy(path)
+            if not self._authorize_versioned_api(legacy_path, "PUT"):
+                return
+            path = legacy_path
         try:
             body = self._read_json_body()
         except Exception:
@@ -490,6 +540,11 @@ class AppHandler(SimpleHTTPRequestHandler):
     def do_DELETE(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/v1/"):
+            legacy_path = self._versioned_path_to_legacy(path)
+            if not self._authorize_versioned_api(legacy_path, "DELETE"):
+                return
+            path = legacy_path
         self._handle_api_delete(path)
 
     # ------------------------------------------------------------------

@@ -20,6 +20,7 @@ import sqlite3
 import sys
 import threading
 import unittest
+from datetime import timedelta
 from http.client import HTTPConnection
 from http.server import HTTPServer
 from pathlib import Path
@@ -433,18 +434,20 @@ class _TestServerBase(unittest.TestCase):
         if cls._db:
             cls._db.close()
 
-    def _get(self, path: str) -> tuple[int, dict]:
+    def _get(self, path: str, headers: dict | None = None) -> tuple[int, dict]:
         conn = HTTPConnection("127.0.0.1", self._port, timeout=5)
-        conn.request("GET", path)
+        conn.request("GET", path, headers=headers or {})
         resp = conn.getresponse()
         body = json.loads(resp.read().decode())
         conn.close()
         return resp.status, body
 
-    def _post(self, path: str, payload: dict) -> tuple[int, dict]:
+    def _post(self, path: str, payload: dict, headers: dict | None = None) -> tuple[int, dict]:
         data = json.dumps(payload).encode()
         conn = HTTPConnection("127.0.0.1", self._port, timeout=5)
-        conn.request("POST", path, body=data, headers={"Content-Type": "application/json"})
+        request_headers = {"Content-Type": "application/json"}
+        request_headers.update(headers or {})
+        conn.request("POST", path, body=data, headers=request_headers)
         resp = conn.getresponse()
         body = json.loads(resp.read().decode())
         conn.close()
@@ -671,6 +674,68 @@ class TestHttpConflictError(_TestServerBase):
         self._insert_album_for_status()
         _, body = self._delete("/api/statuses/1")
         self.assertIn("request_id", body["meta"])
+
+
+class TestVersionedApiAuthorization(_TestServerBase):
+    """Versioned routes enforce bearer state and scopes before dispatch."""
+
+    def _issue(self, *, role="reader", validity=None):
+        import repositories as repo
+        import services as svc
+
+        auth = svc.AuthenticationService(
+            repo.AuthRepository(lambda: self._db), registration_secret="local-proof"
+        )
+        suffix = str(self._db.execute("SELECT COUNT(*) FROM device_registration").fetchone()[0]) if self._table_exists("device_registration") else "0"
+        registration = auth.request_registration(
+            device_name="test device",
+            device_identity=f"test-device-{suffix}",
+            requested_role=role,
+            requested_scopes=None,
+            registration_proof="local-proof",
+        )
+        return auth.approve_registration(registration["uuid"], validity=validity)
+
+    def _table_exists(self, name):
+        return self._db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+        ).fetchone() is not None
+
+    @staticmethod
+    def _bearer(issued):
+        return {"Authorization": f"Bearer {issued['token']}"}
+
+    def test_versioned_route_rejects_missing_token(self):
+        status, body = self._get("/api/v1/statuses")
+        self.assertEqual(status, 401)
+        self.assertEqual(body["error"]["code"], "AUTHENTICATION_MISSING_TOKEN")
+
+    def test_versioned_route_allows_approved_scoped_token(self):
+        issued = self._issue()
+        status, body = self._get("/api/v1/statuses", self._bearer(issued))
+        self.assertEqual(status, 200)
+        self.assertIn("data", body)
+
+    def test_versioned_route_rejects_expired_token(self):
+        issued = self._issue(validity=timedelta(microseconds=1))
+        status, body = self._get("/api/v1/statuses", self._bearer(issued))
+        self.assertEqual(status, 401)
+        self.assertEqual(body["error"]["code"], "AUTHENTICATION_EXPIRED_TOKEN")
+
+    def test_versioned_route_rejects_revoked_token(self):
+        issued = self._issue()
+        import repositories as repo
+        import services as svc
+        svc.AuthenticationService(repo.AuthRepository(lambda: self._db)).revoke_token(issued["token_record"]["uuid"])
+        status, body = self._get("/api/v1/statuses", self._bearer(issued))
+        self.assertEqual(status, 401)
+        self.assertEqual(body["error"]["code"], "AUTHENTICATION_REVOKED_TOKEN")
+
+    def test_reader_token_cannot_perform_write(self):
+        issued = self._issue(role="reader")
+        status, body = self._post("/api/v1/statuses", {"name": "Blocked"}, self._bearer(issued))
+        self.assertEqual(status, 403)
+        self.assertEqual(body["error"]["code"], "AUTHORIZATION_INSUFFICIENT_SCOPE")
 
 
 if __name__ == "__main__":
