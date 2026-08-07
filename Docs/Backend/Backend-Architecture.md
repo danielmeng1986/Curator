@@ -50,7 +50,7 @@ The current implementation is centred on two standalone HTTP-server modules:
 
 Both modules use Python's standard-library HTTP server and SQLite directly. The newer server is the practical reference for the current full UI; the earlier server is historical context rather than a workflow-migration requirement.
 
-`workspace/curator_base_app` is currently disabled and is not started before the Backend migration is complete. Its routes and workflows are not migration requirements. It remains in the repository only as historical reference until the new Backend is verified and its legacy entry point is formally retired.
+`workspace/curator_base_app` is retired and its startup module deliberately refuses to run. Its routes and workflows are not migration requirements. Its source remains in the repository only as historical migration reference; it exposes no Backend entry point.
 
 In these modules, one file currently performs all of the following:
 
@@ -372,7 +372,7 @@ backend/
     api/
 ```
 
-This does not require moving everything at once. Existing `tools/web_ui/static` assets can remain where they are. During transition, `tools/web_ui/server.py` can become a thin launch point that imports the Backend composition root, preserving the current command and local port behavior. The disabled earlier base app remains historical reference only and is deleted only after the completed, verified migration retires its entry point.
+This does not require moving everything at once. Existing `tools/web_ui/static` assets can remain where they are. During transition, `tools/web_ui/server.py` can become a thin launch point that imports the Backend composition root, preserving the current command and local port behavior. The earlier base app's entry point has been retired; its source remains historical reference only and can be deleted after the completed, verified migration.
 
 ## 10. Migration Strategy
 
@@ -386,7 +386,7 @@ Migration should be incremental, behavior-preserving, and accompanied by focused
 6. **Migrate Workspace workflows.** Move Workspace listing, detail, single edits, and batch edits behind `WorkspaceAlbumService` and its repository. Preserve allow-lists, validation, the high-impact snapshot policy, and operation results.
 7. **Migrate import deliberately.** Extract `ImportService` with preview first, then execution. Make its database transaction, file-operation sequence, `needs_repair` state, repair options, snapshot policy, and audit record explicit. This is the highest-risk workflow and should not be mechanically moved.
 8. **Extract operational services.** Move backup cataloging, retention, restore, database-first operation history with JSONL support, and daily scheduling into operational Services and infrastructure adapters. Preserve local-first binding, controlled LAN access, and recovery behavior.
-9. **Consolidate entry points.** Once feature parity is verified, make the new Backend the sole entry point. Delete `workspace/curator_base_app` only after Migration is complete, verified, and its legacy entry point is confirmed retired. Delete either historical `server.py` only after its required behavior has been migrated and tested and the new Backend is the sole entry point.
+9. **Consolidate entry points.** Once feature parity is verified, make the new Backend the sole entry point. `workspace/curator_base_app` has no runnable entry point and can be deleted after Migration is complete and verified. Delete either historical `server.py` only after its required behavior has been migrated and tested and the new Backend is the sole entry point.
 10. **Prepare PostgreSQL only when justified.** Add contract tests shared by SQLite repositories first. Introduce PostgreSQL adapters and data migration tooling later, without changing services or API behavior unnecessarily.
 
 At every step, maintain a working application, retain database backups before material changes, and prefer small reviewable commits. Do not run both old and new writers against the same behavior indefinitely; cut a migrated operation over to one service once verified.

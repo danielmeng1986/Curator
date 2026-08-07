@@ -5,6 +5,7 @@ import re
 import shutil
 import sqlite3
 import socket
+import sys
 import threading
 from datetime import datetime, timedelta, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -1561,56 +1562,18 @@ class AppHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
-    if not DATABASE_PATH.exists():
-        raise FileNotFoundError(f"Database not found: {DATABASE_PATH}")
-    if not STATIC_DIR.exists():
-        raise FileNotFoundError(f"Static directory not found: {STATIC_DIR}")
+    """Refuse to start the retired pre-versioned Backend entry point.
 
-    host = "127.0.0.1"
-    port = int(os.environ.get("CURATOR_APP_PORT", "8787"))
-    backup_thread = threading.Thread(target=run_daily_backup, name="daily-backup", daemon=True)
-    backup_thread.start()
-
-    try:
-        startup_snapshot = create_db_snapshot("startup")
-        append_backup_log(
-            {
-                "timestamp": utc_now_iso(),
-                "reason": "startup",
-                "ok": True,
-                "snapshot": str(startup_snapshot),
-                "tag": "",
-            }
-        )
-    except Exception as ex:
-        append_backup_log(
-            {
-                "timestamp": utc_now_iso(),
-                "reason": "startup",
-                "ok": False,
-                "error": str(ex),
-                "tag": "",
-            }
-        )
-
-    cleanup_expired_snapshots(RETENTION_DAYS)
-
-    server = ThreadingHTTPServer((host, port), AppHandler)
-    print(f"Curator Normalize App running at http://{host}:{port}{NORMALIZE_BASE_PATH}")
-    print(f"Curator Import App running at http://{host}:{port}{IMPORT_BASE_PATH}")
-    print(f"Curator Albums App running at http://{host}:{port}{ALBUMS_BASE_PATH}")
-    print(f"Database: {DATABASE_PATH}")
-    print(f"Logs: {LOG_PATH}")
-    print(f"Backups: {BACKUP_DIR}")
-    print(f"Backup logs: {BACKUP_LOG_PATH}")
-    print(f"Rollback logs: {ROLLBACK_LOG_PATH}")
-    print(f"Retention days: {RETENTION_DAYS}")
-
-    try:
-        server.serve_forever()
-    finally:
-        STOP_EVENT.set()
-        backup_thread.join(timeout=3)
+    The implementation remains as historical reference while its data and
+    workflow migration history is retained, but it must never expose the
+    pre-``/api/v1`` HTTP surface or run a second writer against Curator.
+    """
+    print(
+        "The workspace/curator_base_app entry point is retired. "
+        "Use tools/web_ui/server.py and the supported /api/v1 API instead.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 
 
 if __name__ == "__main__":
