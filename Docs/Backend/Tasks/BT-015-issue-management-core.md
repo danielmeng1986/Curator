@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-015` — Status: `Ready`
+`BT-015` — Status: `Complete`
 
 ## Title
 
