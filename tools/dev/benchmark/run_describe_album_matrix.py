@@ -113,7 +113,7 @@ def main() -> int:
                 logf.write(f"[{ts}] START {run_id}\n")
 
             describe_cmd = (
-                f"python3 scripts/describe_workspace_album.py {shlex.quote(album_id)} {shlex.quote(sample_count)} "
+                f"python3 legacy/scripts/describe_workspace_album.py {shlex.quote(album_id)} {shlex.quote(sample_count)} "
                 f"--ctx-size {shlex.quote(ctx)} --threads {shlex.quote(th)} --gpu-layers {shlex.quote(gpu_layers)} "
                 f"{extra_args} > {shlex.quote(str(json_out))}"
             )

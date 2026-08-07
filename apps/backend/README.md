@@ -33,6 +33,4 @@ Apply reviewed database migrations explicitly (with the Backend stopped):
 python3 -m apps.backend.migrations
 ```
 
-`tools/web_ui/server.py` is a compatibility launcher only. It delegates to
-this package with the old local runtime locations until the client migration is
-complete.
+Historical launchers are retained under `legacy/` and are not runnable.
