@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`MT-006` — Status: `Proposed`
+`MT-006` — Status: `Completed`
 
 ## Title
 
@@ -68,3 +68,12 @@ retaining Backend workflow tests as the durable business-rule foundation.
 - UI tests prove client integration; they do not replace service-level safety
   tests. `MT-008` retires the historical Workspace Album collection and is not
   a prerequisite for the initial UI acceptance gate.
+
+## Completion Record
+
+- Added a disposable in-memory Backend composition root and Playwright browser
+  gate. It registers and approves a temporary Writer device, proves the UI
+  presents unauthenticated access safely, verifies authenticated Album access,
+  and confirms a rejected administrative request leaves Albums unchanged.
+- The gate does not open `var/`, access historical Workspace records, or retain
+  tokens after the temporary process exits.
