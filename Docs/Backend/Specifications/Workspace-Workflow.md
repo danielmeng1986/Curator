@@ -2,7 +2,7 @@
 
 ## Purpose and scope
 
-This Specification governs temporary Curator workspace datasets. `workspace_album` is the current example; future workspace datasets, such as `workspace_ai_album`, `workspace_photo`, and other AI-related workspace records, inherit the same lifecycle.
+This Specification governs temporary Curator workspace datasets. `workspace_album` is the completed historical example: it was used to normalize and materialize the existing Album catalogue and is now to be closed and archived. Future workspace datasets, such as `workspace_ai_album`, `workspace_photo`, and other AI-related workspace records, inherit the same lifecycle and must define their own dataset contract.
 
 Workspace data is not a permanent business entity. It exists to support import, enrichment, validation, review, and controlled promotion into permanent production tables.
 
@@ -43,6 +43,75 @@ Every workspace dataset must define its own Review editing contract in its speci
 - **System-managed fields:** Fields maintained by services or workflow execution, including lifecycle, audit, and other system-generated information. Reviewers must not edit these fields directly.
 
 Imported source data, AI raw output, and audit information are normally immutable during Review unless the applicable workspace workflow explicitly defines otherwise. Changes outside the documented Review editing contract are not allowed.
+
+### `workspace_album` Review and promotion contract
+
+`workspace_album` is the historical Workspace dataset used to materialize the
+existing permanent Album catalogue. It is not the normal entry point for new
+Album imports. Its remaining records are to be reviewed, promoted where
+approved, then retained as closed and archived history.
+
+`lifecycle_state` and `status_id` have distinct meanings. The lifecycle state
+expresses the Workspace stage. `status_id` expresses the business and review
+conclusion for the row. The Workspace status catalogue must provide at least
+`PendingReview`, `ReturnedForCorrection`, `Approved`, and `Rejected` (or
+stable, documented equivalents). The historical `Ready` status may be mapped
+to `Approved` during the legacy-data migration; new review decisions use
+`Approved`.
+
+Within lifecycle state `Review`, a reviewer may change only the selected
+business values `studio_name`, `album_name`, `primary_model`,
+`additional_models`, `remark`, and `belongs_to_album_id`, and may make the
+documented review-status transition. These are candidate values until the
+reviewer records `status_id = Approved`. `Approved` freezes them as the final
+selection. A correction requires the explicit transition to
+`ReturnedForCorrection`, with its reason retained in the audit trail, before a
+further edit is permitted. `Rejected` is terminal for promotion. The decision
+record must retain the reviewer, decision time, status transition, and reason.
+Writers may submit a Workspace row for Review and make permitted corrections;
+only an Administrator may approve, reject, return for correction, or execute
+promotion. An Administrator must not approve a row that the same principal
+submitted unless an explicit future separation-of-duties exception is defined.
+
+`current_path` is the observed imported filesystem value and is immutable in
+Review. `expected_path` is not a reviewer-editable field: a controlled
+canonicalization and validation action may calculate or update it, with
+durable evidence. `ai_result`, `album_id`, lifecycle fields, timestamps, and
+all audit or Operation fields are system-managed and never reviewer-editable.
+
+Promotion is permitted only for an `Approved` row that passes all of the
+following checks:
+
+- required Studio, Album title, primary Model, and review decision are present;
+- the Studio and every selected Model resolve uniquely to permanent entities;
+- the observed and expected paths have passed the applicable canonical-path
+  and filesystem validation, and the resulting permanent path has no
+  conflicting Album;
+- a non-self `belongs_to_album_id` points to an approved Workspace row that is
+  included in the same promotion set; and
+- no existing permanent Album conflicts with the requested materialization.
+
+The promotion set is processed in two durable phases. First, every approved
+Workspace row creates one permanent `album`, writes its canonical
+`expected_path` to `album.path`, copies `remark` to `album.remark`, creates
+its `album_model` records, and records the generated permanent ID in
+`workspace_album.album_id`. Second, each non-self Workspace relationship is
+resolved through those two `album_id` values and written as one
+`album_relation` with `relation_type = 'BELONGS_TO'`. A null or self
+`belongs_to_album_id` creates no relation. The Service owns this mapping; a
+client cannot supply a permanent `album_id` or a direct relation target.
+
+Promotion is database materialization, not a filesystem mutation. Filesystem
+normalization or repair, if required, completes and verifies before approval.
+The Service creates a truthful Operation, applies the risk-based snapshot
+policy, and writes the promotion atomically. A required snapshot failure or
+validation failure creates no partial permanent materialization. An unexpected
+failure is never reported as success; if a durable inconsistency cannot be
+rolled back it remains visible through the Operation and Repair workflows.
+After successful materialization the Workspace row is `Closed`; the legacy
+`workspace_album` collection is then archived under the historical-retention
+policy. A rejected record may be closed without promotion only with an
+auditable rejection or cancellation reason.
 
 ## Responsibilities
 
@@ -85,8 +154,6 @@ Lifecycle transitions, promotion, and material batch changes create Operation re
 
 ## Open Questions
 
-- What exact validation and approval conditions allow each kind of workspace data to move from Review to Closed?
-- For each workspace dataset, which fields are permitted to change during Review, as explicitly documented in its Review editing contract?
 - What future retention periods, access expectations, and storage strategies should apply to Closed and Archived / Retired workspaces while preserving the historical-retention goals?
 
 ## Future extensions

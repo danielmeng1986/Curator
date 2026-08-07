@@ -34,6 +34,7 @@ erDiagram
         UUID uuid
         string title
         string description
+        string remark
         string scene
         string location
         datetime capture_date
@@ -99,6 +100,7 @@ erDiagram
 ## Domain Rules
 
 - `album.path` is the permanent Album’s single canonical filesystem path. The permanent Album has no `current_path` or `expected_path` fields.
+- `album.remark` is the permanent curator business remark. During `workspace_album` promotion it receives the approved Workspace `remark`; review decisions and audit reasons are retained separately and are not stored here.
 - `workspace_album` is temporary and may maintain both `current_path` and `expected_path` while processing is incomplete.
 - `album_relation` represents an Album-to-Album relationship. For `BELONGS_TO`, `album_id` is a separately released part and `related_album_id` is its logical/canonical Album.
 - A default/self relationship is implicit: do not store an `album_relation` row when both sides would be the same Album.

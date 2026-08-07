@@ -43,6 +43,7 @@ erDiagram
 
         TEXT title
         TEXT description
+        TEXT remark
 
         TEXT scene
         TEXT location
