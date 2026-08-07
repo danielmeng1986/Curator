@@ -6,6 +6,10 @@ This document establishes the repository boundary between versioned source and
 local runtime state. It is introduced by MT-001 before application code moves
 to the target layout.
 
+For a bilingual introduction to the current project folders and their roles,
+see [中文项目结构](Project-Structure.zh.md) or
+[English project structure](Project-Structure.en.md).
+
 ## Target layout
 
 ```text
