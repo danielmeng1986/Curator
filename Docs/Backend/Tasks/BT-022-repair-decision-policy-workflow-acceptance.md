@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-022` — Status: `Blocked`
+`BT-022` — Status: `Complete`
 
 ## Title
 
@@ -59,4 +59,4 @@ Verify that repair classification and execution enforce the specified safety bou
 
 ## Risks or Notes
 
-- Blocked by the absence of a policy-enforcing repair execution boundary: the current `RepairService` persists only generic state transitions. It cannot classify or execute canonicalization-only renames, preserve fuzzy-match evidence, persist suppression records, or run quarantine and restore actions. These are tracked by `BT-028` and `BT-029`; this acceptance task must resume after them rather than weakening its scenarios.
+- The policy, suppression, quarantine, and restore capabilities required by this acceptance task are provided by `BT-028` and `BT-029`.

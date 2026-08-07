@@ -1976,6 +1976,34 @@ class RepairSuppressionRepository:
         return self._normalise(dict(row)) if row else None
 
 
+class QuarantineRepository:
+    """Durable metadata for intact quarantined directories."""
+    def __init__(self, db_factory): self._db = db_factory
+    def _schema(self, conn):
+        conn.execute("""CREATE TABLE IF NOT EXISTS quarantine_item (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
+            original_path TEXT NOT NULL, quarantine_path TEXT NOT NULL,
+            repair_uuid TEXT, operation_uuid TEXT NOT NULL, reason TEXT NOT NULL,
+            inventory TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+            hold INTEGER NOT NULL DEFAULT 0)""")
+        conn.commit()
+    def create(self, fields):
+        now = datetime.now(timezone.utc).isoformat(); item_uuid = fields.get("uuid") or str(uuid.uuid4())
+        with self._db() as conn:
+            self._schema(conn)
+            conn.execute("INSERT INTO quarantine_item (uuid,original_path,quarantine_path,repair_uuid,operation_uuid,reason,inventory,created_at,expires_at,hold) VALUES (?,?,?,?,?,?,?,?,?,?)", (item_uuid, fields["original_path"], fields["quarantine_path"], fields.get("repair_uuid"), fields["operation_uuid"], fields["reason"], fields["inventory"], now, fields["expires_at"], 0))
+            conn.commit(); row = conn.execute("SELECT * FROM quarantine_item WHERE uuid=?", (item_uuid,)).fetchone()
+        return dict(row)
+    def get(self, item_uuid):
+        with self._db() as conn:
+            self._schema(conn); row = conn.execute("SELECT * FROM quarantine_item WHERE uuid=?", (item_uuid,)).fetchone()
+        return dict(row) if row else None
+    def list(self):
+        with self._db() as conn:
+            self._schema(conn); rows = conn.execute("SELECT * FROM quarantine_item ORDER BY created_at").fetchall()
+        return [dict(row) for row in rows]
+
+
 # ---------------------------------------------------------------------------
 # IssueRepository
 # ---------------------------------------------------------------------------

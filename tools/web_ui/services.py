@@ -1887,6 +1887,53 @@ class RepairDecisionService:
             raise ServiceConflict("ADMIN_REQUIRED", "This repair suppression action requires an administrator.")
 
 
+class QuarantineService:
+    """Administrator-only intact-directory quarantine and restoration."""
+    def __init__(self, quarantine_repo, operation_service, archive_root, quarantine_root, snapshot_fn, audit_log_fn=None):
+        self._repo, self._operations = quarantine_repo, operation_service
+        self._archive, self._quarantine = Path(archive_root).resolve(), Path(quarantine_root).resolve()
+        self._snapshot, self._audit = snapshot_fn, audit_log_fn or (lambda _: None)
+
+    def quarantine(self, relative_path, *, repair_uuid, reason, actor_role, initiator="System", item_count=1):
+        self._admin(actor_role); source = self._within(self._archive, relative_path)
+        if not source.is_dir(): raise ServiceNotFound("Managed directory was not found.")
+        snapshot = self._snapshot("repair_quarantine") if item_count > 1 else None
+        if item_count > 1 and snapshot is None: raise ServiceConflict("SNAPSHOT_REQUIRED", "A required snapshot was not created.")
+        op = self._operations.begin("repair_quarantine", initiator, repair_uuid=repair_uuid, summary=f"Quarantine {relative_path}")
+        item_uuid = str(_uuid_mod.uuid4()); target = self._quarantine / item_uuid
+        inventory = "\n".join(sorted(p.relative_to(source).as_posix() for p in source.rglob("*") if p.is_file()))
+        shutil.move(str(source), str(target))
+        record = self._repo.create({"uuid": item_uuid, "original_path": relative_path, "quarantine_path": item_uuid, "repair_uuid": repair_uuid, "operation_uuid": op["uuid"], "reason": reason, "inventory": inventory, "expires_at": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()})
+        self._operations.succeed(op["uuid"], "Directory quarantined intact.")
+        self._audit({"action":"quarantine","quarantine_uuid":item_uuid,"operation_uuid":op["uuid"],"snapshot":str(snapshot) if snapshot else None})
+        return record
+
+    def restore(self, item_uuid, destination, *, actor_role, initiator="System"):
+        self._admin(actor_role); item = self._repo.get(item_uuid)
+        if not item: raise ServiceNotFound("Quarantine item was not found.")
+        source = self._within(self._quarantine, item["quarantine_path"]); target = self._within(self._archive, destination)
+        if target.exists(): raise ServiceConflict("RESTORE_DESTINATION_EXISTS", "Restore destination already exists.")
+        snapshot = self._snapshot("repair_restore")
+        if snapshot is None: raise ServiceConflict("SNAPSHOT_REQUIRED", "A required snapshot was not created.")
+        op = self._operations.begin("repair_restore", initiator, repair_uuid=item["repair_uuid"], related_operation_uuid=item["operation_uuid"])
+        target.parent.mkdir(parents=True, exist_ok=True); shutil.move(str(source), str(target))
+        self._operations.succeed(op["uuid"], "Quarantined directory restored intact.")
+        self._audit({"action":"restore","quarantine_uuid":item_uuid,"operation_uuid":op["uuid"],"snapshot":str(snapshot)})
+        return op
+
+    def list_items(self, *, actor_role): self._admin(actor_role); return self._repo.list()
+    @staticmethod
+    def _admin(role):
+        if role != ISSUE_ADMIN_ROLE: raise ServiceConflict("ADMIN_REQUIRED", "This quarantine action requires an administrator.")
+    @staticmethod
+    def _within(root, relative):
+        p = Path(relative)
+        if p.is_absolute(): raise ValueError("Quarantine paths must be relative.")
+        resolved = (root / p).resolve()
+        if root not in resolved.parents: raise ValueError("Quarantine path escapes its root.")
+        return resolved
+
+
 # ---------------------------------------------------------------------------
 # IssueService
 # ---------------------------------------------------------------------------

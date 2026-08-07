@@ -60,6 +60,8 @@ GROUPS: dict[str, tuple[str, ...]] = {
         "test_import_workflow_acceptance",
         "test_workspace_workflow_acceptance",
         "test_repair_policy_workflow_acceptance",
+        "test_quarantine_workflow_acceptance",
+        "test_repair_decision_workflow_acceptance",
     ),
 }
 
