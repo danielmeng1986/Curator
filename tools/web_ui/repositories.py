@@ -2318,6 +2318,15 @@ class OperationRepository:
             ).fetchone()
         return _norm_operation(dict(row)) if row else None
 
+    def list_recent(self, limit: int = 50) -> list[dict]:
+        """Return durable Operation records newest first, bounded by *limit*."""
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                "SELECT * FROM operation ORDER BY started_at DESC, id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [_norm_operation(dict(row)) for row in rows]
+
     def set_status(
         self,
         op_uuid: str,

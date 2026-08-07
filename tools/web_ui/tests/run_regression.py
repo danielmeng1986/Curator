@@ -23,6 +23,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "api-workflow": (
         "test_api_contract.TestAuthenticatedApiWorkflow",
+        "test_api_contract.TestOperationHistoryDisclosure",
     ),
     "repository": (
         "test_repositories",
@@ -76,6 +77,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
         "test_repair_decision_workflow_acceptance",
         "test_traceability_workflow_acceptance",
         "test_api_contract.TestAuthenticatedApiWorkflow",
+        "test_api_contract.TestOperationHistoryDisclosure",
     ),
 }
 

@@ -771,5 +771,44 @@ class TestAuthenticatedApiWorkflow(_TestServerBase):
         self.assertEqual(before, after)
 
 
+class TestOperationHistoryDisclosure(_TestServerBase):
+    """BT-030: durable Operation projection follows role disclosure policy."""
+
+    def _issued(self, role):
+        import repositories as repo
+        import services as svc
+        auth = svc.AuthenticationService(repo.AuthRepository(lambda: self._db), registration_secret="ops-proof")
+        registration = auth.request_registration(
+            device_name=f"{role} operations", device_identity=f"ops-{role}",
+            requested_role=role, requested_scopes=None, registration_proof="ops-proof",
+        )
+        return auth.approve_registration(registration["uuid"])
+
+    def _operation(self):
+        import repositories as repo
+        import services as svc
+        ops = svc.OperationService(repo.OperationRepository(lambda: self._db))
+        operation = ops.begin("repair", svc.OP_INITIATOR_SYSTEM, entity_uuid="album-1", summary="Repair needs review")
+        return ops.mark_needs_repair(operation["uuid"], "filesystem", "filesystem.write-failed", error_details="/private/archive/a raw stack trace", recovery_context="Confirm path and retry.")
+
+    def test_reader_sees_only_public_summary(self):
+        operation = self._operation(); issued = self._issued("reader")
+        status, body = self._get(f"/api/v1/operations/{operation['uuid']}", {"Authorization": f"Bearer {issued['token']}"})
+        self.assertEqual(200, status); item = body["data"]["operation"]
+        self.assertEqual(operation["uuid"], item["uuid"])
+        self.assertNotIn("recovery_context", item); self.assertNotIn("error_details", item)
+
+    def test_writer_gets_operational_context_but_not_sensitive_details(self):
+        operation = self._operation(); issued = self._issued("writer")
+        status, body = self._get("/api/v1/operations", {"Authorization": f"Bearer {issued['token']}"})
+        self.assertEqual(200, status); item = next(x for x in body["data"]["items"] if x["uuid"] == operation["uuid"])
+        self.assertEqual("Confirm path and retry.", item["recovery_context"])
+        self.assertNotIn("error_details", item)
+
+    def test_unversioned_operation_history_is_not_exposed(self):
+        self._operation(); status, body = self._get("/api/operations")
+        self.assertEqual(404, status); self.assertEqual("NOT_FOUND", body["error"]["code"])
+
+
 if __name__ == "__main__":
     unittest.main()

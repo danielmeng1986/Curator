@@ -291,7 +291,7 @@ class AuthenticationService:
         if required_scope is not None and required_scope not in token["scopes"]:
             raise AuthorizationFailure(required_scope)
         self._repo.touch_token(token["uuid"], self._now_utc().isoformat())
-        return {"device_name": token["device_name"], "registration_uuid": token["registration_uuid"], "scopes": token["scopes"]}
+        return {"device_name": token["device_name"], "registration_uuid": token["registration_uuid"], "scopes": token["scopes"], "role": registration["approved_role"]}
 
     def request_renewal(self, token_plaintext: str, *, device_identity: str) -> dict:
         principal = self.authenticate(token_plaintext)
@@ -2330,3 +2330,31 @@ class OperationService:
             raise ServiceNotFound(f"Operation not found: {op_uuid}")
         self._repo.set_status(op_uuid, OP_STATUS_CANCELLED, summary=summary)
         return self._repo.get_by_uuid(op_uuid)
+
+
+class OperationReadService:
+    """Project durable Operation records into role-safe API read models."""
+
+    _PUBLIC_FIELDS = (
+        "uuid", "operation_type", "initiator", "status", "summary", "started_at", "ended_at",
+        "entity_uuid", "import_uuid", "batch_uuid", "repair_uuid", "related_operation_uuid",
+        "parent_operation_uuid", "issue_uuid", "error_category", "error_code", "repair_state",
+    )
+
+    def __init__(self, operation_repo):
+        self._repo = operation_repo
+
+    def list_recent(self, role: str, limit: int = 50) -> list[dict]:
+        return [self._project(record, role) for record in self._repo.list_recent(limit)]
+
+    def get(self, operation_uuid: str, role: str) -> dict:
+        record = self._repo.get_by_uuid(operation_uuid)
+        if record is None:
+            raise ServiceNotFound("Operation not found.")
+        return self._project(record, role)
+
+    def _project(self, record: dict, role: str) -> dict:
+        result = {field: record.get(field) for field in self._PUBLIC_FIELDS}
+        if role in {"writer", "admin"}:
+            result["recovery_context"] = record.get("recovery_context")
+        return result

@@ -620,6 +620,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_workspace_album(wa_id)
             elif path == "/api/backups":
                 self._get_backups()
+            elif path == "/api/operations":
+                self._get_operations(qs)
+            elif re.match(r"^/api/operations/[^/]+$", path):
+                self._get_operation(path.split("/")[-1])
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
         except Exception:
@@ -734,6 +738,31 @@ class AppHandler(SimpleHTTPRequestHandler):
         catalog = build_backup_catalog()
         items = [public_backup_item(x) for x in catalog]
         self._send_success(200, {"items": items, "retention_days": RETENTION_DAYS})
+
+    def _operation_reader(self):
+        principal = getattr(self, "_principal", None)
+        if principal is None:
+            self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
+            return None
+        return svc.OperationReadService(repo.OperationRepository(open_db)), principal["role"]
+
+    def _get_operations(self, qs: dict):
+        reader = self._operation_reader()
+        if reader is None:
+            return
+        service, role = reader
+        limit = min(max(int(qs.get("limit", ["50"])[0]), 1), 100)
+        self._send_success(200, {"items": service.list_recent(role, limit)})
+
+    def _get_operation(self, operation_uuid: str):
+        reader = self._operation_reader()
+        if reader is None:
+            return
+        service, role = reader
+        try:
+            self._send_success(200, {"operation": service.get(operation_uuid, role)})
+        except svc.ServiceNotFound as exc:
+            self._send_error(404, "NOT_FOUND", str(exc))
 
     # ------------------------------------------------------------------
     # POST handlers
