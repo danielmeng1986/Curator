@@ -21,25 +21,32 @@ retaining Backend workflow tests as the durable business-rule foundation.
 
 ## Scope
 
-- Test approved-device access, authenticated import, Workspace lifecycle, Repair/Issue visibility, and safe error presentation.
+- Test approved-device access, authenticated import, permanent-Album and
+  Repair/Issue visibility, and safe error presentation.
 - Run against disposable Backend/database/filesystem resources.
 - Publish a UI readiness matrix that links each UI scenario to its Backend workflow evidence.
 
 ## Out of Scope
 
 - Re-testing every Service rule through the browser.
+- Historical `workspace_album` promotion, correction, or archival screens.
+- AI Workspace result/review screens before a dataset-specific AI Workspace
+  Specification and API exist.
 - Performance, visual-polish, accessibility, and deployment certification beyond specified acceptance scope.
 
 ## Dependencies
 
 - `MT-002` and `MT-003` — migrated Backend and Web client.
-- `MT-004` only for AI-result UI workflows.
-- `BT-030` for Operation-history UI views; `BT-031` for promotion UI flows.
+- `BT-030` for Operation-history UI views.
+- `MT-004` and a future AI Workspace Specification only for AI-result UI
+  workflows.
 
 ## Implementation Steps
 
 1. Choose a browser automation boundary and disposable test composition root.
-2. Implement critical-path scenarios against `/api/v1` with explicit durable assertions.
+2. Implement critical-path scenarios against `/api/v1` with explicit durable
+   assertions; do not make historical Workspace Album actions a client
+   journey.
 3. Add the UI gate beside Backend `workflow-readiness`.
 
 ## Acceptance Criteria
@@ -47,6 +54,9 @@ retaining Backend workflow tests as the durable business-rule foundation.
 - UI tests never use production database, archive, token, or output paths.
 - Rejected actions visibly preserve zero business side effects.
 - Each UI workflow links to a passing Backend workflow or an explicit readiness gap.
+- The initial UI gate exercises no direct or indirect `workspace_album`
+  promotion path; any future Workspace UI scenario names its dataset contract
+  and Backend API evidence.
 
 ## Verification
 
@@ -55,4 +65,6 @@ retaining Backend workflow tests as the durable business-rule foundation.
 
 ## Risks or Notes
 
-- UI tests prove client integration; they do not replace service-level safety tests.
+- UI tests prove client integration; they do not replace service-level safety
+  tests. `MT-008` retires the historical Workspace Album collection and is not
+  a prerequisite for the initial UI acceptance gate.
