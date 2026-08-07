@@ -28,7 +28,7 @@ except ImportError:  # Focused test discovery still loads sibling modules direct
 BASE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BASE_DIR.parents[1]
 RUNTIME_DIR = Path(os.environ.get("CURATOR_RUNTIME_DIR", REPO_ROOT / "var"))
-STATIC_DIR = Path(os.environ.get("CURATOR_STATIC_DIR", REPO_ROOT / "tools" / "web_ui" / "static"))
+STATIC_DIR = Path(os.environ.get("CURATOR_STATIC_DIR", REPO_ROOT / "apps" / "web" / "static"))
 DATABASE_PATH = Path(os.environ.get("CURATOR_DATABASE_PATH", RUNTIME_DIR / "data" / "Curator.db"))
 CONFIG_PATH = Path(os.environ.get("CURATOR_CONFIG_PATH", REPO_ROOT / "config" / "backend.json"))
 LOG_DIR = Path(os.environ.get("CURATOR_LOG_DIR", RUNTIME_DIR / "logs"))

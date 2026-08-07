@@ -22,7 +22,6 @@ def _set_legacy_defaults() -> None:
     os.environ.setdefault("CURATOR_CONFIG_PATH", str(LEGACY_DIR / "app_config.json"))
     os.environ.setdefault("CURATOR_LOG_DIR", str(LEGACY_DIR / "logs"))
     os.environ.setdefault("CURATOR_BACKUP_DIR", str(LEGACY_DIR / "backups"))
-    os.environ.setdefault("CURATOR_STATIC_DIR", str(LEGACY_DIR / "static"))
 
 
 def main() -> None:

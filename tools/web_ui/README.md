@@ -1,6 +1,7 @@
-# Curator Web UI
+# Curator Web UI Compatibility Area
 
-Full-featured local web interface for Curator, implementing the spec from `Docs/UI/`.
+The active Web Client has moved to `apps/web`. This directory retains only the
+temporary compatibility launcher and its local runtime configuration example.
 
 ## Start
 
@@ -12,19 +13,6 @@ Open **http://127.0.0.1:8080** in a browser.
 
 `python3 tools/web_ui/server.py` remains a temporary compatibility launcher;
 it delegates to the Backend while preserving the old local runtime paths.
-
-## Features
-
-| Page | Route | Description |
-|---|---|---|
-| Dashboard | `#/` | Entity counts, recent operations |
-| Albums | `#/albums` | Browse/search/filter permanent albums |
-| Album Detail | `#/albums/:id` | Edit album, manage models/relations/photos |
-| Models | `#/models` | Browse/create/edit models |
-| Studios | `#/studios` | Browse/create/edit studios |
-| Workspace | `#/workspace/albums` | Browse and batch-edit workspace albums |
-| Import | `#/import/albums` | Multi-step import from folders to permanent albums |
-| Statuses | `#/statuses` | Admin controlled-status list |
 
 ## Backend configuration
 
@@ -46,7 +34,8 @@ Copy `tools/web_ui/app_config.example.json` to the ignored local file
 ```
 
 This is a transitional configuration location used only by the compatibility
-launcher. MT-003 moves the Web client to its target application directory.
+launcher. MT-005 retires this location after the active replacements are
+verified.
 
 ## Tech Stack
 

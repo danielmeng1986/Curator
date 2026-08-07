@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`MT-003` — Status: `Proposed`
+`MT-003` — Status: `Complete`
 
 ## Title
 
@@ -23,6 +23,8 @@ Backend integration boundary.
 - Relocate static assets and client tests into `apps/web`.
 - Replace direct legacy `/api/*` dependencies with authenticated `/api/v1` calls.
 - Add client configuration for Backend URL and device-token storage without embedding secrets in source.
+- Remove the historical `workspace_album` client journey; it is not an active
+  Workspace surface after BT-031.
 
 ## Out of Scope
 
@@ -32,13 +34,14 @@ Backend integration boundary.
 ## Dependencies
 
 - `MT-002` — stable new Backend entry point and compatibility contract.
-- `BT-031` — only for any UI promotion screen.
+- `BT-031` — historical `workspace_album` is closed/archived rather than
+  exposed as a promotion screen.
 
 ## Implementation Steps
 
-1. Inventory current UI calls and map each to a versioned API endpoint.
-2. Move static assets and remove unsupported direct-route dependencies.
-3. Add focused browserless client/API contract tests.
+1. Inventory current UI calls and map each to a versioned API endpoint. — Complete
+2. Move static assets and remove unsupported direct-route dependencies. — Complete
+3. Add focused browserless client/API contract tests. — Complete
 
 ## Acceptance Criteria
 
@@ -48,9 +51,11 @@ Backend integration boundary.
 
 ## Verification
 
-- Run API contract tests and client build/lint checks where applicable.
-- Exercise an isolated authenticated client/API smoke path.
+- Run API contract tests and browserless client contract checks. — Complete
+- Exercise an isolated authenticated client/API smoke path. — Complete
 
 ## Risks or Notes
 
-- Preserve temporary compatibility only in the Backend; do not perpetuate it in the migrated client.
+- Preserve temporary compatibility only in the Backend; do not perpetuate it
+  in the migrated client. The historical Workspace Album UI is intentionally
+  absent; future Workspace UIs require a dataset-specific Specification.

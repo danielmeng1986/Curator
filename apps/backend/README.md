@@ -18,8 +18,8 @@ var/logs/
 
 `CURATOR_DATABASE_PATH`, `CURATOR_CONFIG_PATH`, `CURATOR_RUNTIME_DIR`,
 `CURATOR_LOG_DIR`, `CURATOR_BACKUP_DIR`, and `CURATOR_STATIC_DIR` provide
-explicit local or deployment overrides. The static client remains temporarily
-at `tools/web_ui/static` until MT-003.
+explicit local or deployment overrides. The static client is served from
+`apps/web/static`.
 
 Run regressions with:
 

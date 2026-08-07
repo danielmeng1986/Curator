@@ -54,8 +54,8 @@ and one retired historical module:
 
 The active Backend uses Python's standard-library HTTP server and SQLite
 through its Repository boundary. `tools/web_ui/server.py` is now only a
-compatibility launcher that delegates to `apps/backend`; its static files stay
-in place until the Web-client migration. The earlier base-app server is
+compatibility launcher that delegates to `apps/backend`; the static Web Client
+is owned by `apps/web`. The earlier base-app server is
 historical context rather than a workflow-migration requirement.
 
 `workspace/curator_base_app` is retired and its startup module deliberately refuses to run. Its routes and workflows are not migration requirements. Its source remains in the repository only as historical migration reference; it exposes no Backend entry point.
@@ -380,7 +380,12 @@ backend/
     api/
 ```
 
-This does not require moving everything at once. Existing `tools/web_ui/static` assets can remain where they are. During transition, `tools/web_ui/server.py` can become a thin launch point that imports the Backend composition root, preserving the current command and local port behavior. The earlier base app's entry point has been retired; its source remains historical reference only and can be deleted after the completed, verified migration.
+This does not require moving everything at once. The static Web Client now lives
+under `apps/web`; `tools/web_ui/server.py` remains only as a thin launch point
+that imports the Backend composition root and preserves the old local command
+and runtime paths. The earlier base app's entry point has been retired; its
+source remains historical reference only and can be deleted after the
+completed, verified migration.
 
 ## 10. Migration Strategy
 

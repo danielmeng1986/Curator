@@ -3,20 +3,18 @@ const DashboardPage = {
     const el = document.getElementById('page-content');
     el.innerHTML = '<div class="loading">Loading…</div>';
     try {
-      const [health, statuses, albums, models, studios, workspace] = await Promise.all([
+      const [health, statuses, albums, models, studios] = await Promise.all([
         api.get('/health'),
         api.get('/statuses'),
         api.get('/albums?limit=1&offset=0'),
         api.get('/models?limit=1&offset=0'),
         api.get('/studios?limit=1&offset=0'),
-        api.get('/workspace/albums?limit=1&offset=0'),
       ]);
 
       const statusRows = (statuses.statuses || []).map(s => `
         <tr>
           <td>${esc(s.name)}</td>
           <td>${s.album_count || 0}</td>
-          <td>${s.workspace_album_count || 0}</td>
           <td style="color:var(--ink-soft)">${esc(s.description || '')}</td>
         </tr>`).join('');
 
@@ -38,10 +36,6 @@ const DashboardPage = {
             <div class="stat-number">${studios.total || 0}</div>
             <div class="stat-label">Studios</div>
           </div>
-          <div class="stat-card" style="cursor:pointer" onclick="navigate('#/workspace/albums')">
-            <div class="stat-number">${workspace.total || 0}</div>
-            <div class="stat-label">Workspace</div>
-          </div>
         </div>
         <div class="card" style="padding:16px;margin-bottom:16px">
           <div class="form-section-title">Database</div>
@@ -55,9 +49,9 @@ const DashboardPage = {
           <div class="form-section-title">Statuses</div>
           <div class="table-wrap">
             <table><thead><tr>
-              <th>Name</th><th>Albums</th><th>Workspace</th><th>Description</th>
+              <th>Name</th><th>Albums</th><th>Description</th>
             </tr></thead>
-            <tbody>${statusRows || '<tr><td colspan="4" style="color:var(--ink-soft);text-align:center">No statuses</td></tr>'}</tbody>
+            <tbody>${statusRows || '<tr><td colspan="3" style="color:var(--ink-soft);text-align:center">No statuses</td></tr>'}</tbody>
             </table>
           </div>
         </div>

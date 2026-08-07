@@ -12,8 +12,6 @@ const ROUTES = [
   { pattern: /^#\/studios\/new$/, page: 'studio-new', params: [] },
   { pattern: /^#\/studios\/(\d+)$/, page: 'studio-detail', params: ['id'] },
   { pattern: /^#\/statuses$/, page: 'statuses', params: [] },
-  { pattern: /^#\/workspace\/albums$/, page: 'workspace-list', params: [] },
-  { pattern: /^#\/workspace\/albums\/(\d+)$/, page: 'workspace-detail', params: ['id'] },
   { pattern: /^#\/import\/albums$/, page: 'import', params: [] },
 ];
 
@@ -38,20 +36,18 @@ function route() {
       btn.onclick = null;
 
       switch (r.page) {
-        case 'dashboard':       DashboardPage.render(paramValues); break;
-        case 'albums-list':     AlbumsPage.renderList(paramValues); break;
-        case 'album-new':       AlbumsPage.renderDetail({ id: null }); break;
-        case 'album-detail':    AlbumsPage.renderDetail(paramValues); break;
-        case 'models-list':     ModelsPage.renderList(paramValues); break;
-        case 'model-new':       ModelsPage.renderDetail({ id: null }); break;
-        case 'model-detail':    ModelsPage.renderDetail(paramValues); break;
-        case 'studios-list':    StudiosPage.renderList(paramValues); break;
-        case 'studio-new':      StudiosPage.renderDetail({ id: null }); break;
-        case 'studio-detail':   StudiosPage.renderDetail(paramValues); break;
-        case 'statuses':        StatusesPage.render(paramValues); break;
-        case 'workspace-list':  WorkspacePage.renderList(paramValues); break;
-        case 'workspace-detail':WorkspacePage.renderDetail(paramValues); break;
-        case 'import':          ImportPage.render(paramValues); break;
+        case 'dashboard':       void DashboardPage.render(paramValues).catch(renderRequestError); break;
+        case 'albums-list':     void AlbumsPage.renderList(paramValues).catch(renderRequestError); break;
+        case 'album-new':       void AlbumsPage.renderDetail({ id: null }).catch(renderRequestError); break;
+        case 'album-detail':    void AlbumsPage.renderDetail(paramValues).catch(renderRequestError); break;
+        case 'models-list':     void ModelsPage.renderList(paramValues).catch(renderRequestError); break;
+        case 'model-new':       void ModelsPage.renderDetail({ id: null }).catch(renderRequestError); break;
+        case 'model-detail':    void ModelsPage.renderDetail(paramValues).catch(renderRequestError); break;
+        case 'studios-list':    void StudiosPage.renderList(paramValues).catch(renderRequestError); break;
+        case 'studio-new':      void StudiosPage.renderDetail({ id: null }).catch(renderRequestError); break;
+        case 'studio-detail':   void StudiosPage.renderDetail(paramValues).catch(renderRequestError); break;
+        case 'statuses':        void StatusesPage.render(paramValues).catch(renderRequestError); break;
+        case 'import':          void ImportPage.render(paramValues).catch(renderRequestError); break;
         default:                renderNotFound();
       }
       return;
@@ -72,6 +68,13 @@ function updateNavActive(hash) {
 function renderNotFound() {
   document.getElementById('page-content').innerHTML =
     '<div style="padding:40px;text-align:center;color:#888">Page not found</div>';
+}
+
+function renderRequestError(error) {
+  const message = api.isAuthenticationError(error)
+    ? 'Authorization is required. Select Connect and provide an approved device token.'
+    : `Unable to load this view: ${esc(error.message || 'Backend request failed.')}`;
+  document.getElementById('page-content').innerHTML = `<div class="error-msg">${message}</div>`;
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -123,10 +126,39 @@ async function checkHealth() {
     document.getElementById('healthDot').className = 'health-dot ok';
     document.getElementById('healthText').textContent =
       `DB OK · ${data.backup_count || 0} backups`;
-  } catch {
+  } catch (error) {
     document.getElementById('healthDot').className = 'health-dot error';
-    document.getElementById('healthText').textContent = 'DB Error';
+    document.getElementById('healthText').textContent =
+      api.isAuthenticationError(error) ? 'Authorization required' : 'Backend unavailable';
   }
+}
+
+function openConnectionSettings() {
+  const connection = api.getConnection();
+  showModal(`
+    <h3 class="modal-title">Connect to Curator</h3>
+    <div class="form-field">
+      <label>Backend URL</label>
+      <input id="backendUrl" value="${esc(connection.backendUrl)}" placeholder="Same origin when empty">
+    </div>
+    <div class="form-field">
+      <label>Approved device token</label>
+      <input id="deviceToken" type="password" placeholder="${connection.hasToken ? 'Stored locally; enter a replacement to change it' : 'Required'}">
+    </div>
+    <p style="font-size:.8rem;color:var(--ink-soft)">Stored only in this browser profile; never in source files.</p>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="connectionCancel">Cancel</button>
+      <button class="btn btn-primary" id="connectionSave">Save</button>
+    </div>
+  `);
+  document.getElementById('connectionCancel').onclick = closeModal;
+  document.getElementById('connectionSave').onclick = () => {
+    const token = document.getElementById('deviceToken').value;
+    api.configure({ backendUrl: document.getElementById('backendUrl').value, ...(token ? { token } : {}) });
+    closeModal();
+    checkHealth();
+    route();
+  };
 }
 
 // ─── Global search (simple: navigate to albums with q param) ──────────────────
@@ -142,6 +174,7 @@ document.getElementById('globalSearch').addEventListener('keydown', e => {
 
 window.addEventListener('hashchange', route);
 window.addEventListener('load', () => {
+  document.getElementById('connectionBtn').onclick = openConnectionSettings;
   route();
   checkHealth();
   setInterval(checkHealth, 60000);

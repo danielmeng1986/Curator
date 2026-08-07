@@ -13,7 +13,10 @@ const ImportPage = {
     try {
       const cfg = await api.get('/config');
       this._config = cfg;
-    } catch { this._config = {}; }
+    } catch (error) {
+      el.innerHTML = `<div class="error-msg">${esc(error.message)}</div>`;
+      return;
+    }
 
     this._step = 1;
     this._items = [];
