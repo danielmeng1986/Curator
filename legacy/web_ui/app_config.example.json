@@ -1,5 +1,0 @@
-{
-  "import_source_root": "/absolute/path/to/import-source",
-  "archive_root": "/absolute/path/to/archive",
-  "default_import_studio": "Example Studio"
-}
