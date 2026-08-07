@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-025` — Status: `Proposed`
+`BT-025` — Status: `Complete`
 
 ## Title
 

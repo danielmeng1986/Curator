@@ -24,6 +24,7 @@ Use a focused group while working on one boundary:
 | Snapshots | `python3 tools/web_ui/tests/run_regression.py snapshots` | [Snapshot Specification](Specifications/Snapshot-Specification.md) | Risk classification, creation, restore safety, retention eligibility, and protected cleanup behavior. |
 | Operations | `python3 tools/web_ui/tests/run_regression.py operations` | [Operation Logging](Specifications/Operation-Logging.md) | Durable operation creation, status transitions, error and repair context, and workflow linkage. |
 | Workflow | `python3 tools/web_ui/tests/run_regression.py workflow` | [Testing Strategy](Testing-Strategy.md) and applicable workflow Specifications | UI-independent workflow sandbox isolation, durable-state assertions, repeatable scenarios, and completed workflow acceptance coverage. |
+| Workflow readiness | `python3 tools/web_ui/tests/run_regression.py workflow-readiness` | [Workflow Readiness Matrix](Workflow-Readiness-Matrix.md) | The BT-019–BT-024 accepted business workflows plus authenticated API entry. |
 
 `all` uses test discovery to run every Backend test module, including the
 workflow acceptance foundation and focused import, repair, issue, and
@@ -32,8 +33,9 @@ test method name identify the affected contract or transition in failure output.
 
 ## Verification convention
 
-Before completing a Backend change, run its named group, then run `all` twice
-from a clean working tree. The HTTP API group opens an ephemeral loopback port
+Before completing a workflow-readiness change, run `workflow-readiness` twice
+from clean isolated fixtures, then run `all`. A failing readiness scenario must
+remain a failure; do not skip it or convert it to an expected success. The HTTP API group opens an ephemeral loopback port
 for its contract tests. A failure must be treated as evidence about the named
 Specification boundary; tests do not redefine a Specification to match an
 implementation.
