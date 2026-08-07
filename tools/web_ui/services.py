@@ -513,6 +513,7 @@ class WorkspaceAlbumService:
         Raises:
             ValueError: If ``changes`` contains no allowed fields.
         """
+        self._require_active_for_edit(ids)
         now = _utc_now_iso()
         try:
             snap = self._snapshot("workspace_batch")
@@ -532,7 +533,31 @@ class WorkspaceAlbumService:
         Raises:
             ValueError: If ``changes`` contains no allowed fields.
         """
+        self._require_active_for_edit([wa_id])
         self._repo.update(wa_id, self.ALLOWED_UPDATE_FIELDS, changes)
+
+    def _require_active_for_edit(self, workspace_ids: list[int]) -> None:
+        """Reject ordinary edits outside an Active workspace lifecycle state.
+
+        The Workspace Workflow reserves Review changes for a dataset-specific
+        editing contract.  ``workspace_album`` has no such contract yet, so
+        only Active records may receive its general update or batch-update
+        operations.  Closed and Archived / Retired records are always
+        historical and read-only.
+        """
+        for wa_id in workspace_ids:
+            state = self._repo.get_lifecycle_state(wa_id)
+            if state is None:
+                raise ServiceNotFound(f"Workspace album {wa_id} not found.")
+            if state != LIFECYCLE_ACTIVE:
+                raise ServiceConflict(
+                    "LIFECYCLE_EDIT_NOT_ALLOWED",
+                    (
+                        f"Workspace album {wa_id} in '{state}' does not allow "
+                        "ordinary business editing."
+                    ),
+                    {"workspace_id": wa_id, "current_state": state},
+                )
 
     def create(self, fields: dict) -> dict:
         """Create a new workspace album with initial lifecycle_state ``'active'``.

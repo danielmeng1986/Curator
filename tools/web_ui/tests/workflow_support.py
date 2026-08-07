@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable
 
@@ -199,7 +200,15 @@ class WorkflowSandbox:
 
     def db_factory(self):
         """Return the repository-compatible factory for the sandbox database."""
-        return self.connect
+        @contextmanager
+        def connection_scope():
+            conn = self.connect()
+            try:
+                yield conn
+            finally:
+                conn.close()
+
+        return connection_scope
 
     def path_under(self, root: Path, relative_path: str | Path) -> Path:
         """Resolve a relative scenario path and reject paths outside its root."""
