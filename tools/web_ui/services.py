@@ -1787,6 +1787,107 @@ class RepairService:
 
 
 # ---------------------------------------------------------------------------
+# Repair decision policy
+# ---------------------------------------------------------------------------
+
+class RepairDecisionService:
+    """Apply the bounded repair-selection policy before filesystem work.
+
+    This boundary intentionally accepts relative paths only, so every repair
+    action remains confined to the configured managed root.
+    """
+
+    def __init__(self, repair_service, operation_service, suppression_repo, managed_root, audit_log_fn=None):
+        self._repair_service = repair_service
+        self._operations = operation_service
+        self._suppressions = suppression_repo
+        self._root = Path(managed_root).resolve()
+        self._audit = audit_log_fn or (lambda _: None)
+
+    def classify(self, observed_paths: list[str], expected_path: str, *, authoritative_path: str | None = None) -> dict:
+        """Classify candidates without mutating files or repair state."""
+        expected = self._under_root(expected_path)
+        candidates = [self._under_root(path) for path in observed_paths]
+        automatic = (
+            len(candidates) == 1 and candidates[0].is_dir() and not expected.exists()
+            and self._canonicalization_only(candidates[0], expected)
+        )
+        if automatic:
+            return {"category": REPAIR_CATEGORY_AUTOMATIC, "candidate": self._relative(candidates[0]), "evidence": "canonicalization-only"}
+        if len(candidates) != 1 or authoritative_path != self._relative(candidates[0]):
+            return {"category": REPAIR_CATEGORY_MANUAL_CONFLICT, "candidate": None, "evidence": "ambiguous-or-insufficient"}
+        return {"category": REPAIR_CATEGORY_ASSISTED, "candidate": self._relative(candidates[0]), "evidence": "authoritative-provenance"}
+
+    def execute_automatic_rename(self, repair_uuid: str, observed_path: str, expected_path: str, *, initiator: str = "System") -> dict:
+        decision = self.classify([observed_path], expected_path)
+        if decision["category"] != REPAIR_CATEGORY_AUTOMATIC:
+            raise ServiceConflict("AUTOMATIC_POLICY_REJECTED", "Repair is not eligible for an automatic rename.", decision)
+        repair = self._repair_service.start_repair(repair_uuid)
+        operation = self._operations.begin("repair_automatic_rename", initiator, repair_uuid=repair_uuid, related_operation_uuid=repair["operation_uuid"])
+        source = self._under_root(observed_path)
+        destination = self._under_root(expected_path)
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(destination))
+            self._repair_service.complete_action(repair_uuid)
+            self._operations.succeed(operation["uuid"], "Automatic canonicalization-only rename completed.")
+            self._audit({"action": "repair_automatic_rename", "repair_uuid": repair_uuid, "operation_uuid": operation["uuid"], "success": True})
+            return operation
+        except OSError as exc:
+            self._operations.mark_needs_repair(operation["uuid"], "filesystem", "filesystem.rename-failed", summary="Automatic repair rename failed.", error_details=str(exc), repair_state=REPAIR_STATE_NEEDS_REPAIR)
+            self._audit({"action": "repair_automatic_rename", "repair_uuid": repair_uuid, "operation_uuid": operation["uuid"], "success": False})
+            raise
+
+    def create_suppression(self, *, fingerprint: str, scope_path: str, reason: str, creator: str, actor_role: str, expires_at: str) -> dict:
+        self._require_admin(actor_role)
+        record = self._suppressions.create({"fingerprint": fingerprint, "scope_path": scope_path, "reason": reason, "creator": creator, "expires_at": expires_at})
+        self._audit({"action": "repair_suppression_created", "suppression_uuid": record["uuid"], "creator": creator})
+        return record
+
+    def revoke_suppression(self, suppression_uuid: str, *, actor: str, actor_role: str) -> dict:
+        self._require_admin(actor_role)
+        record = self._suppressions.revoke(suppression_uuid, actor)
+        if record is None:
+            raise ServiceNotFound(f"Repair suppression not found: {suppression_uuid}")
+        self._audit({"action": "repair_suppression_revoked", "suppression_uuid": suppression_uuid, "creator": actor})
+        return record
+
+    def is_suppressed(self, fingerprint: str, scope_path: str, *, now: datetime | None = None) -> bool:
+        at = (now or datetime.now(timezone.utc)).isoformat()
+        record = self._suppressions.find_active(fingerprint, scope_path, at)
+        if record:
+            self._audit({"action": "repair_suppression_applied", "suppression_uuid": record["uuid"]})
+        return record is not None
+
+    def _under_root(self, relative_path: str) -> Path:
+        path = Path(relative_path)
+        if path.is_absolute():
+            raise ValueError("Repair paths must be relative to the managed root.")
+        resolved = (self._root / path).resolve()
+        if resolved == self._root or self._root not in resolved.parents:
+            raise ValueError("Repair path escapes the managed root.")
+        return resolved
+
+    def _relative(self, path: Path) -> str:
+        return path.relative_to(self._root).as_posix()
+
+    @staticmethod
+    def _canonicalization_only(source: Path, destination: Path) -> bool:
+        source_parts, dest_parts = source.parts, destination.parts
+        if len(source_parts) != len(dest_parts) or source == destination:
+            return False
+        return all(
+            cpath.canonicalize_component(left).casefold() == cpath.canonicalize_component(right).casefold()
+            for left, right in zip(source_parts, dest_parts)
+        )
+
+    @staticmethod
+    def _require_admin(actor_role: str) -> None:
+        if actor_role != ISSUE_ADMIN_ROLE:
+            raise ServiceConflict("ADMIN_REQUIRED", "This repair suppression action requires an administrator.")
+
+
+# ---------------------------------------------------------------------------
 # IssueService
 # ---------------------------------------------------------------------------
 

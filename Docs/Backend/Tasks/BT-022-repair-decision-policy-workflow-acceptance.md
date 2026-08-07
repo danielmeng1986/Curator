@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-022` — Status: `Proposed`
+`BT-022` — Status: `Blocked`
 
 ## Title
 
@@ -59,4 +59,4 @@ Verify that repair classification and execution enforce the specified safety bou
 
 ## Risks or Notes
 
-- Any policy capability not implemented yet should be reported as a readiness gap, not simulated by weakening the scenario.
+- Blocked by the absence of a policy-enforcing repair execution boundary: the current `RepairService` persists only generic state transitions. It cannot classify or execute canonicalization-only renames, preserve fuzzy-match evidence, persist suppression records, or run quarantine and restore actions. These are tracked by `BT-028` and `BT-029`; this acceptance task must resume after them rather than weakening its scenarios.

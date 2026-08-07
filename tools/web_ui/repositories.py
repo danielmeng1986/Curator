@@ -1897,6 +1897,86 @@ class RepairRepository:
 
 
 # ---------------------------------------------------------------------------
+# Repair suppression persistence
+# ---------------------------------------------------------------------------
+
+class RepairSuppressionRepository:
+    """Durable, bounded suppression records for repair rediscovery."""
+
+    def __init__(self, db_factory):
+        self._db = db_factory
+
+    @staticmethod
+    def _ensure_schema(conn) -> None:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS repair_suppression (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid TEXT NOT NULL UNIQUE,
+                fingerprint TEXT NOT NULL,
+                scope_path TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                creator TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                revoked_at TEXT,
+                revoked_by TEXT
+            )"""
+        )
+        conn.commit()
+
+    @staticmethod
+    def _normalise(row: dict) -> dict:
+        return {
+            "id": row["id"], "uuid": row["uuid"],
+            "fingerprint": row["fingerprint"], "scope_path": row["scope_path"],
+            "reason": row["reason"], "creator": row["creator"],
+            "created_at": row["created_at"], "expires_at": row["expires_at"],
+            "revoked_at": row.get("revoked_at"), "revoked_by": row.get("revoked_by"),
+        }
+
+    def create(self, fields: dict) -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        record_uuid = fields.get("uuid") or str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            cur = conn.execute(
+                """INSERT INTO repair_suppression
+                   (uuid, fingerprint, scope_path, reason, creator, created_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (record_uuid, fields["fingerprint"], fields["scope_path"],
+                fields["reason"], fields["creator"], fields.get("created_at") or now,
+                 fields["expires_at"]),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM repair_suppression WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return self._normalise(dict(row))
+
+    def find_active(self, fingerprint: str, scope_path: str, now: str) -> dict | None:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                """SELECT * FROM repair_suppression
+                   WHERE fingerprint = ? AND scope_path = ?
+                     AND revoked_at IS NULL AND expires_at > ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (fingerprint, scope_path, now),
+            ).fetchone()
+        return self._normalise(dict(row)) if row else None
+
+    def revoke(self, record_uuid: str, revoked_by: str) -> dict | None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                "UPDATE repair_suppression SET revoked_at = ?, revoked_by = ? WHERE uuid = ?",
+                (now, revoked_by, record_uuid),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM repair_suppression WHERE uuid = ?", (record_uuid,)).fetchone()
+        return self._normalise(dict(row)) if row else None
+
+
+# ---------------------------------------------------------------------------
 # IssueRepository
 # ---------------------------------------------------------------------------
 
