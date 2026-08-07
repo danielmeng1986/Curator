@@ -57,6 +57,7 @@ CREATE TABLE album (
     publish_date TEXT,
     rating REAL,
     path TEXT,
+    remark TEXT,
     created_at TEXT,
     updated_at TEXT
 );

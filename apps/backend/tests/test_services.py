@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS album (
     publish_date TEXT,
     rating REAL,
     path TEXT,
+    remark TEXT,
     created_at TEXT,
     updated_at TEXT
 );
@@ -406,6 +407,11 @@ class TestAlbumServiceCreate(unittest.TestCase):
         ).fetchone()
         self.assertIsNotNone(row)
 
+    def test_create_preserves_optional_permanent_remark(self):
+        album_id = self.service.create({"title": "Summer", "remark": "curator note"}, [], [])
+        row = self.conn.execute("SELECT remark FROM album WHERE id = ?", (album_id,)).fetchone()
+        self.assertEqual("curator note", row[0])
+
     def test_create_with_models_inserts_album_model(self):
         self.conn.execute(
             "INSERT INTO model (uuid, display_name, created_at, updated_at)"
@@ -470,6 +476,11 @@ class TestAlbumServiceUpdate(unittest.TestCase):
         self.service.update(1, {"title": "Updated"}, [], [])
         row = self.conn.execute("SELECT title FROM album WHERE id = 1").fetchone()
         self.assertEqual(row[0], "Updated")
+
+    def test_update_preserves_optional_permanent_remark(self):
+        self.service.update(1, {"title": "Updated", "remark": "reviewed"}, [], [])
+        row = self.conn.execute("SELECT remark FROM album WHERE id = 1").fetchone()
+        self.assertEqual("reviewed", row[0])
 
     def test_update_replaces_model_list(self):
         self.conn.execute(

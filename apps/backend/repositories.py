@@ -379,6 +379,7 @@ def _norm_album_list(row: dict) -> dict:
         "publish_date": row.get("publish_date"),
         "rating": row.get("rating"),
         "path": row.get("path"),
+        "remark": row.get("remark"),
         "studio_id": row.get("studio_id"),
         "status_id": row.get("status_id"),
         "created_at": row.get("created_at"),
@@ -402,6 +403,7 @@ def _norm_album_detail(row: dict) -> dict:
         "publish_date": row.get("publish_date"),
         "rating": row.get("rating"),
         "path": row.get("path"),
+        "remark": row.get("remark"),
         "studio_id": row.get("studio_id"),
         "status_id": row.get("status_id"),
         "created_at": row.get("created_at"),
@@ -945,7 +947,7 @@ class AlbumRepository:
 
         query = f"""
             SELECT a.id, a.uuid, a.title, a.description, a.scene, a.location,
-                a.capture_date, a.publish_date, a.rating, a.path,
+                a.capture_date, a.publish_date, a.rating, a.path, a.remark,
                 a.studio_id, a.status_id, a.created_at, a.updated_at,
                 s.name AS studio_name,
                 st.name AS status_name,
@@ -1041,8 +1043,8 @@ class AlbumRepository:
                     INSERT INTO album
                         (uuid, studio_id, status_id, title, description,
                          scene, location, capture_date, publish_date,
-                         rating, path, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         rating, path, remark, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         new_uuid,
@@ -1056,6 +1058,7 @@ class AlbumRepository:
                         data.get("publish_date"),
                         data.get("rating"),
                         data.get("path"),
+                        data.get("remark"),
                         now,
                         now,
                     ),
@@ -1109,7 +1112,7 @@ class AlbumRepository:
                         studio_id = ?, status_id = ?, title = ?,
                         description = ?, scene = ?, location = ?,
                         capture_date = ?, publish_date = ?,
-                        rating = ?, path = ?, updated_at = ?
+                        rating = ?, path = ?, remark = ?, updated_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -1123,6 +1126,7 @@ class AlbumRepository:
                         data.get("publish_date"),
                         data.get("rating"),
                         data.get("path"),
+                        data.get("remark"),
                         now,
                         album_id,
                     ),

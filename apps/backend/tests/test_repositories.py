@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS album (
     publish_date TEXT,
     rating REAL,
     path TEXT,
+    remark TEXT,
     created_at TEXT,
     updated_at TEXT
 );
@@ -1349,7 +1350,7 @@ class TestAlbumListReadModelShape(unittest.TestCase):
         rows, _ = self.repo.search()
         expected_keys = {
             "id", "uuid", "title", "description", "scene", "location",
-            "capture_date", "publish_date", "rating", "path",
+            "capture_date", "publish_date", "rating", "path", "remark",
             "studio_id", "status_id", "created_at", "updated_at",
             "studio_name", "status_name", "model_names",
         }
@@ -1422,7 +1423,7 @@ class TestAlbumDetailReadModelShape(unittest.TestCase):
         result = self.repo.get_by_id(1)
         expected_keys = {
             "id", "uuid", "title", "description", "scene", "location",
-            "capture_date", "publish_date", "rating", "path",
+            "capture_date", "publish_date", "rating", "path", "remark",
             "studio_id", "status_id", "created_at", "updated_at",
             "studio_name", "status_name",
         }

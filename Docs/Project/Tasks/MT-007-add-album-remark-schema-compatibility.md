@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`MT-007` — Status: `Proposed`
+`MT-007` — Status: `Completed`
 
 ## Title
 
@@ -73,3 +73,18 @@ the migration process and the target schema.
   database has the same prior revision.
 - This task is deliberately separate from history promotion so a schema change
   can be recovered independently of business-data materialization.
+
+## Completion Record
+
+- Added migration `0001_add_album_remark` and an explicit, idempotent Backend
+  migration runner. It takes and validates a SQLite backup before its first
+  schema write, records the applied version, validates foreign keys, and makes
+  a recorded rerun a no-op.
+- Applied the migration to the active local runtime database. The verified
+  recovery snapshot is retained under the ignored `var/backups/` runtime
+  location; no database image or backup is versioned.
+- Updated permanent Album read/write models and disposable schemas for nullable
+  `remark`. Existing callers that omit it continue to write `NULL`.
+- Verified migration behavior on pre-migration disposable databases, including
+  a repeat run and an existing unrecorded column, then ran the full Backend
+  regression suite successfully.
