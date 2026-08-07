@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-023` — Status: `Proposed`
+`BT-023` — Status: `Complete`
 
 ## Title
 
@@ -59,3 +59,4 @@ Verify that representative material workflows leave a complete, truthful, and au
 ## Risks or Notes
 
 - Keep assertions at stable record and API boundaries; do not couple this task to JSONL formatting or internal logging implementation.
+- No `/api/v1` Operation-history read endpoint currently exists. Consequently, the role-sensitive Operation diagnostic disclosure rule has no implemented API/read-model surface to exercise; this is a surface-readiness gap for a later API task, not a reason to expose diagnostics through an ad hoc endpoint here.

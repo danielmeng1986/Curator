@@ -154,11 +154,19 @@ class AuthenticationService:
         registration_secret: str | None = None,
         now_fn=None,
         issue_service=None,
+        operation_service=None,
     ):
         self._repo = auth_repo
         self._registration_secret = registration_secret
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
         self._issues = issue_service
+        self._operations = operation_service
+
+    def _record_operation(self, operation_type: str, entity_uuid: str, summary: str, issue_uuid: str | None = None) -> dict | None:
+        if self._operations is None:
+            return None
+        operation = self._operations.begin(operation_type, "System", entity_uuid=entity_uuid, issue_uuid=issue_uuid, summary=summary)
+        return self._operations.succeed(operation["uuid"], summary)
 
     def _now_utc(self) -> datetime:
         value = self._now()
@@ -197,6 +205,7 @@ class AuthenticationService:
                 "device_name": device_name.strip(), "device_identity": device_identity.strip(),
                 "requested_role": role, "requested_scopes": scopes,
             })
+            issue = None
             if self._issues is not None:
                 issue = self._issues.create({
                     "category": "Device Registration",
@@ -205,6 +214,9 @@ class AuthenticationService:
                     "source_workflow": "AuthenticationService",
                 })
                 self._issues.link(issue["uuid"], "affected_entity", registration["uuid"])
+            operation = self._record_operation("device_registration", registration["uuid"], "Device registration requested.", issue["uuid"] if issue else None)
+            if issue is not None and operation is not None:
+                self._issues.link(issue["uuid"], "triggering_operation", operation["uuid"])
             return registration
         except repo.PersistenceConflict as exc:
             raise ServiceConflict("BUSINESS_CONFLICT", "A registration already exists for this device identity.", exc.details)
@@ -230,7 +242,9 @@ class AuthenticationService:
         registration = self._repo.approve_registration(registration_uuid, role, scopes, trusted)
         if registration is None:
             raise ServiceNotFound("Registration request not found.")
-        return self._issue_token(registration, scopes, validity)
+        issued = self._issue_token(registration, scopes, validity)
+        self._record_operation("device_token_issuance", registration["uuid"], "Approved device token issued.")
+        return issued
 
     def reject_registration(self, registration_uuid: str) -> None:
         registration = self._repo.get_registration(registration_uuid)
@@ -307,6 +321,7 @@ class AuthenticationService:
     def revoke_token(self, token_uuid: str) -> None:
         if not self._repo.revoke_token(token_uuid):
             raise ServiceNotFound("Active token not found.")
+        self._record_operation("device_token_revocation", token_uuid, "Device token revoked.")
 
 
 # ---------------------------------------------------------------------------
