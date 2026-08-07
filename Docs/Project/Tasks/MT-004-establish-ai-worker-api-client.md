@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`MT-004` — Status: `Proposed`
+`MT-004` — Status: `Completed`
 
 ## Title
 
@@ -72,3 +72,9 @@ and future dataset-specific AI Workspace operations.
   `MT-008`; it is not an AI Worker integration surface. Define a new
   dataset-specific AI Workspace Specification before adding an AI submission
   endpoint or a promotion journey.
+
+## Completion Record
+
+- Added an isolated Worker API client, llama.cpp provider adapter, retrying
+  suggestion-only workflow, and fake-provider test. The Worker has no SQLite
+  or Backend-service dependency and exposes no durable-result operation.
