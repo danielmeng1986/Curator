@@ -58,10 +58,10 @@ def _verify_database(path: Path) -> None:
         raise MigrationError(f"SQLite integrity check failed for {path}: {integrity}")
 
 
-def _create_verified_backup(database: Path, backup_dir: Path) -> Path:
+def _create_verified_backup(database: Path, backup_dir: Path, migration_id: str = MIGRATION_ID) -> Path:
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    backup = backup_dir / f"Curator_{stamp}_{MIGRATION_ID}.db"
+    backup = backup_dir / f"Curator_{stamp}_{migration_id}.db"
     with sqlite3.connect(database) as source, sqlite3.connect(backup) as destination:
         source.backup(destination)
     _verify_database(backup)

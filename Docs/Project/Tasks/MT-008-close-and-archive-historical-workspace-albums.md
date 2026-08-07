@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`MT-008` — Status: `Proposed`
+`MT-008` — Status: `Completed`
 
 ## Title
 
@@ -88,3 +88,15 @@ traceability evidence.
   database without an explicit, verified backup and reviewed dry-run report.
 - Existing direct imports to permanent Album data remain the normal path; this
   task retires a historical Workspace collection rather than reviving it.
+
+## Completion Record
+
+- The live dry run classified all remaining historical rows as already
+  materialized; permanent links, paths, and relations were verified before
+  archival.
+- A curator-directed duplicate cleanup removed one redundant Workspace and
+  permanent Album record after filesystem verification, with a verified backup
+  and durable Operation record.
+- The versioned archival migration records a verified backup, durable archive
+  Operation, row classification, archive time, and `archived_retired` lifecycle
+  state. A rerun is a no-op.
