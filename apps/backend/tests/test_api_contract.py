@@ -741,6 +741,17 @@ class TestVersionedApiAuthorization(_TestServerBase):
 class TestAuthenticatedApiWorkflow(_TestServerBase):
     """BT-024: loopback enrolment then protected import entry."""
 
+    def test_invalid_unicode_registration_proof_is_rejected_safely(self):
+        import server as srv
+        with patch.object(srv, "AUTH_REGISTRATION_SECRET", "test-proof"):
+            status, body = self._post("/api/auth/registrations", {
+                "device_name": "workflow worker", "device_identity": "invalid-proof-worker",
+                "requested_role": "writer", "requested_scopes": ["read", "write"],
+                "registration_proof": "不是 test-proof",
+            })
+        self.assertEqual(401, status)
+        self.assertEqual("AUTHENTICATION_INVALID_REGISTRATION_PROOF", body["error"]["code"])
+
     def test_registration_approval_and_writer_import_preview(self):
         import server as srv
         with patch.object(srv, "AUTH_REGISTRATION_SECRET", "test-proof"):

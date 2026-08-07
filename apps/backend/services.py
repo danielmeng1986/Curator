@@ -201,7 +201,15 @@ class AuthenticationService:
         """Record a reviewable registration request; this never grants access."""
         if not all(isinstance(value, str) and value.strip() for value in (device_name, device_identity, registration_proof)):
             raise ValueError("Device name, stable device identity, and registration proof are required.")
-        if not self._registration_secret or not hmac.compare_digest(registration_proof, self._registration_secret):
+        # Compare bytes rather than Unicode strings.  ``compare_digest``
+        # rejects non-ASCII string inputs, but an invalid registration proof
+        # must be a normal authentication failure rather than an unhandled
+        # transport error.
+        proof_matches = bool(self._registration_secret) and hmac.compare_digest(
+            registration_proof.encode("utf-8"),
+            self._registration_secret.encode("utf-8"),
+        )
+        if not proof_matches:
             raise AuthenticationFailure("AUTHENTICATION_INVALID_REGISTRATION_PROOF", "The registration proof is invalid.")
         role, scopes = self._validate_role_and_scopes(requested_role, requested_scopes)
         try:
