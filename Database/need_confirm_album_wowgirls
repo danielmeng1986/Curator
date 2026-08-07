@@ -1,4 +1,0 @@
-SELECT *
-FROM workspace_album
-WHERE status_id = 1
-AND studio_name= "Wowgirls"

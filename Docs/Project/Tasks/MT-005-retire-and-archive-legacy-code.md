@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`MT-005` — Status: `Proposed`
+`MT-005` — Status: `Completed`
 
 ## Title
 
@@ -53,3 +53,11 @@ Move historical scripts and the retired workspace application into an explicit
 ## Risks or Notes
 
 - Archiving is reversible; deletion is a separate decision.
+
+## Completion Record
+
+- Historical scripts, retired workspace application, and the compatibility
+  launcher moved to `legacy/` with a classification manifest and startup guard.
+- Benchmark utilities moved to `tools/dev/benchmark/`.
+- The historical `Database/` runtime directory was removed by curator action;
+  active database state is under ignored `var/data/`.

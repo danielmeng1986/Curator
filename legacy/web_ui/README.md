@@ -1,7 +1,8 @@
-# Curator Web UI Compatibility Area
+# Retired Web UI Compatibility Area
 
-The active Web Client has moved to `apps/web`. This directory retains only the
-temporary compatibility launcher and its local runtime configuration example.
+The active Web Client is `apps/web`, served by `python3 -m apps.backend`.
+This directory is historical reference only; its launcher deliberately refuses
+to start and its runtime folders are not active locations.
 
 ## Start
 
@@ -11,8 +12,7 @@ python3 -m apps.backend
 
 Open **http://127.0.0.1:8080** in a browser.
 
-`python3 tools/web_ui/server.py` remains a temporary compatibility launcher;
-it delegates to the Backend while preserving the old local runtime paths.
+Do not run this directory.
 
 ## Backend configuration
 
