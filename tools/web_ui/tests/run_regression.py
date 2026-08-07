@@ -55,6 +55,9 @@ GROUPS: dict[str, tuple[str, ...]] = {
         "test_services.TestOperationServiceCancel",
         "test_services.TestOperationServiceWorkflowIntegration",
     ),
+    "workflow": (
+        "test_workflow_foundation",
+    ),
 }
 
 
