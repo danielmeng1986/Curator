@@ -2231,6 +2231,19 @@ class OperationRepository:
     def __init__(self, db_factory):
         self._db = db_factory
 
+    @staticmethod
+    def _ensure_schema(conn) -> None:
+        """Provide additive Operation persistence for existing databases."""
+        conn.execute("""CREATE TABLE IF NOT EXISTS operation (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL,
+            operation_type TEXT NOT NULL, initiator TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Pending', summary TEXT, started_at TEXT NOT NULL,
+            ended_at TEXT, entity_uuid TEXT, import_uuid TEXT, batch_uuid TEXT,
+            repair_uuid TEXT, related_operation_uuid TEXT, parent_operation_uuid TEXT,
+            issue_uuid TEXT, error_category TEXT, error_code TEXT, error_details TEXT,
+            repair_state TEXT, recovery_context TEXT)""")
+        conn.commit()
+
     def create(self, fields: dict) -> dict:
         """Create a new Operation record and return the normalised result.
 
@@ -2249,6 +2262,7 @@ class OperationRepository:
         op_uuid = fields.get("uuid") or str(uuid.uuid4())
         status = fields.get("status", "Pending")
         with self._db() as conn:
+            self._ensure_schema(conn)
             cur = conn.execute(
                 """
                 INSERT INTO operation (
@@ -2298,6 +2312,7 @@ class OperationRepository:
     def get_by_uuid(self, op_uuid: str) -> dict | None:
         """Return the normalised Operation for *op_uuid*, or ``None``."""
         with self._db() as conn:
+            self._ensure_schema(conn)
             row = conn.execute(
                 "SELECT * FROM operation WHERE uuid = ?", (op_uuid,)
             ).fetchone()
@@ -2333,6 +2348,7 @@ class OperationRepository:
         """
         now = datetime.now(timezone.utc).isoformat()
         with self._db() as conn:
+            self._ensure_schema(conn)
             conn.execute(
                 """
                 UPDATE operation SET

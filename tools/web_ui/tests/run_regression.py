@@ -21,6 +21,9 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "api": (
         "test_api_contract",
     ),
+    "api-workflow": (
+        "test_api_contract.TestAuthenticatedApiWorkflow",
+    ),
     "repository": (
         "test_repositories",
         "test_canonical_path",

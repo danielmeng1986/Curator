@@ -66,6 +66,7 @@ def load_app_config() -> dict:
 
 
 APP_CONFIG = load_app_config()
+AUTH_REGISTRATION_SECRET = os.environ.get("CURATOR_REGISTRATION_SECRET", "")
 
 # ---------------------------------------------------------------------------
 # DB helpers
@@ -510,6 +511,14 @@ class AppHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/auth/"):
+            try:
+                body = self._read_json_body()
+            except Exception:
+                self._send_error(400, "REQUEST_INVALID_JSON", "The request body contains invalid JSON.")
+                return
+            self._handle_auth_management_post(path, body)
+            return
         if path.startswith("/api/v1/"):
             legacy_path = self._versioned_path_to_legacy(path)
             if not self._authorize_versioned_api(legacy_path, "POST"):
@@ -521,6 +530,36 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_error(400, "REQUEST_INVALID_JSON", "The request body contains invalid JSON.")
             return
         self._handle_api_post(path, body)
+
+    def _handle_auth_management_post(self, path: str, body: dict) -> None:
+        """Loopback-only registration management, outside normal bearer auth."""
+        if self.client_address[0] not in {"127.0.0.1", "::1"}:
+            self._send_error(403, "AUTHORIZATION_LOOPBACK_REQUIRED", "Authentication management is available only on loopback.")
+            return
+        auth = svc.AuthenticationService(
+            repo.AuthRepository(open_db), registration_secret=AUTH_REGISTRATION_SECRET,
+            operation_service=svc.OperationService(repo.OperationRepository(open_db)),
+        )
+        try:
+            if path == "/api/auth/registrations":
+                registration = auth.request_registration(
+                    device_name=body.get("device_name", ""), device_identity=body.get("device_identity", ""),
+                    requested_role=body.get("requested_role", ""), requested_scopes=body.get("requested_scopes"),
+                    registration_proof=body.get("registration_proof", ""),
+                )
+                self._send_success(201, {"registration": registration})
+            elif re.match(r"^/api/auth/registrations/[^/]+/approve$", path):
+                registration_uuid = path.split("/")[4]
+                issued = auth.approve_registration(registration_uuid, approved_role=body.get("approved_role"), approved_scopes=body.get("approved_scopes"))
+                self._send_success(200, issued)
+            else:
+                self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
+        except svc.AuthenticationFailure as exc:
+            self._send_error(401, exc.code, str(exc))
+        except svc.AuthorizationFailure as exc:
+            self._send_error(403, exc.code, str(exc))
+        except (svc.ServiceConflict, ValueError) as exc:
+            self._send_error(409, getattr(exc, "code", "BUSINESS_CONFLICT"), str(exc))
 
     def do_PUT(self):
         parsed = urlparse(self.path)

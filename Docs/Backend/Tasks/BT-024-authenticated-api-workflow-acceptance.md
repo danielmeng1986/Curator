@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-024` — Status: `Proposed`
+`BT-024` — Status: `Complete`
 
 ## Title
 
@@ -58,4 +58,4 @@ Verify from a non-UI client perspective that an approved device can enter suppor
 
 ## Risks or Notes
 
-- If an implemented service workflow lacks a specified API entry point, report that separately as a surface-readiness gap rather than bypassing the contract in this task.
+- Registration and administrator approval use loopback-only `/api/auth/*` management endpoints. They deliberately remain outside ordinary bearer-token routes; protected business workflow entry remains `/api/v1`.

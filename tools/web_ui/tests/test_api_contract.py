@@ -738,5 +738,38 @@ class TestVersionedApiAuthorization(_TestServerBase):
         self.assertEqual(body["error"]["code"], "AUTHORIZATION_INSUFFICIENT_SCOPE")
 
 
+class TestAuthenticatedApiWorkflow(_TestServerBase):
+    """BT-024: loopback enrolment then protected import entry."""
+
+    def test_registration_approval_and_writer_import_preview(self):
+        import server as srv
+        with patch.object(srv, "AUTH_REGISTRATION_SECRET", "test-proof"):
+            status, body = self._post("/api/auth/registrations", {
+                "device_name": "workflow worker", "device_identity": "workflow-worker-1",
+                "requested_role": "writer", "requested_scopes": ["read", "write"],
+                "registration_proof": "test-proof",
+            })
+            self.assertEqual(201, status)
+            registration = body["data"]["registration"]
+            self.assertEqual("PendingApproval", registration["status"])
+            status, issued_body = self._post(f"/api/auth/registrations/{registration['uuid']}/approve", {})
+        self.assertEqual(200, status)
+        issued = issued_body["data"]
+        self.assertIn("token", issued)
+        self.assertNotIn("token_hash", issued["token_record"])
+        headers = {"Authorization": f"Bearer {issued['token']}"}
+        status, preview = self._post("/api/v1/import/preview", {"items": []}, headers)
+        self.assertEqual(200, status)
+        self.assertIn("preview", preview["data"])
+
+    def test_rejected_import_request_has_no_business_side_effect(self):
+        before = self._db.execute("SELECT COUNT(*) FROM album").fetchone()[0]
+        status, body = self._post("/api/v1/import/preview", {"items": []})
+        self.assertEqual(401, status)
+        self.assertEqual("AUTHENTICATION_MISSING_TOKEN", body["error"]["code"])
+        after = self._db.execute("SELECT COUNT(*) FROM album").fetchone()[0]
+        self.assertEqual(before, after)
+
+
 if __name__ == "__main__":
     unittest.main()
