@@ -43,12 +43,20 @@ Likely ADR topics include Backend database ownership, the Repository pattern, RE
 
 ### Current `server.py` responsibilities
 
-The current implementation is centred on two standalone HTTP-server modules:
+The current implementation is centred on the `apps/backend` Backend package
+and one retired historical module:
 
-- `workspace/curator_base_app/server.py` supports the earlier Normalize, Import, and Workspace Album pages.
-- `tools/web_ui/server.py` is the newer, broader Web UI backend for permanent Albums, Models, Studios, Statuses, Photos, Workspace Albums, direct import, backups, and rollback.
+- `apps/backend` is the authoritative Backend package for permanent Albums,
+  Models, Studios, Statuses, Photos, Workspace Albums, direct import, backups,
+  rollback, Services, Repositories, and the authenticated API.
+- `workspace/curator_base_app/server.py` supported the earlier Normalize,
+  Import, and Workspace Album pages.
 
-Both modules use Python's standard-library HTTP server and SQLite directly. The newer server is the practical reference for the current full UI; the earlier server is historical context rather than a workflow-migration requirement.
+The active Backend uses Python's standard-library HTTP server and SQLite
+through its Repository boundary. `tools/web_ui/server.py` is now only a
+compatibility launcher that delegates to `apps/backend`; its static files stay
+in place until the Web-client migration. The earlier base-app server is
+historical context rather than a workflow-migration requirement.
 
 `workspace/curator_base_app` is retired and its startup module deliberately refuses to run. Its routes and workflows are not migration requirements. Its source remains in the repository only as historical migration reference; it exposes no Backend entry point.
 

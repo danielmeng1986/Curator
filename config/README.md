@@ -5,6 +5,7 @@ configuration is created by copying an example without the `.example` suffix:
 
 ```text
 config/ai.toml.example -> config/ai.toml
+config/backend.example.json -> config/backend.json
 tools/web_ui/app_config.example.json -> tools/web_ui/app_config.json
 ```
 

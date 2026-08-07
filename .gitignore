@@ -7,6 +7,8 @@ __pycache__/
 # credentials, device tokens, model files, or machine-specific paths in Git.
 /config/*.toml
 !/config/*.toml.example
+/config/*.json
+!/config/*.json.example
 /tools/web_ui/app_config.json
 /workspace/curator_base_app/app_config.json
 .env

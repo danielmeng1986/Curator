@@ -5,10 +5,13 @@ Full-featured local web interface for Curator, implementing the spec from `Docs/
 ## Start
 
 ```bash
-python3 tools/web_ui/server.py
+python3 -m apps.backend
 ```
 
 Open **http://127.0.0.1:8080** in a browser.
+
+`python3 tools/web_ui/server.py` remains a temporary compatibility launcher;
+it delegates to the Backend while preserving the old local runtime paths.
 
 ## Features
 
@@ -23,7 +26,13 @@ Open **http://127.0.0.1:8080** in a browser.
 | Import | `#/import/albums` | Multi-step import from folders to permanent albums |
 | Statuses | `#/statuses` | Admin controlled-status list |
 
-## Configuration
+## Backend configuration
+
+The authoritative Backend reads `config/backend.json`; copy it from
+`config/backend.example.json` and set the local source/archive paths. Its
+runtime database, backups, and logs are under `var/` by default.
+
+## Transitional launcher configuration
 
 Copy `tools/web_ui/app_config.example.json` to the ignored local file
 `tools/web_ui/app_config.json`, then edit it:
@@ -36,9 +45,8 @@ Copy `tools/web_ui/app_config.example.json` to the ignored local file
 }
 ```
 
-This is a transitional configuration location. MT-002 and MT-003 move the
-Backend and Web client to their target application directories; runtime data
-then belongs under `var/`.
+This is a transitional configuration location used only by the compatibility
+launcher. MT-003 moves the Web client to its target application directory.
 
 ## Tech Stack
 

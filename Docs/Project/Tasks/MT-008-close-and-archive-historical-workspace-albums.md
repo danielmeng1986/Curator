@@ -79,8 +79,8 @@ traceability evidence.
   historical data, including repeat/resume and conflict cases.
 - Verify foreign keys, relationship uniqueness, canonical path uniqueness,
   row counts, and Operation links after each scenario.
-- Run `python3 tools/web_ui/tests/run_regression.py workflow-readiness` twice
-  and `python3 tools/web_ui/tests/run_regression.py all` successfully.
+- Run `python3 -m apps.backend.tests.run_regression workflow-readiness` twice
+  and `python3 -m apps.backend.tests.run_regression all` successfully.
 
 ## Risks or Notes
 

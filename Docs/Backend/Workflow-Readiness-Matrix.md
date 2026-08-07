@@ -5,7 +5,7 @@
 Run from the repository root without starting the Web UI:
 
 ```bash
-python3 tools/web_ui/tests/run_regression.py workflow-readiness
+python3 -m apps.backend.tests.run_regression workflow-readiness
 ```
 
 The command uses only disposable databases, filesystems, and an ephemeral

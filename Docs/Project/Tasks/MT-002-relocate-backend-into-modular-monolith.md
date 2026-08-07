@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`MT-002` — Status: `Proposed`
+`MT-002` — Status: `Complete`
 
 ## Title
 
@@ -35,9 +35,9 @@ preserving the tested `/api/v1` contract and a temporary compatibility launcher.
 
 ## Implementation Steps
 
-1. Move modules by layer, maintaining compatibility imports only where required.
-2. Move regression and workflow tests with the Backend test boundary.
-3. Make the new entry point authoritative; mark the old launcher as transitional.
+1. Move modules by layer, maintaining compatibility imports only where required. — Complete
+2. Move regression and workflow tests with the Backend test boundary. — Complete
+3. Make the new entry point authoritative; mark the old launcher as transitional. — Complete
 
 ## Acceptance Criteria
 
@@ -47,8 +47,8 @@ preserving the tested `/api/v1` contract and a temporary compatibility launcher.
 
 ## Verification
 
-- Run API, workflow-readiness, and full regression suites through the new entry point.
-- Confirm the compatibility launcher delegates rather than duplicates application logic.
+- Run API, workflow-readiness twice, and full regression through the new entry point. — Complete
+- Confirm the compatibility launcher delegates rather than duplicates application logic. — Complete
 
 ## Risks or Notes
 

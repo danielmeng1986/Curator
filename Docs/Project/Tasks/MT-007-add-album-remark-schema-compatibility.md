@@ -64,7 +64,7 @@ the migration process and the target schema.
 
 - Run migration tests on a representative disposable pre-migration database,
   including a repeat run and schema integrity check.
-- Run `python3 tools/web_ui/tests/run_regression.py all` successfully.
+- Run `python3 -m apps.backend.tests.run_regression all` successfully.
 - Inspect the migration backup and the working tree before committing.
 
 ## Risks or Notes

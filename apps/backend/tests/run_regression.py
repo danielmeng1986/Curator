@@ -16,6 +16,8 @@ from pathlib import Path
 
 
 TEST_DIR = Path(__file__).resolve().parent
+BACKEND_DIR = TEST_DIR.parent
+REPO_ROOT = BACKEND_DIR.parents[1]
 
 GROUPS: dict[str, tuple[str, ...]] = {
     "api": (
@@ -101,8 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # Existing modules import siblings by filename, so make that import root
-    # explicit regardless of the directory from which this command is run.
+    # Existing focused tests load sibling modules by filename. Keep that
+    # compatibility while the authoritative package remains apps.backend.
+    sys.path.insert(0, str(REPO_ROOT))
+    sys.path.insert(0, str(BACKEND_DIR))
     sys.path.insert(0, str(TEST_DIR))
     result = unittest.TextTestRunner(verbosity=2).run(build_suite(args.group))
     return 0 if result.wasSuccessful() else 1

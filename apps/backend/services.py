@@ -22,8 +22,12 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import canonical_path as cpath
-import repositories as repo
+try:  # Package execution: python3 -m apps.backend
+    from . import canonical_path as cpath
+    from . import repositories as repo
+except ImportError:  # Focused test discovery still loads sibling modules directly.
+    import canonical_path as cpath
+    import repositories as repo
 
 # Import Action constants — passed by callers to ImportService.execute().
 IMPORT_ACTION_DATABASE_ONLY: str = "DATABASE_ONLY"

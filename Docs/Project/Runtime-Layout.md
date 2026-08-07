@@ -51,8 +51,9 @@ under `var/`, never beside the migration source.
 
 Migrations must state their preconditions, preserve existing data, be safe to
 identify as already applied, and include verification and recovery guidance.
-MT-002 supplies the Backend composition root and migration runner; MT-007 is
-the first planned schema change using this convention.
+MT-002 supplies the Backend composition root and establishes this source
+location; its migration runner is added when the first schema migration is
+implemented in MT-007.
 
 ## Fresh-clone setup
 
