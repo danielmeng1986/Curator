@@ -811,6 +811,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             snapshot_fn=create_db_snapshot,
             backup_log_fn=append_backup_log,
             change_log_fn=append_log,
+            operation_service=svc.OperationService(repo.OperationRepository(open_db)),
+            initiator=svc.OP_INITIATOR_WEB_UI,
         )
         preview = import_service.preview(items_in, archive_root, default_studio)
         self._send_success(200, {"preview": preview})
@@ -832,6 +834,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             snapshot_fn=create_db_snapshot,
             backup_log_fn=append_backup_log,
             change_log_fn=append_log,
+            operation_service=svc.OperationService(repo.OperationRepository(open_db)),
+            initiator=svc.OP_INITIATOR_WEB_UI,
         )
         result = import_service.execute(items_in, archive_root, default_studio)
         self._send_success(200, result)

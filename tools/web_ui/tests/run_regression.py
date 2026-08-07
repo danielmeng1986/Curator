@@ -57,6 +57,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "workflow": (
         "test_workflow_foundation",
+        "test_import_workflow_acceptance",
     ),
 }
 

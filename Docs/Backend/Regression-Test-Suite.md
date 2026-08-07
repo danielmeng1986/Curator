@@ -23,7 +23,7 @@ Use a focused group while working on one boundary:
 | Authentication | `python3 tools/web_ui/tests/run_regression.py authentication` | [Authentication](Specifications/Authentication.md) | Registration approval, token use, expiry, revocation, scope checks, and protected-route enforcement. |
 | Snapshots | `python3 tools/web_ui/tests/run_regression.py snapshots` | [Snapshot Specification](Specifications/Snapshot-Specification.md) | Risk classification, creation, restore safety, retention eligibility, and protected cleanup behavior. |
 | Operations | `python3 tools/web_ui/tests/run_regression.py operations` | [Operation Logging](Specifications/Operation-Logging.md) | Durable operation creation, status transitions, error and repair context, and workflow linkage. |
-| Workflow | `python3 tools/web_ui/tests/run_regression.py workflow` | [Testing Strategy](Testing-Strategy.md) | UI-independent workflow sandbox isolation, durable-state assertions, and repeatable scenario execution. |
+| Workflow | `python3 tools/web_ui/tests/run_regression.py workflow` | [Testing Strategy](Testing-Strategy.md) and applicable workflow Specifications | UI-independent workflow sandbox isolation, durable-state assertions, repeatable scenarios, and completed workflow acceptance coverage. |
 
 `all` uses test discovery to run every Backend test module, including the
 workflow acceptance foundation and focused import, repair, issue, and

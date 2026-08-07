@@ -250,6 +250,29 @@ class WorkflowSandbox:
     def assert_operation(self, operation_uuid: str, **expected: object) -> dict:
         return self._assert_row("operation", operation_uuid, expected)
 
+    def assert_operation_for_import(
+        self, target_import_uuid: str, **expected: object
+    ) -> dict:
+        """Return the unique durable Operation associated with an import."""
+        conn = self.connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM operation WHERE import_uuid = ?", (target_import_uuid,)
+            ).fetchall()
+        finally:
+            conn.close()
+        if len(rows) != 1:
+            raise AssertionError(
+                f"Expected one Operation for import {target_import_uuid!r}, found {len(rows)}."
+            )
+        result = dict(rows[0])
+        for field, value in expected.items():
+            if result.get(field) != value:
+                raise AssertionError(
+                    f"Expected operation.{field}={value!r}, got {result.get(field)!r}."
+                )
+        return result
+
     def assert_issue(self, issue_uuid: str, **expected: object) -> dict:
         return self._assert_row("issue", issue_uuid, expected)
 

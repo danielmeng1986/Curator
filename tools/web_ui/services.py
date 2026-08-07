@@ -653,6 +653,19 @@ def build_archive_path(model_name: str, studio_name: str, album_name: str) -> st
     return cpath.build_canonical_path(model_name, studio_name, album_name)
 
 
+def _source_is_canonical_destination(source_path: str, destination: Path) -> bool:
+    """Return whether an existing source directory is already the destination.
+
+    This is the narrow Import Workflow exception to the normal occupied-path
+    rejection: a source Album already located at its own computed canonical
+    destination needs metadata persistence only, not a filesystem operation.
+    """
+    if not source_path:
+        return False
+    source = Path(source_path)
+    return source.is_dir() and source.resolve() == destination.resolve()
+
+
 # ---------------------------------------------------------------------------
 # ImportService
 # ---------------------------------------------------------------------------
@@ -666,11 +679,15 @@ class ImportService:
         snapshot_fn,
         backup_log_fn,
         change_log_fn,
+        operation_service,
+        initiator: str = "CLI",
     ):
         self._repo = import_repo
         self._snapshot = snapshot_fn
         self._backup_log = backup_log_fn
         self._change_log = change_log_fn
+        self._operations = operation_service
+        self._initiator = initiator
 
     def preview(
         self, items: list, archive_root: str, default_studio: str
@@ -783,7 +800,10 @@ class ImportService:
 
             full_path = Path(archive_root) / n["expected_path"]
             path_exists = full_path.exists()
-            if path_exists:
+            source_at_canonical_destination = _source_is_canonical_destination(
+                n["source_path"], full_path
+            )
+            if path_exists and not source_at_canonical_destination:
                 errors.append(
                     {
                         "code": "PATH_EXISTS",
@@ -804,6 +824,11 @@ class ImportService:
                     "album_exists": lookup["album_exists"],
                     "album_id": lookup["album_id"],
                     "path_exists": path_exists,
+                    "source_at_canonical_destination": source_at_canonical_destination,
+                    "effective_action": (
+                        IMPORT_ACTION_DATABASE_ONLY
+                        if source_at_canonical_destination else None
+                    ),
                     "can_import": not errors,
                 }
             )
@@ -871,15 +896,38 @@ class ImportService:
         """
         import_uuid = str(_uuid_mod.uuid4())
         now = _utc_now_iso()
+        operation = self._operations.begin(
+            "import",
+            self._initiator,
+            summary="Import execution started.",
+            import_uuid=import_uuid,
+        )
+        operation_uuid = operation["uuid"]
 
         try:
             snap = self._snapshot("import")
             self._backup_log(
-                {"timestamp": now, "reason": "import", "ok": True, "snapshot": str(snap), "tag": ""}
+                {
+                    "timestamp": now,
+                    "reason": "import",
+                    "ok": True,
+                    "snapshot": str(snap),
+                    "tag": "",
+                    "operation_uuid": operation_uuid,
+                    "import_uuid": import_uuid,
+                }
             )
         except Exception as ex:
             self._backup_log(
-                {"timestamp": now, "reason": "import", "ok": False, "error": str(ex), "tag": ""}
+                {
+                    "timestamp": now,
+                    "reason": "import",
+                    "ok": False,
+                    "error": str(ex),
+                    "tag": "",
+                    "operation_uuid": operation_uuid,
+                    "import_uuid": import_uuid,
+                }
             )
 
         results = []
@@ -887,6 +935,8 @@ class ImportService:
         skipped = 0
         errors = 0
         needs_repair_count = 0
+        first_execution_error: str | None = None
+        first_needs_repair_error: str | None = None
 
         for item in items:
             folder_name = item.get("folder_name", "")
@@ -938,7 +988,7 @@ class ImportService:
                 # DATABASE_ONLY automatically regardless of the requested action.
                 # ----------------------------------------------------------
                 src = Path(source_path) if source_path else None
-                if src and src.resolve() == full_dest.resolve():
+                if _source_is_canonical_destination(source_path, full_dest):
                     effective_action = IMPORT_ACTION_DATABASE_ONLY
                 else:
                     effective_action = import_action
@@ -977,10 +1027,13 @@ class ImportService:
                     result["needs_repair"] = True
                     result["error"] = str(fs_ex)
                     needs_repair_count += 1
+                    if first_needs_repair_error is None:
+                        first_needs_repair_error = str(fs_ex)
                     self._change_log(
                         {
                             "timestamp": item_now,
                             "action": "import_album",
+                            "operation_uuid": operation_uuid,
                             "import_uuid": import_uuid,
                             "album_id": album_id,
                             "model_name": model_name,
@@ -1000,6 +1053,7 @@ class ImportService:
                     {
                         "timestamp": item_now,
                         "action": "import_album",
+                        "operation_uuid": operation_uuid,
                         "import_uuid": import_uuid,
                         "album_id": album_id,
                         "model_name": model_name,
@@ -1013,10 +1067,44 @@ class ImportService:
             except Exception as ex:
                 result["error"] = str(ex)
                 errors += 1
+                if first_execution_error is None:
+                    first_execution_error = str(ex)
 
             results.append(result)
 
+        if needs_repair_count:
+            self._operations.mark_needs_repair(
+                operation_uuid,
+                "filesystem",
+                "filesystem.write-failed",
+                summary="Import execution requires filesystem repair.",
+                error_details=first_needs_repair_error,
+                repair_state="NeedsRepair",
+                recovery_context=(
+                    f"Review filesystem repair for import {import_uuid}; "
+                    f"{needs_repair_count} item(s) require verification."
+                ),
+            )
+        elif errors:
+            self._operations.fail(
+                operation_uuid,
+                "database",
+                "database.transaction-failed",
+                summary="Import execution failed before a verified outcome.",
+                error_details=first_execution_error,
+                recovery_context=(
+                    f"Review failed items for import {import_uuid}; "
+                    f"{errors} item(s) did not complete."
+                ),
+            )
+        else:
+            self._operations.succeed(
+                operation_uuid,
+                summary="Import execution completed successfully.",
+            )
+
         return {
+            "operation_uuid": operation_uuid,
             "import_uuid": import_uuid,
             "results": results,
             "summary": {

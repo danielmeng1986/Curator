@@ -728,6 +728,9 @@ class TestImportServicePreview(unittest.TestCase):
             snapshot_fn=lambda *a, **kw: MagicMock(),
             backup_log_fn=lambda _: None,
             change_log_fn=lambda _: None,
+            operation_service=svc.OperationService(
+                repo.OperationRepository(_db_factory(self.conn))
+            ),
         )
 
     def tearDown(self):
@@ -802,6 +805,9 @@ class TestImportServiceExecute(unittest.TestCase):
             snapshot_fn=lambda *a, **kw: self.snapshot_mock,
             backup_log_fn=self.backup_calls.append,
             change_log_fn=self.log_calls.append,
+            operation_service=svc.OperationService(
+                repo.OperationRepository(_db_factory(self.conn))
+            ),
         )
 
     def tearDown(self):
@@ -868,6 +874,24 @@ class TestImportServiceExecute(unittest.TestCase):
         self.assertEqual(entry["action"], "import_album")
         self.assertTrue(entry["success"])
 
+    def test_execute_creates_succeeded_operation_linked_to_import_and_logs(self):
+        result = self.service.execute(
+            [{"model_name": "OperationModel", "album_name": "OperationAlbum", "studio_name": "S"}],
+            "/no-such-root",
+            "S",
+            import_action=svc.IMPORT_ACTION_DATABASE_ONLY,
+        )
+
+        operation = self.conn.execute(
+            "SELECT * FROM operation WHERE import_uuid = ?", (result["import_uuid"],)
+        ).fetchone()
+        self.assertIsNotNone(operation)
+        self.assertNotEqual(operation["uuid"], result["import_uuid"])
+        self.assertEqual(operation["operation_type"], "import")
+        self.assertEqual(operation["status"], svc.OP_STATUS_SUCCEEDED)
+        self.assertEqual(self.log_calls[0]["operation_uuid"], operation["uuid"])
+        self.assertEqual(self.backup_calls[0]["operation_uuid"], operation["uuid"])
+
 
 # ---------------------------------------------------------------------------
 # ImportService.execute — filesystem actions and NeedsRepair (BT-009)
@@ -886,6 +910,9 @@ class TestImportServiceExecuteActions(unittest.TestCase):
             snapshot_fn=lambda *a, **kw: MagicMock(),
             backup_log_fn=self.backup_calls.append,
             change_log_fn=self.log_calls.append,
+            operation_service=svc.OperationService(
+                repo.OperationRepository(_db_factory(self.conn))
+            ),
         )
 
     def tearDown(self):
@@ -1067,6 +1094,8 @@ class TestImportServiceExecuteActions(unittest.TestCase):
             expected = cp.build_canonical_path("Alice", "S", "AtDest")
             dest_dir = os.path.join(tmpdir, expected)
             os.makedirs(dest_dir)
+            source_file = os.path.join(dest_dir, "cover.jpg")
+            Path(source_file).touch()
             items = [
                 {"model_name": "Alice", "album_name": "AtDest", "studio_name": "S",
                  "source_path": dest_dir}   # source IS the destination
@@ -1075,6 +1104,7 @@ class TestImportServiceExecuteActions(unittest.TestCase):
                 items, tmpdir, "S",
                 import_action=svc.IMPORT_ACTION_MOVE,
             )
+            self.assertTrue(os.path.isfile(source_file))
         item_result = result["results"][0]
         self.assertEqual(item_result["effective_action"], "DATABASE_ONLY")
         self.assertTrue(item_result["ok"])
@@ -1097,6 +1127,41 @@ class TestImportServiceExecuteActions(unittest.TestCase):
         self.assertTrue(item_result["needs_repair"])
         self.assertFalse(item_result["ok"])
         self.assertIsNotNone(item_result["error"])
+        operation = self.conn.execute(
+            "SELECT * FROM operation WHERE import_uuid = ?", (result["import_uuid"],)
+        ).fetchone()
+        self.assertEqual(operation["status"], svc.OP_STATUS_NEEDS_REPAIR)
+        self.assertEqual(operation["error_category"], "filesystem")
+        self.assertEqual(operation["error_code"], "filesystem.write-failed")
+        self.assertEqual(operation["repair_state"], "NeedsRepair")
+        self.assertIn(result["import_uuid"], operation["recovery_context"])
+
+    def test_persistence_failure_records_failed_operation(self):
+        failing_repo = MagicMock()
+        failing_repo.create_item.side_effect = sqlite3.OperationalError("database unavailable")
+        service = svc.ImportService(
+            import_repo=failing_repo,
+            snapshot_fn=lambda *a, **kw: MagicMock(),
+            backup_log_fn=lambda _: None,
+            change_log_fn=lambda _: None,
+            operation_service=svc.OperationService(
+                repo.OperationRepository(_db_factory(self.conn))
+            ),
+        )
+
+        result = service.execute(
+            [{"model_name": "Broken", "album_name": "Write", "studio_name": "S"}],
+            "/no-such-root",
+            "S",
+        )
+
+        operation = self.conn.execute(
+            "SELECT * FROM operation WHERE import_uuid = ?", (result["import_uuid"],)
+        ).fetchone()
+        self.assertEqual(result["summary"]["errors"], 1)
+        self.assertEqual(operation["status"], svc.OP_STATUS_FAILED)
+        self.assertEqual(operation["error_category"], "database")
+        self.assertEqual(operation["error_code"], "database.transaction-failed")
 
     def test_filesystem_failure_db_record_still_exists(self):
         """DB record must persist even when the filesystem step fails."""
@@ -1921,6 +1986,9 @@ class TestImportServicePreviewValidation(unittest.TestCase):
             snapshot_fn=lambda *a, **kw: None,
             backup_log_fn=lambda _: None,
             change_log_fn=lambda _: None,
+            operation_service=svc.OperationService(
+                repo.OperationRepository(_db_factory(self.conn))
+            ),
         )
 
     def tearDown(self):
@@ -2005,6 +2073,54 @@ class TestImportServicePreviewValidation(unittest.TestCase):
             ]
             result = self.service.preview(items, tmpdir, "MetArt")
         self.assertFalse(result["items"][0]["can_import"])
+
+    def test_source_already_at_canonical_destination_is_importable(self):
+        import tempfile
+        import canonical_path as cp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            expected = cp.build_canonical_path("Alice", "MetArt", "AlreadyHome")
+            source = Path(tmpdir) / expected
+            source.mkdir(parents=True)
+            items = [{
+                "model_name": "Alice",
+                "album_name": "AlreadyHome",
+                "studio_name": "MetArt",
+                "source_path": str(source),
+            }]
+            result = self.service.preview(items, tmpdir, "MetArt")
+
+        item = result["items"][0]
+        codes = [e["code"] for e in item["validation_errors"]]
+        self.assertTrue(item["path_exists"])
+        self.assertTrue(item["source_at_canonical_destination"])
+        self.assertEqual(item["effective_action"], svc.IMPORT_ACTION_DATABASE_ONLY)
+        self.assertNotIn("PATH_EXISTS", codes)
+        self.assertTrue(item["can_import"])
+
+    def test_existing_destination_different_from_source_remains_conflict(self):
+        import tempfile
+        import canonical_path as cp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            expected = cp.build_canonical_path("Alice", "MetArt", "Occupied")
+            destination = Path(tmpdir) / expected
+            destination.mkdir(parents=True)
+            source = Path(tmpdir) / "unmanaged-source"
+            source.mkdir()
+            items = [{
+                "model_name": "Alice",
+                "album_name": "Occupied",
+                "studio_name": "MetArt",
+                "source_path": str(source),
+            }]
+            result = self.service.preview(items, tmpdir, "MetArt")
+
+        item = result["items"][0]
+        codes = [e["code"] for e in item["validation_errors"]]
+        self.assertFalse(item["source_at_canonical_destination"])
+        self.assertIn("PATH_EXISTS", codes)
+        self.assertFalse(item["can_import"])
 
     # --- DUPLICATE_IN_BATCH ---
 
