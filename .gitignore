@@ -3,6 +3,34 @@ __pycache__/
 *.py[cod]
 *$py.class
 .DS_Store
+# Local configuration is copied from committed examples and never contains
+# credentials, device tokens, model files, or machine-specific paths in Git.
+/config/*.toml
+!/config/*.toml.example
+/tools/web_ui/app_config.json
+/workspace/curator_base_app/app_config.json
+.env
+.env.*
+!.env.example
+
+# Target runtime layout. Keep directory markers only; all runtime contents
+# (database files, WAL files, backups, logs, generated output, and tokens)
+# remain local.
+/var/*
+!/var/data/
+/var/data/*
+!/var/data/.gitkeep
+!/var/backups/
+/var/backups/*
+!/var/backups/.gitkeep
+!/var/logs/
+/var/logs/*
+!/var/logs/.gitkeep
+!/var/outputs/
+/var/outputs/*
+!/var/outputs/.gitkeep
+
+# Legacy runtime location retained until MT-005. Only its marker is tracked.
 database/*
 workspace/curator_base_app/backups/*
 workspace/curator_base_app/logs/*

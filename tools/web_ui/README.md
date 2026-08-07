@@ -25,7 +25,8 @@ Open **http://127.0.0.1:8080** in a browser.
 
 ## Configuration
 
-Edit `tools/web_ui/app_config.json`:
+Copy `tools/web_ui/app_config.example.json` to the ignored local file
+`tools/web_ui/app_config.json`, then edit it:
 
 ```json
 {
@@ -34,6 +35,10 @@ Edit `tools/web_ui/app_config.json`:
   "default_import_studio": "MetArt"
 }
 ```
+
+This is a transitional configuration location. MT-002 and MT-003 move the
+Backend and Web client to their target application directories; runtime data
+then belongs under `var/`.
 
 ## Tech Stack
 

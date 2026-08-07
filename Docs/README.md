@@ -106,6 +106,7 @@ The documentation is organized into several independent chapters.
 | 04-Data-Model.md | Core concepts and data model |
 | 05-AI.md | AI architecture and responsibilities |
 | 06-Roadmap.md | Development roadmap |
+| Project/Runtime-Layout.md | Versioned source, local configuration, and runtime-data boundaries |
 | Project/Tasks/ | Cross-cutting repository migration tasks |
 | ADR/ | Architecture Decision Records |
 

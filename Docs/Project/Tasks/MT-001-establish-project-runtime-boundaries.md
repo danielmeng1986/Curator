@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`MT-001` — Status: `Proposed`
+`MT-001` — Status: `Complete`
 
 ## Title
 
@@ -36,9 +36,9 @@ source/configuration and untracked runtime data before moving application code.
 
 ## Implementation Steps
 
-1. Inventory current runtime files and validate each destination before any move.
-2. Create target directories, ignore rules, config examples, and migration/schema convention.
-3. Update startup documentation to explain local runtime configuration.
+1. Inventory current runtime files and validate each destination before any move. — Complete
+2. Create target directories, ignore rules, config examples, and migration/schema convention. — Complete
+3. Update startup documentation to explain local runtime configuration. — Complete
 
 ## Acceptance Criteria
 
@@ -48,9 +48,11 @@ source/configuration and untracked runtime data before moving application code.
 
 ## Verification
 
-- Inspect Git status after generating representative runtime files.
-- Run existing Backend regression suites against disposable paths.
+- Inspect Git status after generating representative runtime files. — Complete
+- Run the existing Backend regression suite against disposable paths. — Complete
 
 ## Risks or Notes
 
-- Copy or move live database data only with an explicit backup and rollback plan.
+- No live database, backup, output, or runtime configuration was moved or
+  modified. Later tasks move active code and data only with an explicit backup
+  and rollback plan.

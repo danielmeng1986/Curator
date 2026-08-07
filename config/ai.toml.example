@@ -1,11 +1,13 @@
-[llama]
+# Copy to config/ai.toml and replace every local path before using legacy AI
+# scripts. Do not store credentials, access tokens, model files, or local
+# machine paths in a tracked file.
 
-cli = "/Volumes/4TB-SSD/AI_Project/llama-b9534/llama-cli"
+[llama]
+cli = "/absolute/path/to/llama-cli"
 hf_repo = "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF"
 hf_file = "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
 
 [describe_album]
-
 default_sample_count = 8
 
 [vision]
