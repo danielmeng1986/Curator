@@ -7,8 +7,10 @@ and Import Action; Operation Logging / import execution requirements.
 from __future__ import annotations
 
 import sys
+import shutil
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -26,14 +28,19 @@ class TestImportHappyPathWorkflowAcceptance(unittest.TestCase):
         self.backup_log: list[dict] = []
         self.change_log: list[dict] = []
         self.snapshot_paths: list[Path] = []
+        self.operation_service = svc.OperationService(
+            repo.OperationRepository(self.sandbox.db_factory())
+        )
         self.service = svc.ImportService(
             repo.ImportRepository(self.sandbox.db_factory()),
             snapshot_fn=self._create_snapshot,
             backup_log_fn=self.backup_log.append,
             change_log_fn=self.change_log.append,
-            operation_service=svc.OperationService(
-                repo.OperationRepository(self.sandbox.db_factory())
-            ),
+            operation_service=self.operation_service,
+        )
+        self.repair_service = svc.RepairService(
+            repo.RepairRepository(self.sandbox.db_factory()),
+            repo.IssueRepository(self.sandbox.db_factory()),
         )
 
     def tearDown(self):
@@ -159,3 +166,86 @@ class TestImportHappyPathWorkflowAcceptance(unittest.TestCase):
         self.assertEqual(item["effective_action"], svc.IMPORT_ACTION_DATABASE_ONLY)
         self.sandbox.assert_row_count("album", 1)
         self.assertTrue((source / "cover.jpg").is_file())
+
+    def test_bt020_import_filesystem_failure_repairs_to_verified_consistency(self):
+        """Import/Repair: a failed MOVE keeps history and repairs by verification."""
+        source = self.sandbox.create_source_directory("repair-source", ["cover.jpg"])
+        candidate = self._candidate(source)
+        preview = self.service.preview(
+            [candidate], str(self.sandbox.archive_root), "Default Studio"
+        )
+        self.assertTrue(preview["items"][0]["can_import"])
+
+        # The failure is injected at the filesystem adapter boundary after the
+        # repository has persisted the Album and before filesystem verification.
+        with patch.object(svc.shutil, "move", side_effect=OSError("injected move failure")):
+            failed_import = self.service.execute(
+                [candidate],
+                str(self.sandbox.archive_root),
+                "Default Studio",
+                import_action=svc.IMPORT_ACTION_MOVE,
+            )
+
+        item = failed_import["results"][0]
+        self.assertTrue(item["needs_repair"])
+        self.assertFalse(item["ok"])
+        original_operation = self.sandbox.assert_operation_for_import(
+            failed_import["import_uuid"],
+            status=svc.OP_STATUS_NEEDS_REPAIR,
+            error_category="filesystem",
+            error_code="filesystem.write-failed",
+            repair_state="NeedsRepair",
+        )
+        conn = self.sandbox.connect()
+        try:
+            album = conn.execute(
+                "SELECT uuid, path FROM album WHERE id = ?", (item["album_id"],)
+            ).fetchone()
+        finally:
+            conn.close()
+
+        handoff = self.repair_service.detect(
+            original_operation["uuid"],
+            album["uuid"],
+            album["path"],
+            category=svc.REPAIR_CATEGORY_AUTOMATIC,
+            failure_reason=item["error"],
+        )
+        repair = handoff["repair"]
+        issue = handoff["issue"]
+        self.assertEqual(repair["operation_uuid"], original_operation["uuid"])
+        self.assertEqual(issue["affected_operation"], original_operation["uuid"])
+
+        repair_operation = self.operation_service.begin(
+            "repair",
+            svc.OP_INITIATOR_CLI,
+            repair_uuid=repair["uuid"],
+            related_operation_uuid=original_operation["uuid"],
+            entity_uuid=album["uuid"],
+            summary="Retry failed import move.",
+        )
+        destination = self.sandbox.path_under(self.sandbox.archive_root, album["path"])
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(destination))
+        self.repair_service.start_repair(repair["uuid"])
+        self.repair_service.complete_action(repair["uuid"])
+        resolved = self.repair_service.verify(
+            repair["uuid"], passed=True, result="Canonical path and directory verified."
+        )
+        self.operation_service.succeed(
+            repair_operation["uuid"], summary="Import filesystem repair verified."
+        )
+
+        self.assertEqual(resolved["state"], svc.REPAIR_STATE_RESOLVED)
+        self.sandbox.assert_path_exists(
+            self.sandbox.archive_root, f"{album['path']}/cover.jpg"
+        )
+        self.sandbox.assert_operation(
+            original_operation["uuid"], status=svc.OP_STATUS_NEEDS_REPAIR
+        )
+        self.sandbox.assert_operation(
+            repair_operation["uuid"],
+            status=svc.OP_STATUS_SUCCEEDED,
+            repair_uuid=repair["uuid"],
+            related_operation_uuid=original_operation["uuid"],
+        )
