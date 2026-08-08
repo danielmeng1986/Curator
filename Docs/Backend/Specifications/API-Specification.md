@@ -78,6 +78,35 @@ Collection responses that require filtering, sorting, aggregation, or pagination
 
 The API adapter does not independently decide snapshots. It exposes the Service outcome, including any Operation identifier, snapshot reference, pending repair, or required confirmation. Services apply the policies in the Operation Logging, Snapshot, Repair, and Import Specifications.
 
+## Album management contracts
+
+`GET /api/v1/albums` supports composable `q`, `studio_id`, `status_id`,
+`model_id`, `rating_min`, `rating_max`, `capture_date_from`, `capture_date_to`,
+`publish_date_from`, `publish_date_to`, `sort`, `limit`, and `offset` query
+parameters. Dates use `YYYY-MM-DD`; an invalid or inverted range is a `400`
+request error. Free-text search covers Album title and description, Studio,
+location, scene, and linked Model display/primary names.
+
+Album create/update accepts Album fields plus complete `models` and `relations`
+sets at the service transaction boundary. Relationship target identifiers must
+exist. A Model may occur once per Album, an Album cannot relate to itself, and
+each `(related_album_id, relation_type)` pair is unique within the Album.
+Malformed or missing targets return structured `400`; duplicate and self
+relationships return structured `409`. Persistence integrity failures must not
+be exposed as generic `500` errors.
+
+`POST /api/v1/albums/batch/preview` accepts `ids`, `changes`, and an explicit
+`overwrite_non_empty` policy. Supported changes are Studio, Status, rating,
+description, scene, location, capture/publish dates, and remark. Preview is a
+zero-write operation returning per-Album consequences, aggregate eligibility,
+and a signed, short-lived `preview_token` bound to Album versions and the
+reviewed overwrite policy.
+
+`POST /api/v1/albums/batch/execute` accepts only that `preview_token`. It
+atomically rejects expired, invalid, replayed-after-change, or stale previews
+with `409`; it never partially applies the batch. Success returns per-Album
+outcomes, an aggregate summary, and the durable batch Operation identifier.
+
 ## Future extensions
 
 - Route/resource catalogs can be added without changing the shared contract.

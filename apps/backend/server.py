@@ -5,6 +5,7 @@ import re
 import shutil
 import sqlite3
 import socket
+import secrets
 import sys
 import threading
 import uuid
@@ -74,6 +75,7 @@ def load_app_config() -> dict:
 
 APP_CONFIG = load_app_config()
 AUTH_REGISTRATION_SECRET = os.environ.get("CURATOR_REGISTRATION_SECRET", "")
+ALBUM_BATCH_PREVIEW_SECRET = secrets.token_bytes(32)
 
 # ---------------------------------------------------------------------------
 # DB helpers
@@ -655,6 +657,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._send_success(200, {"principal": self._principal})
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
+        except ValueError as exc:
+            self._send_error(400, "REQUEST_INVALID", str(exc))
         except Exception:
             self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 
@@ -713,6 +717,23 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, result)
 
     def _get_albums(self, qs: dict):
+        date_filters = {
+            name: qs.get(name, [""])[0].strip()
+            for name in (
+                "capture_date_from", "capture_date_to",
+                "publish_date_from", "publish_date_to",
+            )
+        }
+        for name, value in date_filters.items():
+            if value:
+                try:
+                    datetime.strptime(value, "%Y-%m-%d")
+                except ValueError as exc:
+                    raise ValueError(f"{name} must use YYYY-MM-DD format.") from exc
+        for prefix in ("capture_date", "publish_date"):
+            if date_filters[f"{prefix}_from"] and date_filters[f"{prefix}_to"] \
+                    and date_filters[f"{prefix}_from"] > date_filters[f"{prefix}_to"]:
+                raise ValueError(f"{prefix}_from must not be later than {prefix}_to.")
         album_repo = repo.AlbumRepository(open_db)
         rows, total = album_repo.search(
             q=qs.get("q", [""])[0].strip(),
@@ -721,6 +742,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             model_id=qs.get("model_id", [""])[0].strip(),
             rating_min=qs.get("rating_min", [""])[0].strip(),
             rating_max=qs.get("rating_max", [""])[0].strip(),
+            **date_filters,
             sort=qs.get("sort", ["updated_at"])[0].strip(),
             limit=int(qs.get("limit", ["50"])[0]),
             offset=int(qs.get("offset", ["0"])[0]),
@@ -807,6 +829,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._post_studio(body)
             elif path == "/api/albums":
                 self._post_album(body)
+            elif path == "/api/albums/batch/preview":
+                self._post_album_batch_preview(body)
+            elif path == "/api/albums/batch/execute":
+                self._post_album_batch_execute(body)
             elif re.match(r"^/api/albums/\d+/models$", path):
                 album_id = int(path.split("/")[3])
                 self._post_album_model(album_id, body)
@@ -834,6 +860,14 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._post_token_renewal(body)
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
+        except ValueError as exc:
+            self._send_error(400, "REQUEST_INVALID", str(exc))
+        except svc.ServiceNotFound as exc:
+            self._send_error(404, "NOT_FOUND", str(exc))
+        except svc.ServiceConflict as exc:
+            self._send_error(409, exc.code, str(exc), details=exc.details)
+        except sqlite3.IntegrityError:
+            self._send_error(409, "BUSINESS_CONFLICT", "The requested write conflicts with current data.")
         except Exception:
             self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 
@@ -904,6 +938,27 @@ class AppHandler(SimpleHTTPRequestHandler):
         relations = body.get("relations", [])
         album_id = album_service.create(body, models, relations)
         self._send_success(201, {"id": album_id})
+
+    def _album_service(self) -> svc.AlbumService:
+        return svc.AlbumService(
+            album_repo=repo.AlbumRepository(open_db), log_fn=append_log,
+            preview_secret=ALBUM_BATCH_PREVIEW_SECRET,
+            operation_service=svc.OperationService(repo.OperationRepository(open_db)),
+            initiator=svc.OP_INITIATOR_WEB_UI,
+        )
+
+    def _post_album_batch_preview(self, body: dict):
+        preview = self._album_service().preview_batch(
+            body.get("ids", []), body.get("changes", {}),
+            overwrite_non_empty=body.get("overwrite_non_empty", False),
+        )
+        self._send_success(200, {"preview": preview})
+
+    def _post_album_batch_execute(self, body: dict):
+        token = body.get("preview_token", "")
+        if not token:
+            raise ValueError("The preview_token field is required.")
+        self._send_success(200, {"result": self._album_service().execute_batch(token)})
 
     def _post_album_model(self, album_id: int, body: dict):
         am_repo = repo.AlbumModelRepository(open_db)
@@ -1069,6 +1124,14 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._put_workspace_album(wa_id, body)
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
+        except ValueError as exc:
+            self._send_error(400, "REQUEST_INVALID", str(exc))
+        except svc.ServiceNotFound as exc:
+            self._send_error(404, "NOT_FOUND", str(exc))
+        except svc.ServiceConflict as exc:
+            self._send_error(409, exc.code, str(exc), details=exc.details)
+        except sqlite3.IntegrityError:
+            self._send_error(409, "BUSINESS_CONFLICT", "The requested write conflicts with current data.")
         except Exception:
             self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 

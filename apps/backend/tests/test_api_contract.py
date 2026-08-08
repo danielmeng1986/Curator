@@ -766,6 +766,71 @@ class TestVersionedApiAuthorization(_TestServerBase):
         self.assertEqual(status, 409)
         self.assertEqual(duplicate["error"]["code"], "BUSINESS_CONFLICT")
 
+    def test_album_batch_preview_execute_and_stale_contract(self):
+        issued = self._issue(role="writer")
+        headers = self._bearer(issued)
+        marker = self._db.execute("SELECT COUNT(*) FROM album").fetchone()[0]
+        self._db.execute(
+            "INSERT INTO album (uuid, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (f"batch-{marker}-1", f"Batch {marker} One", "2024-01-01", "2024-01-01"),
+        )
+        first = self._db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        self._db.execute(
+            "INSERT INTO album (uuid, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (f"batch-{marker}-2", f"Batch {marker} Two", "2024-01-01", "2024-01-01"),
+        )
+        second = self._db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        self._db.commit()
+        status, body = self._post(
+            "/api/v1/albums/batch/preview",
+            {"ids": [first, second], "changes": {"rating": 4}}, headers,
+        )
+        self.assertEqual(status, 200)
+        preview = body["data"]["preview"]
+        self.assertEqual(preview["summary"]["eligible"], 2)
+        self.assertEqual(
+            self._db.execute("SELECT COUNT(*) FROM album WHERE rating = 4").fetchone()[0], 0
+        )
+        status, executed = self._post(
+            "/api/v1/albums/batch/execute", {"preview_token": preview["preview_token"]}, headers,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(executed["data"]["result"]["summary"]["succeeded"], 2)
+        self.assertIsNotNone(executed["data"]["result"]["operation_uuid"])
+
+        status, stale_preview = self._post(
+            "/api/v1/albums/batch/preview",
+            {"ids": [first, second], "changes": {"rating": 5}, "overwrite_non_empty": True}, headers,
+        )
+        self.assertEqual(status, 200)
+        self._db.execute("UPDATE album SET updated_at = '2030-01-01' WHERE id = ?", (second,))
+        self._db.commit()
+        status, stale = self._post(
+            "/api/v1/albums/batch/execute",
+            {"preview_token": stale_preview["data"]["preview"]["preview_token"]}, headers,
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(stale["error"]["code"], "ALBUM_BATCH_STALE")
+        self.assertEqual(self._db.execute("SELECT rating FROM album WHERE id = ?", (first,)).fetchone()[0], 4)
+
+    def test_album_relationship_errors_are_structured(self):
+        issued = self._issue(role="writer")
+        status, body = self._post(
+            "/api/v1/albums",
+            {"title": "Invalid relationship", "models": [{"model_id": 999999}]},
+            self._bearer(issued),
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "REQUEST_INVALID")
+
+        status, body = self._post(
+            "/api/v1/albums",
+            {"title": "Duplicate relationship", "models": [{"model_id": 1}, {"model_id": 1}]},
+            self._bearer(issued),
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(body["error"]["code"], "ALBUM_MODEL_DUPLICATE")
+
 
 class TestAuthenticatedApiWorkflow(_TestServerBase):
     """BT-024: loopback enrolment then protected import entry."""

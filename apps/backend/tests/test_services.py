@@ -569,6 +569,70 @@ class TestAlbumServiceDelete(unittest.TestCase):
         self.assertTrue(self.log_calls[0]["success"])
 
 
+class TestAlbumServiceReadiness(unittest.TestCase):
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.conn.execute(
+            "INSERT INTO model (uuid, display_name, created_at, updated_at)"
+            " VALUES ('m1', 'Alice', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO album (uuid, title, description, created_at, updated_at)"
+            " VALUES ('a1', 'One', NULL, '2024-01-01', '2024-01-01')"
+        )
+        self.conn.execute(
+            "INSERT INTO album (uuid, title, description, created_at, updated_at)"
+            " VALUES ('a2', 'Two', 'Existing', '2024-01-01', '2024-01-01')"
+        )
+        self.conn.commit()
+        self.repo = repo.AlbumRepository(db_factory=_db_factory(self.conn))
+        self.service = svc.AlbumService(
+            self.repo, lambda entry: None, preview_secret=b"test-preview-secret"
+        )
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_relationship_validation_rejects_missing_duplicate_and_self(self):
+        with self.assertRaises(ValueError):
+            self.service.update(1, {"title": "One"}, [{"model_id": 99}], [])
+        with self.assertRaises(svc.ServiceConflict) as duplicate:
+            self.service.update(1, {"title": "One"}, [{"model_id": 1}, {"model_id": 1}], [])
+        self.assertEqual(duplicate.exception.code, "ALBUM_MODEL_DUPLICATE")
+        with self.assertRaises(svc.ServiceConflict) as self_relation:
+            self.service.update(1, {"title": "One"}, [], [{"related_album_id": 1}])
+        self.assertEqual(self_relation.exception.code, "ALBUM_RELATION_SELF")
+
+    def test_batch_preview_is_zero_write_and_blocks_unreviewed_overwrite(self):
+        preview = self.service.preview_batch([1, 2], {"description": "Reviewed"})
+        self.assertEqual(preview["summary"], {"total": 2, "eligible": 1, "blocked": 1})
+        values = self.conn.execute("SELECT description FROM album ORDER BY id").fetchall()
+        self.assertEqual([row[0] for row in values], [None, "Existing"])
+        with self.assertRaises(svc.ServiceConflict) as blocked:
+            self.service.execute_batch(preview["preview_token"])
+        self.assertEqual(blocked.exception.code, "ALBUM_BATCH_OVERWRITE_NOT_REVIEWED")
+
+    def test_reviewed_batch_executes_atomically(self):
+        preview = self.service.preview_batch(
+            [1, 2], {"description": "Reviewed"}, overwrite_non_empty=True
+        )
+        result = self.service.execute_batch(preview["preview_token"])
+        self.assertEqual(result["summary"], {"total": 2, "succeeded": 2, "failed": 0})
+        values = self.conn.execute("SELECT description FROM album ORDER BY id").fetchall()
+        self.assertEqual([row[0] for row in values], ["Reviewed", "Reviewed"])
+
+    def test_changed_album_rejects_batch_as_stale_without_partial_write(self):
+        preview = self.service.preview_batch([1, 2], {"rating": 5})
+        self.conn.execute("UPDATE album SET updated_at = '2025-01-01' WHERE id = 2")
+        self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict) as stale:
+            self.service.execute_batch(preview["preview_token"])
+        self.assertEqual(stale.exception.code, "ALBUM_BATCH_STALE")
+        ratings = self.conn.execute("SELECT rating FROM album ORDER BY id").fetchall()
+        self.assertEqual([row[0] for row in ratings], [None, None])
+
+
 # ---------------------------------------------------------------------------
 # WorkspaceAlbumService
 # ---------------------------------------------------------------------------

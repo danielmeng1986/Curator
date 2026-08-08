@@ -1380,6 +1380,28 @@ class TestAlbumListReadModelShape(unittest.TestCase):
         self.assertIsNone(rows[0]["status_id"])
         self.assertIsNone(rows[0]["studio_name"])
 
+    def test_search_matches_studio_location_scene_and_linked_model(self):
+        self.conn.execute(
+            "UPDATE album SET location = 'Berlin', scene = 'Rooftop' WHERE id = 1"
+        )
+        self.conn.commit()
+        for query in ("MetArt", "Berlin", "Rooftop", "Alice"):
+            rows, total = self.repo.search(q=query)
+            self.assertEqual(total, 1, query)
+            self.assertEqual(rows[0]["id"], 1, query)
+
+    def test_capture_and_publish_date_ranges_combine(self):
+        self.conn.execute(
+            "UPDATE album SET capture_date = '2024-03-10', publish_date = '2024-04-10' WHERE id = 1"
+        )
+        self.conn.commit()
+        rows, total = self.repo.search(
+            capture_date_from="2024-03-01", capture_date_to="2024-03-31",
+            publish_date_from="2024-04-01", publish_date_to="2024-04-30",
+        )
+        self.assertEqual(total, 1)
+        self.assertEqual([row["id"] for row in rows], [1])
+
 
 class TestAlbumDetailReadModelShape(unittest.TestCase):
     """Album detail read model has stable fields; photo hash is excluded."""

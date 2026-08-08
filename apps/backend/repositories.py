@@ -1076,6 +1076,10 @@ class AlbumRepository:
         model_id: str = "",
         rating_min: str = "",
         rating_max: str = "",
+        capture_date_from: str = "",
+        capture_date_to: str = "",
+        publish_date_from: str = "",
+        publish_date_to: str = "",
         sort: str = "updated_at",
         limit: int = 50,
         offset: int = 0,
@@ -1086,8 +1090,15 @@ class AlbumRepository:
         params: list = []
 
         if q:
-            conditions.append("(a.title LIKE ? OR a.description LIKE ?)")
-            params += [f"%{q}%", f"%{q}%"]
+            pattern = f"%{q}%"
+            conditions.append(
+                "(a.title LIKE ? OR a.description LIKE ? OR a.location LIKE ?"
+                " OR a.scene LIKE ? OR s.name LIKE ? OR EXISTS ("
+                "SELECT 1 FROM album_model amq JOIN model mq ON mq.id = amq.model_id"
+                " WHERE amq.album_id = a.id"
+                " AND (mq.display_name LIKE ? OR mq.primary_name LIKE ?)))"
+            )
+            params += [pattern] * 7
         if studio_id:
             conditions.append("a.studio_id = ?")
             params.append(int(studio_id))
@@ -1106,6 +1117,15 @@ class AlbumRepository:
         if rating_max:
             conditions.append("a.rating <= ?")
             params.append(float(rating_max))
+        for value, column, operator in (
+            (capture_date_from, "a.capture_date", ">="),
+            (capture_date_to, "a.capture_date", "<="),
+            (publish_date_from, "a.publish_date", ">="),
+            (publish_date_to, "a.publish_date", "<="),
+        ):
+            if value:
+                conditions.append(f"{column} {operator} ?")
+                params.append(value)
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -1138,6 +1158,69 @@ class AlbumRepository:
             rows = conn.execute(query, params + [limit, offset]).fetchall()
             total = conn.execute(count_query, params).fetchone()[0]
         return [_norm_album_list(dict(r)) for r in rows], total
+
+    def get_batch_state(self, album_ids: list[int]) -> list[dict]:
+        """Return stable fields used by Album batch preview and stale checks."""
+        if not album_ids:
+            return []
+        placeholders = ",".join("?" for _ in album_ids)
+        with self._db() as conn:
+            rows = conn.execute(
+                f"SELECT id, uuid, title, studio_id, status_id, rating, description,"
+                f" scene, location, capture_date, publish_date, remark, updated_at"
+                f" FROM album WHERE id IN ({placeholders}) ORDER BY id",
+                album_ids,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def relationship_targets_exist(
+        self, model_ids: set[int], related_album_ids: set[int]
+    ) -> tuple[set[int], set[int]]:
+        """Return the subsets of requested Model and Album ids that exist."""
+        with self._db() as conn:
+            found_models: set[int] = set()
+            found_albums: set[int] = set()
+            if model_ids:
+                marks = ",".join("?" for _ in model_ids)
+                found_models = {
+                    int(row[0]) for row in conn.execute(
+                        f"SELECT id FROM model WHERE id IN ({marks})", sorted(model_ids)
+                    )
+                }
+            if related_album_ids:
+                marks = ",".join("?" for _ in related_album_ids)
+                found_albums = {
+                    int(row[0]) for row in conn.execute(
+                        f"SELECT id FROM album WHERE id IN ({marks})", sorted(related_album_ids)
+                    )
+                }
+        return found_models, found_albums
+
+    def batch_update(
+        self, album_ids: list[int], changes: dict, expected_versions: dict[int, str], now: str
+    ) -> list[dict]:
+        """Atomically apply a reviewed batch when every Album version still matches."""
+        columns = list(changes)
+        assignments = ", ".join(f"{column} = ?" for column in columns)
+        with self._db() as conn:
+            try:
+                conn.execute("BEGIN")
+                for album_id in album_ids:
+                    current = conn.execute(
+                        "SELECT updated_at FROM album WHERE id = ?", (album_id,)
+                    ).fetchone()
+                    if current is None or current[0] != expected_versions[album_id]:
+                        raise PersistenceConflict({"album_id": album_id, "reason": "stale"})
+                for album_id in album_ids:
+                    conn.execute(
+                        f"UPDATE album SET {assignments}, updated_at = ? WHERE id = ?",
+                        [changes[column] for column in columns] + [now, album_id],
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return self.get_batch_state(album_ids)
 
     def get_by_id(self, album_id: int) -> dict | None:
         """Return album with studio, status, models, relations and photos, or None."""

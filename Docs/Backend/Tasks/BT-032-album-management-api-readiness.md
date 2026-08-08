@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-032` — Status: `Ready`
+`BT-032` — Status: `Complete`
 
 ## Title
 
@@ -65,3 +65,10 @@ Provide the authenticated Backend contracts required for `UI-005` to manage Albu
 ## Risks or Notes
 
 - This task intentionally does not define destructive asset lifecycle behavior; that boundary begins with `BT-033`.
+
+## Completion Record
+
+- Extended Album search and date-range query contracts with composable pagination and sorting.
+- Added signed zero-write batch preview, explicit overwrite review, atomic stale-checked execution, summaries, and durable Operation linkage.
+- Centralized create/update relationship existence, duplicate, and self-reference validation with structured API errors.
+- Added repository, service, and authenticated API coverage for query, preview, execution, stale rejection, zero partial write, and relationship failures.

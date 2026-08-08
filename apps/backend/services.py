@@ -19,6 +19,8 @@ import uuid as _uuid_mod
 import hashlib
 import hmac
 import secrets
+import base64
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -604,9 +606,46 @@ class AlbumService:
     persistence to AlbumRepository.
     """
 
-    def __init__(self, album_repo: repo.AlbumRepository, log_fn):
+    BATCH_FIELDS = frozenset({
+        "studio_id", "status_id", "rating", "description", "scene", "location",
+        "capture_date", "publish_date", "remark",
+    })
+
+    def __init__(
+        self, album_repo: repo.AlbumRepository, log_fn,
+        *, preview_secret: bytes | None = None, operation_service=None,
+        initiator: str = "WebUI",
+    ):
         self._repo = album_repo
         self._log = log_fn
+        self._preview_secret = preview_secret
+        self._operations = operation_service
+        self._initiator = initiator
+
+    def _validate_relationships(self, album_id: int | None, models: list, relations: list) -> None:
+        model_ids = [item.get("model_id") for item in models]
+        related_ids = [item.get("related_album_id") for item in relations]
+        if any(not isinstance(value, int) for value in model_ids + related_ids):
+            raise ValueError("Relationship identifiers must be integers.")
+        if len(model_ids) != len(set(model_ids)):
+            raise ServiceConflict("ALBUM_MODEL_DUPLICATE", "A Model can appear only once in an Album.")
+        relation_keys = [
+            (item["related_album_id"], item.get("relation_type") or "BELONGS_TO")
+            for item in relations
+        ]
+        if len(relation_keys) != len(set(relation_keys)):
+            raise ServiceConflict("ALBUM_RELATION_DUPLICATE", "The Album relationship already exists.")
+        if album_id is not None and album_id in related_ids:
+            raise ServiceConflict("ALBUM_RELATION_SELF", "An Album cannot relate to itself.")
+        found_models, found_albums = self._repo.relationship_targets_exist(
+            set(model_ids), set(related_ids)
+        )
+        missing_models = sorted(set(model_ids) - found_models)
+        missing_albums = sorted(set(related_ids) - found_albums)
+        if missing_models or missing_albums:
+            raise ValueError(
+                f"Relationship targets do not exist: models={missing_models}, albums={missing_albums}."
+            )
 
     def create(self, data: dict, models: list, relations: list) -> int:
         """Create an album with associated models and relations atomically.
@@ -614,6 +653,9 @@ class AlbumService:
         Returns:
             The new album's integer id.
         """
+        if not str(data.get("title") or "").strip():
+            raise ValueError("Album title is required.")
+        self._validate_relationships(None, models, relations)
         now = _utc_now_iso()
         album_id = self._repo.create(data, models, relations, now)
         self._log(
@@ -625,11 +667,129 @@ class AlbumService:
         self, album_id: int, data: dict, models: list, relations: list
     ) -> None:
         """Replace album fields, model list, and relation list atomically."""
+        if not str(data.get("title") or "").strip():
+            raise ValueError("Album title is required.")
+        if self._repo.get_by_id(album_id) is None:
+            raise ServiceNotFound("Album not found.")
+        self._validate_relationships(album_id, models, relations)
         now = _utc_now_iso()
         self._repo.update(album_id, data, models, relations, now)
         self._log(
             {"timestamp": now, "action": "update_album", "album_id": album_id, "success": True}
         )
+
+    @staticmethod
+    def _non_empty(value) -> bool:
+        return value not in (None, "")
+
+    def _validated_batch_request(self, album_ids: list, changes: dict) -> tuple[list[int], dict]:
+        if not album_ids or any(not isinstance(value, int) for value in album_ids):
+            raise ValueError("Album ids must be a non-empty list of integers.")
+        ids = sorted(set(album_ids))
+        if len(ids) != len(album_ids):
+            raise ValueError("Album ids must not contain duplicates.")
+        unknown = set(changes) - self.BATCH_FIELDS
+        if not changes or unknown:
+            raise ValueError(f"Unsupported Album batch fields: {sorted(unknown)}.")
+        return ids, {key: changes[key] for key in sorted(changes)}
+
+    def _sign_preview(self, payload: dict) -> str:
+        if not self._preview_secret:
+            raise RuntimeError("Album batch preview signing is not configured.")
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        encoded = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+        signature = hmac.new(self._preview_secret, encoded.encode(), hashlib.sha256).hexdigest()
+        return f"{encoded}.{signature}"
+
+    def _read_preview(self, token: str) -> dict:
+        if not self._preview_secret or "." not in token:
+            raise ServiceConflict("ALBUM_BATCH_PREVIEW_INVALID", "The Album batch preview is invalid.")
+        encoded, signature = token.rsplit(".", 1)
+        expected = hmac.new(self._preview_secret, encoded.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            raise ServiceConflict("ALBUM_BATCH_PREVIEW_INVALID", "The Album batch preview is invalid.")
+        try:
+            raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+            payload = json.loads(raw)
+            if datetime.fromisoformat(payload["expires_at"]) <= datetime.now(timezone.utc):
+                raise ServiceConflict("ALBUM_BATCH_PREVIEW_EXPIRED", "The Album batch preview has expired.")
+            return payload
+        except ServiceConflict:
+            raise
+        except Exception as exc:
+            raise ServiceConflict("ALBUM_BATCH_PREVIEW_INVALID", "The Album batch preview is invalid.") from exc
+
+    def preview_batch(self, album_ids: list, changes: dict, *, overwrite_non_empty: bool = False) -> dict:
+        ids, normalized = self._validated_batch_request(album_ids, changes)
+        rows = self._repo.get_batch_state(ids)
+        if len(rows) != len(ids):
+            found = {row["id"] for row in rows}
+            raise ValueError(f"Albums do not exist: {sorted(set(ids) - found)}.")
+        items = []
+        for row in rows:
+            conflicts = [
+                field for field, value in normalized.items()
+                if self._non_empty(row.get(field)) and row.get(field) != value
+            ]
+            items.append({
+                "album_id": row["id"], "album_uuid": row["uuid"], "title": row["title"],
+                "changes": normalized, "non_empty_overwrites": conflicts,
+                "eligible": overwrite_non_empty or not conflicts,
+            })
+        payload = {
+            "ids": ids, "changes": normalized, "overwrite_non_empty": bool(overwrite_non_empty),
+            "versions": {str(row["id"]): row["updated_at"] for row in rows},
+            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+        }
+        return {
+            "preview_token": self._sign_preview(payload), "items": items,
+            "summary": {"total": len(items), "eligible": sum(item["eligible"] for item in items),
+                        "blocked": sum(not item["eligible"] for item in items)},
+        }
+
+    def execute_batch(self, preview_token: str) -> dict:
+        payload = self._read_preview(preview_token)
+        current_rows = self._repo.get_batch_state(payload["ids"])
+        current_versions = {str(row["id"]): row["updated_at"] for row in current_rows}
+        if current_versions != payload["versions"]:
+            raise ServiceConflict("ALBUM_BATCH_STALE", "Album data changed after preview.")
+        if not payload["overwrite_non_empty"]:
+            current = self.preview_batch(payload["ids"], payload["changes"])
+            if current["summary"]["blocked"]:
+                raise ServiceConflict(
+                    "ALBUM_BATCH_OVERWRITE_NOT_REVIEWED",
+                    "The batch would overwrite non-empty Album fields.",
+                    {"blocked": current["summary"]["blocked"]},
+                )
+        operation = None
+        if self._operations:
+            operation = self._operations.begin(
+                "AlbumBatchUpdate", self._initiator, batch_uuid=str(_uuid_mod.uuid4()),
+                summary=f"Updating {len(payload['ids'])} Albums",
+            )
+        try:
+            rows = self._repo.batch_update(
+                payload["ids"], payload["changes"],
+                {int(key): value for key, value in payload["versions"].items()}, _utc_now_iso(),
+            )
+        except repo.PersistenceConflict as exc:
+            if operation:
+                self._operations.fail(operation["uuid"], "database", "album.batch-stale", summary="Album batch rejected as stale")
+            raise ServiceConflict("ALBUM_BATCH_STALE", "Album data changed after preview.", exc.details) from exc
+        except Exception:
+            if operation:
+                self._operations.fail(
+                    operation["uuid"], "database", "album.batch-failed",
+                    summary="Album batch update failed",
+                )
+            raise
+        if operation:
+            operation = self._operations.succeed(operation["uuid"], f"Updated {len(rows)} Albums")
+        return {
+            "items": [{"album_id": row["id"], "status": "Succeeded", "operation_uuid": operation["uuid"] if operation else None} for row in rows],
+            "summary": {"total": len(rows), "succeeded": len(rows), "failed": 0},
+            "operation_uuid": operation["uuid"] if operation else None,
+        }
 
     def delete(self, album_id: int) -> None:
         """Delete an album and all its associated records atomically."""
