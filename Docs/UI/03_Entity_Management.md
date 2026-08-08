@@ -12,10 +12,19 @@ Rows show title, Studio, Status, linked Model names, dates, rating, and a compac
 2. **Storage** — the single canonical `path`, with a copy control and path validation warnings.
 3. **Models / Additional Models** — the user-facing management surface for the Album–Model many-to-many relationship. Add existing Models, create Models inline, remove linked Models, and edit age when shot, role, and remarks. Adding/removing/editing this section creates/deletes/updates `album_model` rows only; it does not add Model data to the `album` row or delete Model entities.
 4. **Belongs to / Related Releases** — the user-facing management surface for Albums that are separate releases of one logical Album. Add or remove a logical/canonical Album by readable title; the application creates or deletes `album_relation` rows with `relation_type = BELONGS_TO`. The current Album cannot relate to itself.
-5. **Photos** — child records with add, edit, remove actions. Parent context sets the album reference.
-6. **Record details** — read-only system fields.
+5. **Record details** — read-only system fields.
 
-The relationship sections are not `album_model` or `album_relation` table views: they show meaningful names, not raw IDs, and reject duplicate selections. Saving an Album and its relationship changes is one logical transaction. The result summarizes changed Album fields, added/removed/updated Model links, added/removed related-release links, and changed photos.
+The relationship sections are not `album_model` or `album_relation` table views: they show meaningful names, not raw IDs, and reject duplicate selections. Saving an Album and its relationship changes is one logical transaction. The result summarizes changed Album fields, added/removed/updated Model links, and added/removed related-release links.
+
+`apps.web` treats Album as the minimum routine digital-asset management unit.
+It does not expose Photo browsing or independent Photo create/edit/delete actions
+in permanent-entity management. A future AI review surface may show selected
+Photos as read-only evidence, but that does not make Photo a CRUD surface here.
+
+Removing an Album must not use the current database-only hard-delete path. The
+UI may offer an Album removal action only after the Digital Asset Trash
+lifecycle defines and implements reviewed movement of the Album and its
+contained Photos, recovery, and administrator-confirmed permanent purge.
 
 ## Models and Studios
 

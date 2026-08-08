@@ -27,6 +27,7 @@ items with scope preview, confirmation, and verified outcomes.
 ## Out of Scope
 
 - Database Snapshot Restore, handled by UI-010C.
+- User-initiated Digital Asset Trash, Album/Photo Trash recovery, and permanent purge, handled by UI-010E.
 - General filesystem browsing or arbitrary source/destination entry.
 
 ## Dependencies
@@ -55,4 +56,4 @@ items with scope preview, confirmation, and verified outcomes.
 ## Risks or Notes
 
 - UI labels must not imply that moving an item to Quarantine repairs the originating Issue automatically.
-
+- Repair Quarantine must never be labelled or presented as Digital Asset Trash; the former isolates repair conflicts, while the latter is a user/admin asset-removal lifecycle.

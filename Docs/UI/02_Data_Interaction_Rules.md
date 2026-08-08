@@ -49,7 +49,7 @@ Some Studios publish one logical Album through multiple separate releases. The A
 | `studio` | `name`, `website`, `description`, `media_scope` | `name` is required; validate `website` as a URL when supplied. |
 | `status` | `name`, `description` | Show as chips elsewhere; prevent deletion while used by Albums or Workspace Albums. |
 | `album` | `studio_id`, `status_id`, `title`, `description`, `scene`, `location`, `capture_date`, `publish_date`, `rating`, `path` | `path` is the single canonical permanent location. The form also includes relationship sections whose writes go to `album_model` and `album_relation`, not `album`. Rating is a non-negative integer until a project range is defined. |
-| `photo` | `album_id`, `filename`, `relative_path`, `hash`, `width`, `height`, `capture_time` | Normally managed in the parent album context. |
+| `photo` | None in routine `apps.web` entity management | Photo remains a Backend asset record owned by an Album. Selected Photos may later appear as read-only AI evidence; Trash and purge follow their dedicated lifecycle. |
 | `album_model` | `model_id`, `age_when_shot`, `role`, `remarks` | Implementation table for the Album form’s Models / Additional Models section; never presented as direct table CRUD. One model may occur once per album. |
 | `album_relation` | `related_album_id`, `relation_type`, `remarks` | Implementation table for the Album form’s Belongs to / Related Releases section; never presented as direct table CRUD. The initial UI supports `BELONGS_TO`. |
 

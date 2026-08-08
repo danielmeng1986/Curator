@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-005` — Status: `Proposed`
+`UI-005` — Status: `Blocked`
 
 ## Title
 
@@ -16,30 +16,33 @@ Adapt Permanent Entity Management to the Supported API
 
 ## Goal
 
-Complete and normalize Album, Model, Studio, Status, Photo, and relationship
-management against authenticated `/api/v1` contracts.
+Complete and normalize Album, Model, Studio, Status, and relationship
+management against authenticated `/api/v1` contracts, with Album as the
+minimum routine digital-asset management unit.
 
 ## Scope
 
-- Lists, search, filters, sorting, pagination, create, edit, and protected delete.
+- Lists, search, filters, sorting, pagination, create, edit, and protected Album Trash hand-off.
 - Album–Model and Album–Album relationships inside Album detail.
-- Photo record visibility/deletion and readable foreign-key labels.
 - Inline Model/Studio creation where specified, role-aware actions, validation, and retained drafts.
 
 ## Out of Scope
 
-- Import, Workspace, Issue/Repair, and raw relationship-table screens.
+- Import, Workspace, Issue/Repair, raw relationship-table screens, and routine Photo browsing/CRUD.
+- Direct Album hard deletion or filesystem removal before the Digital Asset Trash lifecycle is ready.
 - Backend business-rule changes not required by the approved UI contract.
 
 ## Dependencies
 
 - UI-001 and UI-002.
+- `BT-032` for Album query, batch mutation, and relationship validation contracts.
+- `BT-033`, `BT-034`, `BT-035`, and `UI-010E` before enabling Album Trash or permanent purge actions.
 - Supported canonical read/write models for each exposed entity surface.
 
 ## Implementation Steps
 
 1. Audit current pages against UI field/editability and API contracts.
-2. Close behavior and usability gaps by entity, preserving relationship boundaries.
+2. Remove routine Photo management, close behavior and usability gaps by entity, and preserve relationship boundaries.
 3. Add client contract tests for payloads, validation, conflict, and navigation state.
 
 ## Acceptance Criteria
@@ -48,6 +51,8 @@ management against authenticated `/api/v1` contracts.
 - Album Model and logical/release relationships persist in their relationship records and reject invalid/self/duplicate links.
 - Protected deletes explain references and preserve records when rejected.
 - Filters, sorting, pagination, and open context survive navigation as specified.
+- Album is the page's minimum asset-management unit; no independent Photo browse/edit/delete surface is exposed.
+- Until Digital Asset Trash is implemented, the UI does not offer the current database-only Album hard-delete behavior.
 
 ## Verification
 
@@ -57,4 +62,4 @@ management against authenticated `/api/v1` contracts.
 ## Risks or Notes
 
 - Any mismatch between UI editable fields and Backend writable fields must be resolved in Specification/API contracts, not patched by silent field omission.
-
+- Read-only Photo evidence selected by a future AI review workflow belongs to `UI-011*` or a later native-client specification, not this task.

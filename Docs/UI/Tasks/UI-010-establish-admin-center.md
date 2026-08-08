@@ -17,7 +17,8 @@ Establish Administrator Center Shell and Safety Policy
 ## Goal
 
 Create one Admin-only navigation and interaction boundary for authentication,
-security, Backup, Snapshot, Restore, Quarantine, and administrative history.
+security, Backup, Snapshot, database Restore, Repair Quarantine, Digital Asset
+Trash, and administrative history.
 
 ## Scope
 
@@ -56,4 +57,3 @@ security, Backup, Snapshot, Restore, Quarantine, and administrative history.
 ## Risks or Notes
 
 - An Admin Center raises the impact of browser credential compromise; its pages should avoid long-lived secret exposure and unsafe cached content.
-

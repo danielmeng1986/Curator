@@ -33,7 +33,7 @@ Backup/Snapshot, and Restore workflows through isolated browser scenarios.
 
 ## Dependencies
 
-- UI-003, UI-004A/B/C, UI-010, UI-010A/B/C, and their Backend API evidence.
+- UI-003, UI-004A/B/C, UI-010, UI-010A/B/C/E, and their Backend API evidence.
 
 ## Implementation Steps
 
@@ -55,4 +55,3 @@ Backup/Snapshot, and Restore workflows through isolated browser scenarios.
 ## Risks or Notes
 
 - Playwright tracing must be disabled or sanitized during secret-entry and one-time Token display steps.
-

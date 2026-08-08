@@ -21,7 +21,7 @@ UI against disposable Backend state.
 ## Scope
 
 - Create/edit/search/filter/paginate Album, Model, Studio, and Status records.
-- Add/remove Album Models and logical/release relations; inspect/delete Photo records.
+- Add/remove Album Models and logical/release relations; verify no routine Photo CRUD surface is exposed.
 - Inline creation, validation retention, reference-protected deletion, refresh persistence, and role behavior.
 
 ## Out of Scope
@@ -44,6 +44,7 @@ UI against disposable Backend state.
 - Invalid, duplicate, self-related, cancelled, and reference-blocked actions preserve prior state.
 - Reader cannot mutate even through direct request; Writer sees allowed actions.
 - Browser assertions cover visible outcome and durable Backend state.
+- The database-only Album hard-delete path is unavailable while Digital Asset Trash is not implemented.
 
 ## Verification
 
@@ -52,4 +53,3 @@ UI against disposable Backend state.
 ## Risks or Notes
 
 - Tests should assert user-facing labels and roles, not brittle CSS layout details.
-
