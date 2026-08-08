@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
+import subprocess
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -88,6 +90,101 @@ class AuthenticationLifecycleTests(unittest.TestCase):
         self.assertEqual(
             self.auth.authenticate(replacement["token"], "write")["device_name"], "AI Worker"
         )
+
+
+class AdministratorBootstrapTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:", check_same_thread=False)
+        self.db.row_factory = sqlite3.Row
+        self.now = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        self.auth = svc.AuthenticationService(
+            repo.AuthRepository(lambda: self.db),
+            now_fn=lambda: self.now,
+            operation_service=svc.OperationService(repo.OperationRepository(lambda: self.db)),
+        )
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_first_admin_is_atomic_audited_and_token_is_not_persisted_plaintext(self):
+        issued = self.auth.bootstrap_first_admin(
+            device_name="Local Administrator",
+            device_identity="local-browser-admin",
+        )
+        principal = self.auth.authenticate(issued["token"], "admin")
+        self.assertEqual(principal["role"], "admin")
+        self.assertEqual(principal["scopes"], ["admin", "read", "write"])
+        self.assertNotIn("token_hash", issued["token_record"])
+        stored = self.db.execute("SELECT token_hash FROM auth_token").fetchone()[0]
+        self.assertNotEqual(stored, issued["token"])
+        operation = self.db.execute(
+            "SELECT status, operation_type, summary FROM operation WHERE operation_type = 'administrator_bootstrap'"
+        ).fetchone()
+        self.assertEqual(operation["status"], "Succeeded")
+        self.assertNotIn(issued["token"], operation["summary"])
+
+    def test_second_bootstrap_is_rejected_without_side_effect(self):
+        self.auth.bootstrap_first_admin(device_name="Admin", device_identity="admin-1")
+        before = tuple(self.db.execute(
+            "SELECT (SELECT COUNT(*) FROM device_registration), (SELECT COUNT(*) FROM auth_token), (SELECT COUNT(*) FROM operation)"
+        ).fetchone())
+        with self.assertRaisesRegex(svc.ServiceConflict, "bootstrap is closed"):
+            self.auth.bootstrap_first_admin(device_name="Other", device_identity="admin-2")
+        after = tuple(self.db.execute(
+            "SELECT (SELECT COUNT(*) FROM device_registration), (SELECT COUNT(*) FROM auth_token), (SELECT COUNT(*) FROM operation)"
+        ).fetchone())
+        self.assertEqual(after, before)
+
+    def test_expired_or_revoked_admin_does_not_reopen_first_bootstrap(self):
+        issued = self.auth.bootstrap_first_admin(device_name="Admin", device_identity="admin-1")
+        self.auth.revoke_token(issued["token_record"]["uuid"])
+        self.now += timedelta(days=730)
+        with self.assertRaisesRegex(svc.ServiceConflict, "already been established"):
+            self.auth.bootstrap_first_admin(device_name="Replacement", device_identity="admin-2")
+
+    def test_audit_failure_compensates_bootstrap_credential(self):
+        class FailingOperations:
+            def begin(self, *args, **kwargs):
+                raise RuntimeError("audit unavailable")
+
+        auth = svc.AuthenticationService(
+            repo.AuthRepository(lambda: self.db), now_fn=lambda: self.now,
+            operation_service=FailingOperations(),
+        )
+        with self.assertRaisesRegex(RuntimeError, "audit unavailable"):
+            auth.bootstrap_first_admin(device_name="Admin", device_identity="admin-fail")
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM device_registration").fetchone()[0], 0)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM auth_token").fetchone()[0], 0)
+
+    def test_cli_prints_token_once_and_refuses_repeat(self):
+        with tempfile.TemporaryDirectory(prefix="curator-bootstrap-cli-") as root:
+            database = Path(root) / "bootstrap.db"
+            command = [
+                sys.executable, "-m", "apps.backend", "auth", "bootstrap-admin",
+                "--device-name", "CLI Admin", "--device-identity", "cli-admin",
+                "--database", str(database),
+            ]
+            repo_root = Path(__file__).resolve().parents[3]
+            first = subprocess.run(command, cwd=repo_root, text=True, capture_output=True, check=False)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            lines = first.stdout.splitlines()
+            token = lines[lines.index("Admin Token (shown once):") + 1]
+            self.assertTrue(token)
+            connection = sqlite3.connect(database)
+            try:
+                stored = connection.execute("SELECT token_hash FROM auth_token").fetchone()[0]
+                logs = " ".join(
+                    str(value)
+                    for row in connection.execute("SELECT * FROM operation")
+                    for value in row if value
+                )
+            finally:
+                connection.close()
+            self.assertNotEqual(stored, token)
+            self.assertNotIn(token, logs)
+            second = subprocess.run(command, cwd=repo_root, text=True, capture_output=True, check=False)
+            self.assertEqual(second.returncode, 2)
+            self.assertNotIn(token, second.stdout + second.stderr)
 
 
 if __name__ == "__main__":

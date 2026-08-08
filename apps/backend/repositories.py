@@ -208,6 +208,92 @@ class AuthRepository:
             row = conn.execute("SELECT * FROM auth_token WHERE token_hash = ?", (token_hash,)).fetchone()
         return self._token(dict(row)) if row else None
 
+    def has_usable_admin(self, now_iso: str) -> bool:
+        """Return whether an approved trusted registration has a usable Admin Token."""
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                """SELECT t.scopes FROM auth_token t
+                   JOIN device_registration r ON r.uuid = t.registration_uuid
+                   WHERE r.status = 'Approved' AND r.trusted = 1
+                     AND r.approved_role = 'admin'
+                     AND t.revoked_at IS NULL AND t.expires_at > ?""",
+                (now_iso,),
+            ).fetchall()
+        return any("admin" in json.loads(row["scopes"]) for row in rows)
+
+    def has_bootstrapped_admin(self) -> bool:
+        """Return whether first-administrator bootstrap has already completed."""
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                """SELECT 1 FROM device_registration
+                   WHERE status = 'Approved' AND trusted = 1
+                     AND approved_role = 'admin' LIMIT 1"""
+            ).fetchone()
+        return row is not None
+
+    def bootstrap_first_admin(self, registration: dict, token: dict, now_iso: str) -> tuple[dict, dict]:
+        """Atomically create the first trusted Admin registration and Token."""
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            existing_admin = conn.execute(
+                """SELECT 1 FROM device_registration
+                   WHERE status = 'Approved' AND trusted = 1
+                     AND approved_role = 'admin' LIMIT 1"""
+            ).fetchone()
+            if existing_admin is not None:
+                conn.rollback()
+                raise PersistenceConflict({"reason": "usable_admin_exists"})
+            try:
+                conn.execute(
+                    """INSERT INTO device_registration
+                       (uuid, device_name, device_identity, requested_role,
+                        requested_scopes, approved_role, approved_scopes,
+                        status, trusted, created_at, updated_at, approved_at)
+                       VALUES (?, ?, ?, 'admin', ?, 'admin', ?, 'Approved', 1, ?, ?, ?)""",
+                    (
+                        registration["uuid"], registration["device_name"],
+                        registration["device_identity"], json.dumps(registration["scopes"]),
+                        json.dumps(registration["scopes"]), now_iso, now_iso, now_iso,
+                    ),
+                )
+                conn.execute(
+                    """INSERT INTO auth_token
+                       (uuid, token_hash, registration_uuid, device_name, scopes,
+                        created_at, expires_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        token["uuid"], token["token_hash"], registration["uuid"],
+                        registration["device_name"], json.dumps(registration["scopes"]),
+                        token["created_at"], token["expires_at"],
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            registration_row = conn.execute(
+                "SELECT * FROM device_registration WHERE uuid = ?", (registration["uuid"],)
+            ).fetchone()
+            token_row = conn.execute(
+                "SELECT * FROM auth_token WHERE uuid = ?", (token["uuid"],)
+            ).fetchone()
+        return self._registration(dict(registration_row)), self._token(dict(token_row))
+
+    def rollback_bootstrap(self, registration_uuid: str, token_uuid: str) -> None:
+        """Compensate a just-created bootstrap credential when audit persistence fails."""
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "DELETE FROM auth_token WHERE uuid = ? AND registration_uuid = ?",
+                (token_uuid, registration_uuid),
+            )
+            conn.execute("DELETE FROM device_registration WHERE uuid = ?", (registration_uuid,))
+            conn.commit()
+
     def touch_token(self, token_uuid: str, used_at: str) -> None:
         with self._db() as conn:
             self._ensure_schema(conn)

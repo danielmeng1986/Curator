@@ -51,6 +51,32 @@ The registration proof establishes that the request may be considered; it does n
 
 Certificates, PKI, mutual TLS, and hardware-backed device identities are intentionally outside the current phase.
 
+## First administrator bootstrap
+
+The normal approval workflow requires an existing administrator and therefore
+cannot issue the first Admin Token. Initial installation uses a separate local
+bootstrap trust boundary:
+
+- the operator must control the Backend host console;
+- bootstrap succeeds only before any trusted approved Admin registration has
+  been established; Token expiry or revocation never reopens it;
+- the first device is created directly as a trusted `admin` with the fixed
+  `read`, `write`, and `admin` scopes;
+- the Token plaintext is printed or returned exactly once, while only its hash
+  is persisted;
+- registration, Token issuance, and the security Operation are one truthful
+  outcome; partial failure must not leave usable bootstrap credentials; and
+- a repeated bootstrap request is rejected before authentication state changes.
+
+The supported first phase is a local command. A loopback UI may use a
+console-generated, short-lived, single-use Bootstrap Code as specified below,
+but loopback source address alone never grants administrator authority.
+
+Loss of every usable Admin Token is not a new-installation condition. It must
+not reopen bootstrap automatically or through an anonymous UI/API. Recovery
+requires a separately specified, explicitly invoked offline administrator
+recovery command and is outside the first-bootstrap tasks.
+
 ## Current authorization model
 
 Roles express the maximum authorization requested by a device, and scopes express the permissions granted to its token. The current role policy is deliberately small:

@@ -233,6 +233,66 @@ class AuthenticationService:
         except repo.PersistenceConflict as exc:
             raise ServiceConflict("BUSINESS_CONFLICT", "A registration already exists for this device identity.", exc.details)
 
+    def bootstrap_first_admin(
+        self,
+        *,
+        device_name: str,
+        device_identity: str,
+        validity: timedelta | None = None,
+    ) -> dict:
+        """Issue the first Admin Token under the local-console trust boundary."""
+        if not all(isinstance(value, str) and value.strip() for value in (device_name, device_identity)):
+            raise ValueError("Device name and stable device identity are required.")
+        lifetime = validity or AUTH_DEFAULT_TOKEN_VALIDITY
+        if lifetime <= timedelta(0):
+            raise ValueError("Token validity must be positive.")
+        now = self._now_utc()
+        if self._repo.has_bootstrapped_admin():
+            raise ServiceConflict(
+                "AUTHENTICATION_BOOTSTRAP_CLOSED",
+                "Administrator bootstrap is closed because an Admin has already been established.",
+            )
+        plaintext = secrets.token_urlsafe(32)
+        registration_uuid = str(_uuid_mod.uuid4())
+        token_uuid = str(_uuid_mod.uuid4())
+        registration = {
+            "uuid": registration_uuid,
+            "device_name": device_name.strip(),
+            "device_identity": device_identity.strip(),
+            "scopes": sorted(AUTH_ROLE_SCOPES["admin"]),
+        }
+        token = {
+            "uuid": token_uuid,
+            "token_hash": self._hash_token(plaintext),
+            "created_at": now.isoformat(),
+            "expires_at": (now + lifetime).isoformat(),
+        }
+        try:
+            persisted_registration, persisted_token = self._repo.bootstrap_first_admin(
+                registration, token, now.isoformat()
+            )
+        except repo.PersistenceConflict as exc:
+            raise ServiceConflict(
+                "AUTHENTICATION_BOOTSTRAP_CLOSED",
+                "Administrator bootstrap is closed because an Admin has already been established.",
+                exc.details,
+            )
+        try:
+            self._record_operation(
+                "administrator_bootstrap",
+                registration_uuid,
+                "Initial administrator device and Token issued from the local console.",
+            )
+        except Exception:
+            self._repo.rollback_bootstrap(registration_uuid, token_uuid)
+            raise
+        persisted_token.pop("token_hash", None)
+        return {
+            "token": plaintext,
+            "token_record": persisted_token,
+            "registration": persisted_registration,
+        }
+
     def approve_registration(
         self,
         registration_uuid: str,

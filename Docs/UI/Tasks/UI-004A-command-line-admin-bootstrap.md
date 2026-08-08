@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-004A` — Status: `Proposed`
+`UI-004A` — Status: `Complete`
 
 ## Title
 
@@ -20,7 +20,8 @@ creates the first administrator device and displays its Token exactly once.
 
 ## Scope
 
-- Detect whether an active Admin Token already exists.
+- Detect whether a trusted Admin has ever been established; expired or revoked
+  Tokens do not reopen first-install bootstrap.
 - Create and approve one local administrator device through Authentication Service boundaries.
 - One-time plaintext output, audit Operation, safe retry rejection, and operator guidance.
 - A separately explicit recovery mode for loss of all Admin Tokens, if approved by Specification.
@@ -44,7 +45,7 @@ creates the first administrator device and displays its Token exactly once.
 
 - The command succeeds only under the specified local bootstrap preconditions.
 - Token plaintext is printed once, never persisted or logged, and cannot be retrieved later.
-- Repeating bootstrap when a usable Admin exists is rejected with zero authentication-state mutation.
+- Repeating bootstrap after an Admin has been established is rejected with zero authentication-state mutation.
 - Partial failure does not leave an approved device without truthful token/audit state.
 
 ## Verification
@@ -55,4 +56,15 @@ creates the first administrator device and displays its Token exactly once.
 ## Risks or Notes
 
 - Console access is the trust anchor for initial bootstrap and emergency recovery.
+- Loss of all Admin Tokens does not reopen bootstrap. The separately specified
+  offline recovery command is intentionally not implemented by this task.
 
+## Completion Record
+
+- Added `python3 -m apps.backend auth bootstrap-admin` with explicit device
+  name/identity, configured or explicitly selected database, one-time Token
+  output, and safe repeated-run refusal.
+- Added an atomic repository bootstrap boundary plus compensation when durable
+  security Operation recording fails; plaintext is never persisted or logged.
+- Amended Authentication Specification to separate first installation from
+  loss-of-all-Admin recovery and prohibit automatic or anonymous reset.
