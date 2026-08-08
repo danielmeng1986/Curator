@@ -48,6 +48,21 @@ The Album preview must provide enough information for the user to confirm the pr
 - `album_name`
 - whether the source will create a new Album or be associated with an existing Album
 
+For authenticated API clients, Preview also returns a signed, short-lived
+`preview_token`. It binds the normalized importable items, canonical
+destinations, configured Archive root/default Studio, exactly one Import Action
+(`COPY`, `MOVE`, or `DATABASE_ONLY`), and deterministic source-state
+fingerprints. The token is an execution capability, not a durable record;
+Preview still creates no Album, Operation, Snapshot, or filesystem mutation.
+
+Execution accepts only this token. Before claiming it, the Import Service
+verifies signature and expiry and recomputes source, destination, database, and
+configuration state. Invalid, expired, or stale Preview is rejected without
+production mutation. A valid Preview is atomically claimed for one execution
+attempt; replay and concurrent duplicate claims are rejected. Once execution
+has started, the normal Operation and `NeedsRepair` rules govern truthful
+partial outcomes.
+
 The preview also exposes the proposed canonical path, validation errors, canonical-path collisions, entity reuse/creation implications, the selected or automatic Import Action, filesystem implications, and eligibility for execution. Production persistence must not occur until the Album identity has been confirmed.
 
 ## Import drafts and Workspaces

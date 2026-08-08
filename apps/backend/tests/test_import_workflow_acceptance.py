@@ -118,6 +118,80 @@ class TestImportHappyPathWorkflowAcceptance(unittest.TestCase):
         self.assertEqual(self.snapshot_paths, [])
         self.assertEqual(self.change_log, [])
 
+    def test_bt036_changed_source_rejects_reviewed_preview_without_side_effect(self):
+        source = self.sandbox.create_source_directory("stale-source", ["cover.jpg"])
+        strict = svc.ImportService(
+            repo.ImportRepository(self.sandbox.db_factory()),
+            snapshot_fn=self._create_snapshot,
+            backup_log_fn=self.backup_log.append,
+            change_log_fn=self.change_log.append,
+            operation_service=self.operation_service,
+            preview_secret=b"bt036-preview-secret",
+        )
+        preview = strict.preview(
+            [self._candidate(source)], str(self.sandbox.archive_root), "Default Studio",
+            import_action=svc.IMPORT_ACTION_MOVE,
+        )
+        (source / "added-after-preview.jpg").touch()
+        with self.assertRaises(svc.ServiceConflict) as stale:
+            strict.execute_preview(
+                preview["preview_token"], str(self.sandbox.archive_root), "Default Studio"
+            )
+        self.assertEqual(stale.exception.code, "IMPORT_PREVIEW_STALE")
+        self.sandbox.assert_row_count("album", 0)
+        self.sandbox.assert_row_count("operation", 0)
+        self.assertTrue(source.is_dir())
+        self.assertEqual(self.snapshot_paths, [])
+
+    def test_bt036_preview_is_single_use_and_binds_database_only_action(self):
+        strict = svc.ImportService(
+            repo.ImportRepository(self.sandbox.db_factory()),
+            snapshot_fn=self._create_snapshot,
+            backup_log_fn=self.backup_log.append,
+            change_log_fn=self.change_log.append,
+            operation_service=self.operation_service,
+            preview_secret=b"bt036-preview-secret",
+        )
+        preview = strict.preview(
+            [self._candidate()], str(self.sandbox.archive_root), "Default Studio",
+            import_action=svc.IMPORT_ACTION_DATABASE_ONLY,
+        )
+        result = strict.execute_preview(
+            preview["preview_token"], str(self.sandbox.archive_root), "Default Studio"
+        )
+        self.assertEqual(result["results"][0]["effective_action"], svc.IMPORT_ACTION_DATABASE_ONLY)
+        with self.assertRaises(svc.ServiceConflict) as replay:
+            strict.execute_preview(
+                preview["preview_token"], str(self.sandbox.archive_root), "Default Studio"
+            )
+        self.assertEqual(replay.exception.code, "IMPORT_PREVIEW_REPLAYED")
+        self.sandbox.assert_row_count("album", 1)
+        self.sandbox.assert_row_count("operation", 1)
+
+    def test_bt036_expired_preview_is_rejected_before_claim_or_operation(self):
+        strict = svc.ImportService(
+            repo.ImportRepository(self.sandbox.db_factory()),
+            snapshot_fn=self._create_snapshot,
+            backup_log_fn=self.backup_log.append,
+            change_log_fn=self.change_log.append,
+            operation_service=self.operation_service,
+            preview_secret=b"bt036-preview-secret",
+        )
+        preview = strict.preview(
+            [self._candidate()], str(self.sandbox.archive_root), "Default Studio",
+            import_action=svc.IMPORT_ACTION_DATABASE_ONLY,
+        )
+        payload = strict._read_import_preview(preview["preview_token"])
+        payload["expires_at"] = "2000-01-01T00:00:00+00:00"
+        expired_token = strict._sign_import_preview(payload)
+        with self.assertRaises(svc.ServiceConflict) as expired:
+            strict.execute_preview(
+                expired_token, str(self.sandbox.archive_root), "Default Studio"
+            )
+        self.assertEqual(expired.exception.code, "IMPORT_PREVIEW_EXPIRED")
+        self.sandbox.assert_row_count("album", 0)
+        self.sandbox.assert_row_count("operation", 0)
+
     def test_bt019_database_only_persists_without_filesystem_mutation(self):
         """Import Workflow: DATABASE_ONLY persists identity and skips filesystem work."""
         source = self.sandbox.create_source_directory("database-only", ["cover.jpg"])

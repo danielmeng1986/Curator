@@ -107,6 +107,23 @@ atomically rejects expired, invalid, replayed-after-change, or stale previews
 with `409`; it never partially applies the batch. Success returns per-Album
 outcomes, an aggregate summary, and the durable batch Operation identifier.
 
+## Import preview and execution contracts
+
+`POST /api/v1/import/preview` requires non-empty `items` and one explicit
+`import_action`: `COPY`, `MOVE`, or `DATABASE_ONLY`. It returns normalized
+per-item validation and consequences plus a signed, short-lived
+`preview_token` when at least one item is importable. The token binds the
+importable reviewed items, action, configured roots/defaults, canonical
+destinations, and source-state fingerprints. Preview performs no production
+write, Snapshot, Operation creation, or filesystem mutation.
+
+`POST /api/v1/import/execute` accepts only `preview_token`; client-supplied
+items or replacement action are not execution inputs. Invalid signature,
+expiry, changed source/configuration, new database/filesystem collision, and
+replay return a structured `409` before production mutation. The first valid
+request atomically claims the Preview. After the claim, per-item execution,
+Operation outcome, and `NeedsRepair` behavior follow the Import Workflow.
+
 ## Future extensions
 
 - Route/resource catalogs can be added without changing the shared contract.

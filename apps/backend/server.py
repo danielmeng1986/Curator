@@ -76,6 +76,7 @@ def load_app_config() -> dict:
 APP_CONFIG = load_app_config()
 AUTH_REGISTRATION_SECRET = os.environ.get("CURATOR_REGISTRATION_SECRET", "")
 ALBUM_BATCH_PREVIEW_SECRET = secrets.token_bytes(32)
+IMPORT_PREVIEW_SECRET = secrets.token_bytes(32)
 
 # ---------------------------------------------------------------------------
 # DB helpers
@@ -996,6 +997,11 @@ class AppHandler(SimpleHTTPRequestHandler):
 
     def _post_import_preview(self, body: dict):
         items_in = body.get("items", [])
+        import_action = body.get("import_action", "")
+        if not items_in:
+            raise ValueError("The items field is required.")
+        if not import_action:
+            raise ValueError("The import_action field is required.")
         global APP_CONFIG
         APP_CONFIG = load_app_config()
         archive_root = APP_CONFIG.get("archive_root", "")
@@ -1009,15 +1015,17 @@ class AppHandler(SimpleHTTPRequestHandler):
             change_log_fn=append_log,
             operation_service=svc.OperationService(repo.OperationRepository(open_db)),
             initiator=svc.OP_INITIATOR_WEB_UI,
+            preview_secret=IMPORT_PREVIEW_SECRET,
         )
-        preview = import_service.preview(items_in, archive_root, default_studio)
+        preview = import_service.preview(
+            items_in, archive_root, default_studio, import_action=import_action
+        )
         self._send_success(200, {"preview": preview})
 
     def _post_import_execute(self, body: dict):
-        items_in = body.get("items", [])
-        if not items_in:
-            self._send_error(400, "REQUEST_MISSING_FIELD", "The 'items' field is required.")
-            return
+        preview_token = body.get("preview_token", "")
+        if not preview_token:
+            raise ValueError("The preview_token field is required.")
 
         global APP_CONFIG
         APP_CONFIG = load_app_config()
@@ -1032,8 +1040,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             change_log_fn=append_log,
             operation_service=svc.OperationService(repo.OperationRepository(open_db)),
             initiator=svc.OP_INITIATOR_WEB_UI,
+            preview_secret=IMPORT_PREVIEW_SECRET,
         )
-        result = import_service.execute(items_in, archive_root, default_studio)
+        result = import_service.execute_preview(preview_token, archive_root, default_studio)
         self._send_success(200, result)
 
     def _post_backup(self, body: dict):

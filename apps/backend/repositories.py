@@ -1918,6 +1918,38 @@ class ImportRepository:
             ).fetchone()
         return row is not None
 
+    def claim_preview(self, preview_uuid: str, claimed_at: str) -> None:
+        """Atomically claim a reviewed Import preview for one execution attempt."""
+        with self._db() as conn:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS import_preview_claim (
+                    preview_uuid TEXT PRIMARY KEY,
+                    claimed_at TEXT NOT NULL
+                )"""
+            )
+            try:
+                conn.execute(
+                    "INSERT INTO import_preview_claim (preview_uuid, claimed_at) VALUES (?, ?)",
+                    (preview_uuid, claimed_at),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                raise PersistenceConflict(
+                    {"preview_uuid": preview_uuid, "reason": "already_claimed"}
+                ) from exc
+
+    def preview_is_claimed(self, preview_uuid: str) -> bool:
+        """Return whether an Import preview has already begun execution."""
+        with self._db() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='import_preview_claim'"
+            ).fetchone()
+            if not exists:
+                return False
+            return conn.execute(
+                "SELECT 1 FROM import_preview_claim WHERE preview_uuid = ?", (preview_uuid,)
+            ).fetchone() is not None
+
     def create_item(
         self,
         studio_name: str,

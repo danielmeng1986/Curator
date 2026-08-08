@@ -873,9 +873,43 @@ class TestAuthenticatedApiWorkflow(_TestServerBase):
         self.assertIn("token", issued)
         self.assertNotIn("token_hash", issued["token_record"])
         headers = {"Authorization": f"Bearer {issued['token']}"}
-        status, preview = self._post("/api/v1/import/preview", {"items": []}, headers)
+        status, preview = self._post("/api/v1/import/preview", {
+            "items": [{"model_name": "API Model", "album_name": "API Album", "studio_name": "API Studio"}],
+            "import_action": "DATABASE_ONLY",
+        }, headers)
         self.assertEqual(200, status)
         self.assertIn("preview", preview["data"])
+        self.assertIn("preview_token", preview["data"]["preview"])
+
+    def test_import_execute_requires_valid_unreplayed_preview_token(self):
+        import repositories as repo
+        import services as svc
+        marker = self._db.execute("SELECT COUNT(*) FROM album").fetchone()[0]
+        auth = svc.AuthenticationService(
+            repo.AuthRepository(lambda: self._db), registration_secret="import-proof"
+        )
+        registration = auth.request_registration(
+            device_name="Import Writer", device_identity=f"import-writer-{marker}",
+            requested_role="writer", requested_scopes=None,
+            registration_proof="import-proof",
+        )
+        issued = auth.approve_registration(registration["uuid"])
+        headers = {"Authorization": f"Bearer {issued['token']}"}
+        status, preview = self._post("/api/v1/import/preview", {
+            "items": [{"model_name": f"Token Model {marker}", "album_name": f"Token Album {marker}", "studio_name": "Token Studio"}],
+            "import_action": "DATABASE_ONLY",
+        }, headers)
+        self.assertEqual(status, 200)
+        token = preview["data"]["preview"]["preview_token"]
+        status, tampered = self._post("/api/v1/import/execute", {"preview_token": token + "x"}, headers)
+        self.assertEqual(status, 409)
+        self.assertEqual(tampered["error"]["code"], "IMPORT_PREVIEW_INVALID")
+        status, executed = self._post("/api/v1/import/execute", {"preview_token": token}, headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(executed["data"]["summary"]["created"], 1)
+        status, replay = self._post("/api/v1/import/execute", {"preview_token": token}, headers)
+        self.assertEqual(status, 409)
+        self.assertEqual(replay["error"]["code"], "IMPORT_PREVIEW_REPLAYED")
 
     def test_rejected_import_request_has_no_business_side_effect(self):
         before = self._db.execute("SELECT COUNT(*) FROM album").fetchone()[0]

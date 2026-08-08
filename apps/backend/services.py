@@ -35,6 +35,9 @@ except ImportError:  # Focused test discovery still loads sibling modules direct
 IMPORT_ACTION_DATABASE_ONLY: str = "DATABASE_ONLY"
 IMPORT_ACTION_COPY: str = "COPY"
 IMPORT_ACTION_MOVE: str = "MOVE"
+IMPORT_ACTIONS: frozenset[str] = frozenset({
+    IMPORT_ACTION_DATABASE_ONLY, IMPORT_ACTION_COPY, IMPORT_ACTION_MOVE,
+})
 
 # ---------------------------------------------------------------------------
 # Snapshot policy constants
@@ -1055,6 +1058,7 @@ class ImportService:
         change_log_fn,
         operation_service,
         initiator: str = "CLI",
+        preview_secret: bytes | None = None,
     ):
         self._repo = import_repo
         self._snapshot = snapshot_fn
@@ -1062,9 +1066,62 @@ class ImportService:
         self._change_log = change_log_fn
         self._operations = operation_service
         self._initiator = initiator
+        self._preview_secret = preview_secret
+
+    @staticmethod
+    def _source_fingerprint(source_path: str) -> dict:
+        """Return deterministic source state without serializing it to public results."""
+        if not source_path:
+            return {"exists": False, "kind": "absent", "digest": None}
+        source = Path(source_path)
+        if not source.exists():
+            return {"exists": False, "kind": "missing", "digest": None}
+        entries = []
+        if source.is_dir():
+            for item in sorted(source.rglob("*"), key=lambda value: str(value.relative_to(source))):
+                stat = item.stat()
+                entries.append([
+                    str(item.relative_to(source)), "dir" if item.is_dir() else "file",
+                    stat.st_size, stat.st_mtime_ns,
+                ])
+            kind = "directory"
+        else:
+            stat = source.stat()
+            entries.append([source.name, "file", stat.st_size, stat.st_mtime_ns])
+            kind = "file"
+        digest = hashlib.sha256(
+            json.dumps(entries, ensure_ascii=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return {"exists": True, "kind": kind, "digest": digest}
+
+    def _sign_import_preview(self, payload: dict) -> str:
+        if not self._preview_secret:
+            raise RuntimeError("Import preview signing is not configured.")
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        encoded = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+        signature = hmac.new(self._preview_secret, encoded.encode(), hashlib.sha256).hexdigest()
+        return f"{encoded}.{signature}"
+
+    def _read_import_preview(self, token: str) -> dict:
+        if not self._preview_secret or "." not in token:
+            raise ServiceConflict("IMPORT_PREVIEW_INVALID", "The Import preview is invalid.")
+        encoded, signature = token.rsplit(".", 1)
+        expected = hmac.new(self._preview_secret, encoded.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            raise ServiceConflict("IMPORT_PREVIEW_INVALID", "The Import preview is invalid.")
+        try:
+            payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+            if datetime.fromisoformat(payload["expires_at"]) <= datetime.now(timezone.utc):
+                raise ServiceConflict("IMPORT_PREVIEW_EXPIRED", "The Import preview has expired.")
+            return payload
+        except ServiceConflict:
+            raise
+        except Exception as exc:
+            raise ServiceConflict("IMPORT_PREVIEW_INVALID", "The Import preview is invalid.") from exc
 
     def preview(
-        self, items: list, archive_root: str, default_studio: str
+        self, items: list, archive_root: str, default_studio: str,
+        import_action: str | None = None,
     ) -> dict:
         """Build a deterministic import preview for the supplied candidate items.
 
@@ -1089,6 +1146,8 @@ class ImportService:
         Returns a dict with ``items`` (per-candidate outcome) and ``summary``
         (total / importable / skipped counts).
         """
+        if import_action is not None and import_action not in IMPORT_ACTIONS:
+            raise ValueError("Import Action must be COPY, MOVE, or DATABASE_ONLY.")
         # ---------------------------------------------------------------
         # Pass 1 — normalize all candidates, compute comparison keys.
         # ---------------------------------------------------------------
@@ -1177,6 +1236,11 @@ class ImportService:
             source_at_canonical_destination = _source_is_canonical_destination(
                 n["source_path"], full_path
             )
+            source_state = self._source_fingerprint(n["source_path"])
+            if import_action in {IMPORT_ACTION_COPY, IMPORT_ACTION_MOVE} and not source_state["exists"]:
+                errors.append(
+                    {"code": "SOURCE_NOT_FOUND", "message": "The selected source no longer exists."}
+                )
             if path_exists and not source_at_canonical_destination:
                 errors.append(
                     {
@@ -1201,7 +1265,7 @@ class ImportService:
                     "source_at_canonical_destination": source_at_canonical_destination,
                     "effective_action": (
                         IMPORT_ACTION_DATABASE_ONLY
-                        if source_at_canonical_destination else None
+                        if source_at_canonical_destination else import_action
                     ),
                     "can_import": not errors,
                 }
@@ -1209,7 +1273,7 @@ class ImportService:
 
         total = len(preview_items)
         importable = sum(1 for x in preview_items if x["can_import"])
-        return {
+        result = {
             "items": preview_items,
             "summary": {
                 "total": total,
@@ -1217,6 +1281,59 @@ class ImportService:
                 "skipped": total - importable,
             },
         }
+        if self._preview_secret and import_action is not None and importable:
+            token_items = [
+                {
+                    "folder_name": item["folder_name"], "model_name": item["model_name"],
+                    "album_name": item["album_name"], "studio_name": item["studio_name"],
+                    "source_path": item["source_path"], "expected_path": item["expected_path"],
+                    "source_state": self._source_fingerprint(item["source_path"]),
+                }
+                for item in preview_items if item["can_import"]
+            ]
+            payload = {
+                "preview_uuid": str(_uuid_mod.uuid4()), "items": token_items,
+                "import_action": import_action,
+                "archive_root": str(Path(archive_root).resolve()),
+                "default_studio": default_studio,
+                "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+            }
+            result["preview_token"] = self._sign_import_preview(payload)
+            result["preview_uuid"] = payload["preview_uuid"]
+            result["expires_at"] = payload["expires_at"]
+            result["import_action"] = import_action
+        return result
+
+    def execute_preview(self, preview_token: str, archive_root: str, default_studio: str) -> dict:
+        """Revalidate, claim, and execute exactly one reviewed Import preview."""
+        payload = self._read_import_preview(preview_token)
+        if self._repo.preview_is_claimed(payload["preview_uuid"]):
+            raise ServiceConflict("IMPORT_PREVIEW_REPLAYED", "The Import preview was already used.")
+        if str(Path(archive_root).resolve()) != payload["archive_root"] or default_studio != payload["default_studio"]:
+            raise ServiceConflict("IMPORT_PREVIEW_STALE", "Import configuration changed after preview.")
+        executable_items = []
+        for item in payload["items"]:
+            if self._source_fingerprint(item["source_path"]) != item["source_state"]:
+                raise ServiceConflict("IMPORT_PREVIEW_STALE", "An Import source changed after preview.")
+            executable_items.append({key: item[key] for key in (
+                "folder_name", "model_name", "album_name", "studio_name", "source_path"
+            )})
+        revalidated = self.preview(
+            executable_items, archive_root, default_studio,
+            import_action=payload["import_action"],
+        )
+        if len(revalidated["items"]) != len(executable_items) or any(
+            not item["can_import"] for item in revalidated["items"]
+        ):
+            raise ServiceConflict("IMPORT_PREVIEW_STALE", "Import state changed after preview.")
+        try:
+            self._repo.claim_preview(payload["preview_uuid"], _utc_now_iso())
+        except repo.PersistenceConflict as exc:
+            raise ServiceConflict("IMPORT_PREVIEW_REPLAYED", "The Import preview was already used.", exc.details) from exc
+        return self.execute(
+            executable_items, archive_root, default_studio,
+            import_action=payload["import_action"],
+        )
 
     def execute(
         self,
