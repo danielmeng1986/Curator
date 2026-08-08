@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-010` — Status: `Proposed`
+`UI-010` — Status: `Complete`
 
 ## Title
 
@@ -57,3 +57,14 @@ Trash, and administrative history.
 ## Risks or Notes
 
 - An Admin Center raises the impact of browser credential compromise; its pages should avoid long-lived secret exposure and unsafe cached content.
+
+## Completion Notes
+
+- Added an Admin-only route and navigation entry with overview counts and
+  capability readiness; unavailable sections remain disabled rather than
+  linking to placeholder mutation pages.
+- Reader/Writer route guards run before protected Admin fetches.
+- Added one shared high-risk interaction pattern with impact copy, typed phrase,
+  duplicate-action lock, safe cancellation, and structured result handling.
+- Overview surfaces no Token plaintext/hash, registration proof, raw diagnostic,
+  or arbitrary filesystem path.
