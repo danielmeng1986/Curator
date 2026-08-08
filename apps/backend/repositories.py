@@ -2006,6 +2006,7 @@ class ImportRepository:
                 "SELECT 1 FROM import_preview_claim WHERE preview_uuid = ?", (preview_uuid,)
             ).fetchone() is not None
 
+
     def create_item(
         self,
         studio_name: str,
@@ -2349,6 +2350,31 @@ class RepairSuppressionRepository:
                 "SELECT * FROM repair_suppression ORDER BY created_at DESC, id DESC"
             ).fetchall()
         return [self._normalise(dict(row)) for row in rows]
+
+
+class SnapshotCleanupRepository:
+    """Durable single-use claims for reviewed snapshot cleanup previews."""
+
+    def __init__(self, db_factory):
+        self._db = db_factory
+
+    def claim_preview(self, preview_uuid: str, claimed_at: str) -> None:
+        with self._db() as conn:
+            conn.execute("""CREATE TABLE IF NOT EXISTS snapshot_cleanup_preview_claim (
+                preview_uuid TEXT PRIMARY KEY, claimed_at TEXT NOT NULL)""")
+            try:
+                conn.execute("INSERT INTO snapshot_cleanup_preview_claim VALUES (?, ?)",
+                             (preview_uuid, claimed_at))
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                raise PersistenceConflict({"preview_uuid": preview_uuid, "reason": "already_claimed"}) from exc
+
+    def preview_is_claimed(self, preview_uuid: str) -> bool:
+        with self._db() as conn:
+            exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='snapshot_cleanup_preview_claim'").fetchone()
+            return bool(exists and conn.execute(
+                "SELECT 1 FROM snapshot_cleanup_preview_claim WHERE preview_uuid=?", (preview_uuid,)
+            ).fetchone())
 
 
 class QuarantineRepository:

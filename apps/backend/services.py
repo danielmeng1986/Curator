@@ -1762,6 +1762,11 @@ class BackupService:
         public_item_fn,
         parse_tag_fn,
         cleanup_fn=None,
+        preview_secret=None,
+        cleanup_repo=None,
+        delete_snapshot_fn=None,
+        verify_snapshot_fn=None,
+        operation_service=None,
     ):
         self._snapshot = snapshot_fn
         self._restore = restore_fn
@@ -1772,6 +1777,120 @@ class BackupService:
         self._public_item = public_item_fn
         self._parse_tag = parse_tag_fn
         self._cleanup = cleanup_fn
+        self._preview_secret = preview_secret
+        self._cleanup_repo = cleanup_repo
+        self._delete_snapshot = delete_snapshot_fn
+        self._verify_snapshot = verify_snapshot_fn
+        self._operations = operation_service
+
+    @staticmethod
+    def _identity(item: dict) -> str:
+        value = f"{item.get('filename','')}:{item.get('size_bytes',0)}:{item.get('created_at','')}"
+        return hashlib.sha256(value.encode()).hexdigest()[:24]
+
+    def recovery_points(self, now: datetime | None = None) -> list[dict]:
+        """Return safe Backend-discovered recovery-point administration models."""
+        result = []
+        for raw in self._catalog():
+            item = dict(raw)
+            protection = (SNAP_PROTECTION_PROTECTED if item.get("protected")
+                          else item.get("protection_state", SNAP_PROTECTION_NONE))
+            result.append({
+                "identity": self._identity(item),
+                "filename": item.get("filename"),
+                "size_bytes": item.get("size_bytes", 0),
+                "created_at": item.get("created_at"),
+                "reason": item.get("reason", ""),
+                "tag": item.get("tag", ""),
+                "retention_class": item.get("retention_class", SNAP_RETENTION_ORDINARY),
+                "protection_state": protection,
+                "cleanup_eligible": is_retention_eligible({
+                    "created_at": item.get("created_at"),
+                    "retention_class": item.get("retention_class", SNAP_RETENTION_ORDINARY),
+                    "protection_state": protection,
+                }, now),
+                "verification_state": item.get("verification_state", "not_verified"),
+            })
+        return result
+
+    def verify(self, identity: str) -> dict:
+        if not self._verify_snapshot:
+            raise RuntimeError("Snapshot verification is not configured.")
+        raw = next((x for x in self._catalog() if self._identity(x) == identity), None)
+        if raw is None:
+            raise ServiceNotFound("Recovery point not found.")
+        return {"identity": identity, **self._verify_snapshot(raw)}
+
+    def _sign_cleanup(self, payload: dict) -> str:
+        if not self._preview_secret:
+            raise RuntimeError("Snapshot cleanup preview signing is not configured.")
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        encoded = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+        return f"{encoded}.{hmac.new(self._preview_secret, encoded.encode(), hashlib.sha256).hexdigest()}"
+
+    def _read_cleanup(self, token: str) -> dict:
+        try:
+            encoded, signature = token.rsplit(".", 1)
+            expected = hmac.new(self._preview_secret, encoded.encode(), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(signature, expected):
+                raise ValueError
+            payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+            if datetime.fromisoformat(payload["expires_at"]) <= datetime.now(timezone.utc):
+                raise ServiceConflict("SNAPSHOT_CLEANUP_PREVIEW_EXPIRED", "The cleanup preview has expired.")
+            return payload
+        except ServiceConflict:
+            raise
+        except Exception as exc:
+            raise ServiceConflict("SNAPSHOT_CLEANUP_PREVIEW_INVALID", "The cleanup preview is invalid.") from exc
+
+    def preview_cleanup(self, now: datetime | None = None) -> dict:
+        now = now or datetime.now(timezone.utc)
+        items = [x for x in self.recovery_points(now) if x["cleanup_eligible"]]
+        payload = {
+            "preview_uuid": str(_uuid_mod.uuid4()),
+            "eligible": [{"identity": x["identity"], "filename": x["filename"]} for x in items],
+            "expires_at": (now + timedelta(minutes=15)).isoformat(),
+        }
+        return {"items": items, "summary": {"eligible": len(items)},
+                "preview_token": self._sign_cleanup(payload), "expires_at": payload["expires_at"]}
+
+    def execute_cleanup(self, token: str) -> dict:
+        if not self._cleanup_repo or not self._delete_snapshot:
+            raise RuntimeError("Snapshot cleanup execution is not configured.")
+        payload = self._read_cleanup(token)
+        if self._cleanup_repo.preview_is_claimed(payload["preview_uuid"]):
+            raise ServiceConflict("SNAPSHOT_CLEANUP_PREVIEW_REPLAYED", "The cleanup preview was already used.")
+        current = {self._identity(x): x for x in self._catalog()}
+        reviewed = payload["eligible"]
+        for expected in reviewed:
+            raw = current.get(expected["identity"])
+            if raw is None or not is_retention_eligible({
+                "created_at": raw.get("created_at"),
+                "retention_class": raw.get("retention_class", SNAP_RETENTION_ORDINARY),
+                "protection_state": SNAP_PROTECTION_PROTECTED if raw.get("protected") else SNAP_PROTECTION_NONE,
+            }):
+                raise ServiceConflict("SNAPSHOT_CLEANUP_PREVIEW_STALE", "The recovery-point catalog changed after preview.")
+        try:
+            self._cleanup_repo.claim_preview(payload["preview_uuid"], _utc_now_iso())
+        except repo.PersistenceConflict as exc:
+            raise ServiceConflict("SNAPSHOT_CLEANUP_PREVIEW_REPLAYED", "The cleanup preview was already used.") from exc
+        operation = self._operations.begin("snapshot_cleanup", OP_INITIATOR_WEB_UI,
+                                           summary=f"Cleanup {len(reviewed)} reviewed recovery points") if self._operations else None
+        deleted, failed = [], []
+        for expected in reviewed:
+            try:
+                self._delete_snapshot(current[expected["identity"]])
+                deleted.append(expected)
+            except Exception as exc:
+                failed.append({**expected, "error": str(exc)})
+        if operation:
+            if failed:
+                self._operations.fail(operation["uuid"], "snapshot", "PARTIAL_CLEANUP",
+                                      summary=f"Deleted {len(deleted)}; failed {len(failed)}")
+            else:
+                self._operations.succeed(operation["uuid"], summary=f"Deleted {len(deleted)} recovery points")
+        return {"deleted": deleted, "failed": failed,
+                "operation_uuid": operation["uuid"] if operation else None}
 
     def create(self, reason: str, tag: str = "") -> dict:
         """Create a named snapshot and log the outcome.
@@ -1782,6 +1901,9 @@ class BackupService:
         Raises:
             Exception: If the snapshot operation fails (caller maps to 500).
         """
+        operation = self._operations.begin(
+            "snapshot_create", OP_INITIATOR_WEB_UI, summary="Create manual recovery point"
+        ) if self._operations else None
         snap = self._snapshot(reason, tag)
         entry = {
             "timestamp": _utc_now_iso(),
@@ -1791,7 +1913,16 @@ class BackupService:
             "tag": tag,
         }
         self._backup_log(entry)
-        return {"snapshot": str(snap), "filename": snap.name}
+        if operation:
+            self._operations.succeed(operation["uuid"], summary=f"Created recovery point {snap.name}")
+        discovered = next((x for x in self._catalog()
+                           if x.get("filename") == snap.name), None)
+        recovery_point = None
+        if discovered is not None:
+            recovery_point = next((x for x in self.recovery_points()
+                                   if x["identity"] == self._identity(discovered)), None)
+        return {"recovery_point": recovery_point or {"filename": snap.name},
+                "operation_uuid": operation["uuid"] if operation else None}
 
     def create_failed(self, reason: str, tag: str, error: Exception) -> None:
         """Log a failed snapshot attempt."""

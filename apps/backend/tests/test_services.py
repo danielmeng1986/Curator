@@ -13,7 +13,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -1329,10 +1329,10 @@ class TestBackupServiceCreate(unittest.TestCase):
             parse_tag_fn=lambda p: "",
         )
 
-    def test_create_returns_snapshot_and_filename(self):
+    def test_create_returns_safe_recovery_point_without_path(self):
         result = self.service.create("manual", "")
-        self.assertIn("snapshot", result)
-        self.assertIn("filename", result)
+        self.assertEqual(result["recovery_point"]["filename"], self.snap_path.name)
+        self.assertNotIn("snapshot", result)
 
     def test_create_logs_success(self):
         self.service.create("manual", "")
@@ -1344,6 +1344,58 @@ class TestBackupServiceCreate(unittest.TestCase):
     def test_create_logs_with_tag(self):
         self.service.create("manual", "my-tag")
         self.assertEqual(self.log_calls[0]["tag"], "my-tag")
+
+
+class TestBackupAdministrationContract(unittest.TestCase):
+    class Claims:
+        def __init__(self): self.claimed = set()
+        def preview_is_claimed(self, value): return value in self.claimed
+        def claim_preview(self, value, _at):
+            if value in self.claimed: raise repo.PersistenceConflict({})
+            self.claimed.add(value)
+
+    def setUp(self):
+        old = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+        self.raw = {"filename": "Curator_old_manual.db", "path": "/managed/Curator_old_manual.db",
+                    "size_bytes": 12, "created_at": old, "reason": "manual", "tag": "before-change",
+                    "protected": False, "retention_class": "ordinary", "_created_at_dt": None}
+        self.deleted = []
+        self.claims = self.Claims()
+        self.service = svc.BackupService(
+            snapshot_fn=MagicMock(), restore_fn=MagicMock(), backup_log_fn=MagicMock(),
+            rollback_log_fn=MagicMock(), catalog_fn=lambda: [self.raw], last_change_fn=lambda: None,
+            public_item_fn=lambda x: x, parse_tag_fn=lambda p: "", preview_secret=b"test-secret",
+            cleanup_repo=self.claims, delete_snapshot_fn=lambda x: self.deleted.append(x["filename"]),
+            verify_snapshot_fn=lambda x: {"verification_state": "verified"},
+        )
+
+    def test_catalog_omits_absolute_path_and_exposes_policy(self):
+        item = self.service.recovery_points()[0]
+        self.assertNotIn("path", item)
+        self.assertTrue(item["cleanup_eligible"])
+        self.assertEqual(item["protection_state"], "unprotected")
+
+    def test_cleanup_requires_signed_review_and_is_single_use(self):
+        preview = self.service.preview_cleanup()
+        result = self.service.execute_cleanup(preview["preview_token"])
+        self.assertEqual(result["deleted"][0]["filename"], self.raw["filename"])
+        with self.assertRaisesRegex(svc.ServiceConflict, "already used"):
+            self.service.execute_cleanup(preview["preview_token"])
+
+    def test_tampered_cleanup_has_zero_effect(self):
+        token = self.service.preview_cleanup()["preview_token"]
+        with self.assertRaises(svc.ServiceConflict): self.service.execute_cleanup(token + "x")
+        self.assertEqual(self.deleted, [])
+
+    def test_protected_item_is_never_reviewed_for_cleanup(self):
+        self.raw["protected"] = True
+        preview = self.service.preview_cleanup()
+        self.assertEqual(preview["summary"]["eligible"], 0)
+
+    def test_verification_is_identity_bound(self):
+        identity = self.service.recovery_points()[0]["identity"]
+        self.assertEqual(self.service.verify(identity)["verification_state"], "verified")
+        with self.assertRaises(svc.ServiceNotFound): self.service.verify("unknown")
 
 
 class TestBackupServiceRollback(unittest.TestCase):

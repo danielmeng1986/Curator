@@ -79,6 +79,7 @@ AUTH_REGISTRATION_SECRET = os.environ.get("CURATOR_REGISTRATION_SECRET", "")
 ALBUM_BATCH_PREVIEW_SECRET = secrets.token_bytes(32)
 IMPORT_PREVIEW_SECRET = secrets.token_bytes(32)
 QUARANTINE_PREVIEW_SECRET = secrets.token_bytes(32)
+SNAPSHOT_CLEANUP_PREVIEW_SECRET = secrets.token_bytes(32)
 
 # ---------------------------------------------------------------------------
 # DB helpers
@@ -241,6 +242,9 @@ def build_backup_catalog() -> list:
             "tag": tag,
             "reason": meta.get("reason", ""),
             "protected": protected,
+            "protection_state": "protected" if protected else "unprotected",
+            "retention_class": meta.get("retention_class", "ordinary"),
+            "verification_state": meta.get("verification_state", "not_verified"),
             "_created_at_dt": created_at_dt,
         }
         items.append(item)
@@ -278,6 +282,35 @@ def cleanup_expired_snapshots(retention_days: int) -> dict:
             except Exception as ex:
                 failed.append({"filename": item["filename"], "error": str(ex)})
     return {"deleted": deleted, "failed": failed}
+
+
+def verify_snapshot_item(item: dict) -> dict:
+    """Run SQLite integrity verification for a catalog-resolved snapshot."""
+    path = Path(item["path"])
+    state, detail = "failed", "Recovery point could not be verified."
+    try:
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+            rows = [row[0] for row in conn.execute("PRAGMA integrity_check")]
+        if rows == ["ok"]:
+            state, detail = "verified", "SQLite integrity check passed."
+    except sqlite3.Error:
+        pass
+    append_backup_log({
+        "timestamp": utc_now_iso(), "event": "verification", "snapshot": str(path),
+        "reason": item.get("reason", ""), "tag": item.get("tag", ""),
+        "verification_state": state, "ok": state == "verified",
+    })
+    return {"verification_state": state, "verified_at": utc_now_iso(), "detail": detail}
+
+
+def delete_snapshot_item(item: dict) -> None:
+    """Delete only a catalog-resolved file beneath the configured backup root."""
+    path = Path(item["path"]).resolve()
+    if path.parent != BACKUP_DIR.resolve() or path.suffix != ".db":
+        raise ValueError("Recovery point is outside the managed backup root.")
+    path.unlink()
+    append_backup_log({"timestamp": utc_now_iso(), "event": "cleanup",
+                       "filename": path.name, "ok": True})
 
 
 def find_snapshot_before_or_at(target_dt: datetime) -> dict | None:
@@ -805,9 +838,22 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, {"album": result})
 
     def _get_backups(self):
-        catalog = build_backup_catalog()
-        items = [public_backup_item(x) for x in catalog]
-        self._send_success(200, {"items": items, "retention_days": RETENTION_DAYS})
+        if not self._require_admin_principal(): return
+        service = self._backup_admin_service()
+        self._send_success(200, {"items": service.recovery_points(),
+                                 "retention_days": RETENTION_DAYS})
+
+    def _backup_admin_service(self):
+        return svc.BackupService(
+            snapshot_fn=create_db_snapshot, restore_fn=restore_database_from_snapshot,
+            backup_log_fn=append_backup_log, rollback_log_fn=append_rollback_log,
+            catalog_fn=build_backup_catalog, last_change_fn=get_last_success_change_entry,
+            public_item_fn=public_backup_item, parse_tag_fn=parse_tag_from_name,
+            cleanup_fn=cleanup_expired_snapshots, preview_secret=SNAPSHOT_CLEANUP_PREVIEW_SECRET,
+            cleanup_repo=repo.SnapshotCleanupRepository(open_db),
+            delete_snapshot_fn=delete_snapshot_item, verify_snapshot_fn=verify_snapshot_item,
+            operation_service=svc.OperationService(repo.OperationRepository(open_db)),
+        )
 
     def _operation_reader(self):
         principal = getattr(self, "_principal", None)
@@ -976,8 +1022,16 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._post_import_execute(body)
             elif path == "/api/backup":
                 self._post_backup(body)
+            elif re.match(r"^/api/backups/[^/]+/verify$", path):
+                self._post_backup_verify(path.split("/")[3])
+            elif path == "/api/backups/cleanup/preview":
+                self._send_success(200, {"preview": self._backup_admin_service().preview_cleanup()})
+            elif path == "/api/backups/cleanup/execute":
+                token = body.get("preview_token", "")
+                if not token: raise ValueError("preview_token is required.")
+                self._send_success(200, self._backup_admin_service().execute_cleanup(token))
             elif path == "/api/backup/cleanup":
-                self._post_backup_cleanup()
+                self._send_error(409, "SNAPSHOT_CLEANUP_PREVIEW_REQUIRED", "Create a cleanup preview before execution.")
             elif path == "/api/rollback":
                 self._post_rollback(body)
             elif re.match(r"^/api/auth/registrations/[^/]+/approve$", path):
@@ -1300,6 +1354,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         except Exception as ex:
             backup_service.create_failed(reason, tag, ex)
             self._send_error(500, "INTERNAL_ERROR", "The backup operation failed.")
+
+    def _post_backup_verify(self, identity: str):
+        self._send_success(200, {"verification": self._backup_admin_service().verify(identity)})
 
     def _post_backup_cleanup(self):
         result = cleanup_expired_snapshots(RETENTION_DAYS)
