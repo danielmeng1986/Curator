@@ -141,6 +141,8 @@ AUTH_ROLE_SCOPES: dict[str, frozenset[str]] = {
     "admin": frozenset({"read", "write", "admin"}),
 }
 AUTH_DEFAULT_TOKEN_VALIDITY = timedelta(days=365)
+AUTH_BOOTSTRAP_CODE_VALIDITY = timedelta(minutes=10)
+AUTH_BOOTSTRAP_MAX_ATTEMPTS = 5
 
 
 class AuthenticationService:
@@ -292,6 +294,82 @@ class AuthenticationService:
             "token_record": persisted_token,
             "registration": persisted_registration,
         }
+
+    def bootstrap_status(self) -> dict:
+        initialized = self._repo.has_bootstrapped_admin()
+        current = None if initialized else self._repo.get_current_bootstrap_code()
+        now = self._now_utc()
+        code_available = bool(
+            current
+            and current["used_at"] is None
+            and current["locked_at"] is None
+            and datetime.fromisoformat(current["expires_at"]) > now
+        )
+        return {"initialized": initialized, "code_available": code_available}
+
+    def create_bootstrap_code(self, *, validity: timedelta | None = None) -> dict:
+        """Create one console-disclosed, short-lived Code for loopback bootstrap."""
+        if self._repo.has_bootstrapped_admin():
+            raise ServiceConflict(
+                "AUTHENTICATION_BOOTSTRAP_CLOSED",
+                "Administrator bootstrap is closed because an Admin has already been established.",
+            )
+        lifetime = validity or AUTH_BOOTSTRAP_CODE_VALIDITY
+        if lifetime <= timedelta(0) or lifetime > AUTH_BOOTSTRAP_CODE_VALIDITY:
+            raise ValueError("Bootstrap Code validity must be between zero and ten minutes.")
+        now = self._now_utc()
+        plaintext = secrets.token_urlsafe(12)
+        record = self._repo.create_bootstrap_code({
+            "uuid": str(_uuid_mod.uuid4()),
+            "code_hash": self._hash_token(plaintext),
+            "created_at": now.isoformat(),
+            "expires_at": (now + lifetime).isoformat(),
+        })
+        return {"code": plaintext, "record": record}
+
+    def complete_bootstrap_with_code(
+        self,
+        *,
+        code: str,
+        device_name: str,
+        device_identity: str,
+    ) -> dict:
+        """Consume the active Code and establish the first Admin device."""
+        now = self._now_utc()
+        if self._repo.has_bootstrapped_admin():
+            self._record_operation(
+                "administrator_bootstrap_rejected", "bootstrap",
+                "Administrator UI bootstrap was rejected because initialization is closed.",
+            )
+            raise ServiceConflict("AUTHENTICATION_BOOTSTRAP_CLOSED", "Administrator bootstrap is closed.")
+        current = self._repo.get_current_bootstrap_code()
+        if current is None:
+            raise AuthenticationFailure("AUTHENTICATION_BOOTSTRAP_CODE_REQUIRED", "A current Bootstrap Code is required.")
+        expires_at = datetime.fromisoformat(current["expires_at"])
+        if current["locked_at"] is not None:
+            raise AuthenticationFailure("AUTHENTICATION_BOOTSTRAP_CODE_LOCKED", "The Bootstrap Code is locked.")
+        if expires_at <= now:
+            self._record_operation(
+                "administrator_bootstrap_rejected", current["uuid"],
+                "Administrator UI bootstrap was rejected because the Code expired.",
+            )
+            raise AuthenticationFailure("AUTHENTICATION_BOOTSTRAP_CODE_EXPIRED", "The Bootstrap Code has expired.")
+        supplied_hash = self._hash_token(code if isinstance(code, str) else "")
+        if not hmac.compare_digest(supplied_hash, current["code_hash"]):
+            failed = self._repo.fail_bootstrap_code(current["uuid"], now.isoformat(), AUTH_BOOTSTRAP_MAX_ATTEMPTS)
+            self._record_operation(
+                "administrator_bootstrap_rejected", current["uuid"],
+                "Administrator UI bootstrap was rejected because the Code was invalid.",
+            )
+            error_code = "AUTHENTICATION_BOOTSTRAP_CODE_LOCKED" if failed and failed["locked_at"] else "AUTHENTICATION_INVALID_BOOTSTRAP_CODE"
+            raise AuthenticationFailure(error_code, "The Bootstrap Code is invalid or locked.")
+        issued = self.bootstrap_first_admin(
+            device_name=device_name,
+            device_identity=device_identity,
+        )
+        if not self._repo.consume_bootstrap_code(current["uuid"], now.isoformat()):
+            raise ServiceConflict("AUTHENTICATION_BOOTSTRAP_CODE_USED", "The Bootstrap Code is no longer available.")
+        return issued
 
     def approve_registration(
         self,

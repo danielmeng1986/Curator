@@ -45,6 +45,21 @@ def _bootstrap_admin(args: argparse.Namespace) -> int:
     return 0
 
 
+def _create_bootstrap_code(args: argparse.Namespace) -> int:
+    database_path = Path(args.database or server.DATABASE_PATH).expanduser().resolve()
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    auth = svc.AuthenticationService(repo.AuthRepository(_database_factory(database_path)))
+    try:
+        issued = auth.create_bootstrap_code()
+    except (svc.ServiceConflict, ValueError) as exc:
+        print(f"Bootstrap Code refused: {exc}", file=sys.stderr)
+        return 2
+    print("Administrator UI Bootstrap Code (shown once; valid for 10 minutes):")
+    print(issued["code"])
+    print(f"Expires: {issued['record']['expires_at']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python3 -m apps.backend")
     subcommands = parser.add_subparsers(dest="command")
@@ -55,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
     bootstrap.add_argument("--device-identity", required=True)
     bootstrap.add_argument("--database", help="Explicit database path; defaults to configured Curator database")
     bootstrap.set_defaults(handler=_bootstrap_admin)
+    bootstrap_code = auth_commands.add_parser(
+        "create-bootstrap-code", help="Create a one-time Code for loopback UI bootstrap"
+    )
+    bootstrap_code.add_argument("--database", help="Explicit database path; defaults to configured Curator database")
+    bootstrap_code.set_defaults(handler=_create_bootstrap_code)
     return parser
 
 

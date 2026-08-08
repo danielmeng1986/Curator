@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-004B` — Status: `Proposed`
+`UI-004B` — Status: `Complete`
 
 ## Title
 
@@ -58,3 +58,14 @@ to initialize the first administrator without enabling anonymous self-approval.
 
 - Current loopback approval routes must be reviewed so this flow does not coexist with a weaker unauthenticated approval path.
 
+## Completion Record
+
+- Added a console command that creates a hash-only, ten-minute, single-use UI
+  Bootstrap Code; a new Code invalidates the previous one and five failures
+  lock it.
+- Added loopback-only status/completion endpoints and a first-run UI that saves
+  the issued Admin Token before requiring one-time disclosure acknowledgement.
+- Retired unauthenticated loopback registration approval; approval now requires
+  an authenticated Admin request through `/api/v1`.
+- Migrated disposable browser fixtures to establish an Admin through the local
+  console trust boundary before approving Reader/Writer devices.

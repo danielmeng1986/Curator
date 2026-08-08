@@ -16,6 +16,7 @@ assert.equal(ui.errorPresentation({ code: 'AUTHORIZATION_INSUFFICIENT_SCOPE', st
 assert.equal(ui.errorPresentation({ code: 'REQUEST_INVALID', status: 400, message: 'Title is required.' }).kind, 'validation');
 assert.equal(ui.errorPresentation({ code: 'NEEDS_REPAIR', status: 409 }).title, 'Repair review required');
 assert.equal(ui.errorPresentation({ code: 'NETWORK_UNAVAILABLE' }).kind, 'network');
+assert.equal(ui.errorPresentation({ code: 'AUTHENTICATION_BOOTSTRAP_CODE_LOCKED', message: 'The Bootstrap Code is locked.' }).kind, 'validation');
 assert.equal(ui.errorPresentation({ code: 'INTERNAL_ERROR', message: '<private path>' }).message.includes('private path'), false);
 assert.equal(ui.errorHtml({ code: 'REQUEST_INVALID', status: 400, message: '<bad>' }).includes('&lt;bad&gt;'), true);
 

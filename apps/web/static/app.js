@@ -110,6 +110,10 @@ async function checkHealth() {
 }
 
 function openConnectionSettings() {
+  if (window.curatorBootstrapState && !window.curatorBootstrapState.initialized) {
+    openAdministratorBootstrap();
+    return;
+  }
   const connection = api.getConnection();
   showModal(`
     <h3 class="modal-title">Connect to Curator</h3>
@@ -132,8 +136,85 @@ function openConnectionSettings() {
     const token = document.getElementById('deviceToken').value;
     api.configure({ backendUrl: document.getElementById('backendUrl').value, ...(token ? { token } : {}) });
     closeModal();
-    checkHealth();
+    void checkBootstrap();
+    void checkHealth();
     route();
+  };
+}
+
+async function checkBootstrap() {
+  try {
+    const data = await api.bootstrapStatus();
+    window.curatorBootstrapState = data.bootstrap;
+    const button = document.getElementById('connectionBtn');
+    if (!data.bootstrap.initialized && !api.getConnection().hasToken) {
+      button.textContent = 'Initialize administrator';
+      button.classList.add('btn-accent');
+      button.classList.remove('btn-secondary');
+    } else {
+      button.textContent = 'Connect';
+      button.classList.remove('btn-accent');
+      button.classList.add('btn-secondary');
+    }
+  } catch {
+    window.curatorBootstrapState = null;
+  }
+}
+
+function openAdministratorBootstrap() {
+  const state = window.curatorBootstrapState || {};
+  ui.showModal(`
+    <h3 class="modal-title">Initialize Curator administrator</h3>
+    <p>On the Backend host, run <code>python3 -m apps.backend auth create-bootstrap-code</code>. Enter the one-time Code below within ten minutes.</p>
+    ${state.code_available ? '' : '<div class="feedback feedback-warning"><p>No active Bootstrap Code is available yet.</p></div>'}
+    <div class="form-field">
+      <label for="bootstrapDeviceName">Administrator device name</label>
+      <input id="bootstrapDeviceName" value="Local Administrator" autocomplete="off">
+    </div>
+    <div class="form-field" style="margin-top:12px">
+      <label for="bootstrapCode">Bootstrap Code</label>
+      <input id="bootstrapCode" type="password" autocomplete="one-time-code" placeholder="Required">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="bootstrapCancel">Cancel</button>
+      <button class="btn btn-primary" id="bootstrapSubmit">Initialize</button>
+    </div>
+  `);
+  document.getElementById('bootstrapCancel').onclick = closeModal;
+  document.getElementById('bootstrapSubmit').onclick = async (event) => {
+    const codeInput = document.getElementById('bootstrapCode');
+    const deviceName = document.getElementById('bootstrapDeviceName').value.trim();
+    const code = codeInput.value;
+    if (!deviceName || !code) { toast('Device name and Bootstrap Code are required.', 'error'); return; }
+    const result = await ui.runAction('administrator-bootstrap', () => api.completeBootstrap({
+      code,
+      device_name: deviceName,
+      device_identity: api.getDeviceIdentity(),
+    }), { trigger: event.currentTarget, context: 'initialize the administrator' });
+    codeInput.value = '';
+    if (!result.ok) return;
+    const issued = result.value;
+    api.configure({ token: issued.token });
+    window.curatorBootstrapState = { initialized: true, code_available: false };
+    ui.showModal(`
+      <h3 class="modal-title">Administrator initialized</h3>
+      <div class="feedback feedback-warning">
+        <p>This Admin Token is shown once. It is already stored in this browser profile; copy it to secure storage before continuing.</p>
+      </div>
+      <pre class="one-time-token" id="issuedAdminToken"></pre>
+      <label class="acknowledgement"><input type="checkbox" id="bootstrapAcknowledged"> I have stored the Token securely.</label>
+      <div class="modal-footer"><button class="btn btn-primary" id="bootstrapFinish" disabled>Continue</button></div>
+    `, { dismissible: false });
+    document.getElementById('issuedAdminToken').textContent = issued.token;
+    document.getElementById('bootstrapAcknowledged').onchange = (changeEvent) => {
+      document.getElementById('bootstrapFinish').disabled = !changeEvent.target.checked;
+    };
+    document.getElementById('bootstrapFinish').onclick = () => {
+      closeModal();
+      void checkBootstrap();
+      void checkHealth();
+      route();
+    };
   };
 }
 
@@ -151,6 +232,7 @@ document.getElementById('globalSearch').addEventListener('keydown', e => {
 window.addEventListener('hashchange', route);
 window.addEventListener('load', () => {
   document.getElementById('connectionBtn').onclick = openConnectionSettings;
+  void checkBootstrap();
   route();
   checkHealth();
   setInterval(checkHealth, 60000);

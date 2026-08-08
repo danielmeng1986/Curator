@@ -1,11 +1,14 @@
 /* Shared disposable scenario builder for Curator browser workflow tests. */
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { resolve, sep } from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 export const SCENARIOS = Object.freeze({
   empty: Object.freeze({ readiness: 'Ready' }),
@@ -44,7 +47,7 @@ async function post(origin, path, body, token = '') {
   return payload.data;
 }
 
-async function issueDevice(origin, secret, fixtureId, role, index) {
+async function issueDevice(origin, secret, fixtureId, role, index, adminToken) {
   if (!ROLE_SCOPES[role]) throw new Error(`Unsupported fixture role: ${role}`);
   const registration = await post(origin, '/api/auth/registrations', {
     device_name: `Browser fixture ${role}`,
@@ -53,7 +56,9 @@ async function issueDevice(origin, secret, fixtureId, role, index) {
     requested_scopes: ROLE_SCOPES[role],
     registration_proof: secret,
   });
-  const issued = await post(origin, `/api/auth/registrations/${registration.registration.uuid}/approve`, {});
+  const issued = await post(
+    origin, `/api/v1/auth/registrations/${registration.registration.uuid}/approve`, {}, adminToken,
+  );
   return Object.freeze({
     token: issued.token,
     tokenRecord: issued.token_record,
@@ -62,7 +67,25 @@ async function issueDevice(origin, secret, fixtureId, role, index) {
   });
 }
 
-export async function startBrowserFixture({ scenario = 'empty', roles = ['writer'], artifactDir = null } = {}) {
+export async function createBootstrapCode(databasePath) {
+  const { stdout } = await execFileAsync('python3', [
+    '-m', 'apps.backend', 'auth', 'create-bootstrap-code', '--database', databasePath,
+  ], { cwd: process.cwd() });
+  const lines = stdout.split(/\r?\n/);
+  return lines[lines.indexOf('Administrator UI Bootstrap Code (shown once; valid for 10 minutes):') + 1];
+}
+
+async function bootstrapFixtureAdmin(databasePath) {
+  const { stdout } = await execFileAsync('python3', [
+    '-m', 'apps.backend', 'auth', 'bootstrap-admin',
+    '--device-name', 'Fixture Administrator', '--device-identity', `fixture-admin-${randomBytes(8).toString('hex')}`,
+    '--database', databasePath,
+  ], { cwd: process.cwd() });
+  const lines = stdout.split(/\r?\n/);
+  return lines[lines.indexOf('Admin Token (shown once):') + 1];
+}
+
+export async function startBrowserFixture({ scenario = 'empty', roles = ['writer'], artifactDir = null, bootstrapAdmin = true } = {}) {
   const metadata = SCENARIOS[scenario];
   if (!metadata) throw new Error(`Unknown browser fixture scenario: ${scenario}`);
   if (metadata.readiness !== 'Ready') {
@@ -90,10 +113,16 @@ export async function startBrowserFixture({ scenario = 'empty', roles = ['writer
   assert.equal(isUnder(repoRuntime, manifest.root), false, 'fixture root must not use repository runtime');
 
   const devices = {};
+  const fixtureAdminToken = bootstrapAdmin ? await bootstrapFixtureAdmin(manifest.resources.database) : null;
+  if (!bootstrapAdmin && roles.length) throw new Error('roles require bootstrapAdmin in the secured fixture.');
   for (const [index, role] of roles.entries()) {
-    devices[role] = await issueDevice(manifest.origin, secret, manifest.fixture_id, role, index);
+    if (role === 'admin') {
+      devices.admin = Object.freeze({ token: fixtureAdminToken, role: 'admin' });
+    } else {
+      devices[role] = await issueDevice(manifest.origin, secret, manifest.fixture_id, role, index, fixtureAdminToken);
+    }
   }
-  const secrets = [secret, ...Object.values(devices).map((device) => device.token)];
+  const secrets = [secret, fixtureAdminToken, ...Object.values(devices).map((device) => device.token)].filter(Boolean);
 
   return Object.freeze({
     ...manifest,

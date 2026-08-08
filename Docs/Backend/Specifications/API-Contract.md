@@ -163,7 +163,20 @@ The Backend recognizes only these policy categories:
 2. **Loopback-only diagnostics** MAY be unauthenticated only when explicitly declared, bound to loopback, and limited to safe diagnostics.
 3. **Public/bootstrap routes** MAY exist only when explicitly declared by a route specification and must state their purpose, exposure, allowed inputs, and rate/abuse safeguards.
 
-Every exception MUST be declared by its route-specific specification, including whether it is local-only and whether authentication is waived. Until a route is so declared, it is a normal bearer-token-protected route. Current specifications do not declare a general unauthenticated management, registration, approval, or token-issuance route; any later route must meet this policy and the Authentication Specification.
+Every exception MUST be declared by its route-specific specification, including whether it is local-only and whether authentication is waived. Until a route is so declared, it is a normal bearer-token-protected route.
+
+The Authentication Specification declares exactly these current loopback-only
+exceptions outside `/api/v1`:
+
+| Route | Unauthenticated purpose and constraint |
+| --- | --- |
+| `POST /api/auth/registrations` | Submit a registration bearing the configured registration proof; it creates Pending Approval only and never issues a Token. |
+| `GET /api/auth/bootstrap/status` | Disclose only whether first Admin initialization is complete and whether a current Code is available. |
+| `POST /api/auth/bootstrap/complete` | Consume a console-created, short-lived, single-use Code to establish the first Admin exactly once. |
+
+All three reject non-loopback clients. Registration approval and every later
+authentication-management action use bearer-protected `/api/v1` routes with
+Admin scope. In particular, there is no unauthenticated loopback approval route.
 
 ## Confirmation-required and repair-required outcomes
 

@@ -460,7 +460,7 @@ class AppHandler(SimpleHTTPRequestHandler):
     @staticmethod
     def _required_scope(path: str, method: str) -> str:
         """Return the least privilege required by a versioned API route."""
-        if path in {"/api/backup", "/api/backup/cleanup", "/api/rollback"} or path.startswith("/api/backups"):
+        if path in {"/api/backup", "/api/backup/cleanup", "/api/rollback"} or path.startswith("/api/backups") or path.startswith("/api/auth/"):
             return "admin"
         return "read" if method == "GET" else "write"
 
@@ -500,6 +500,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         path = parsed.path
         qs = parse_qs(parsed.query)
 
+        if path == "/api/auth/bootstrap/status":
+            self._handle_auth_bootstrap_status()
+            return
         if path.startswith("/api/v1/"):
             legacy_path = self._versioned_path_to_legacy(path)
             if not self._authorize_versioned_api(legacy_path, "GET"):
@@ -539,7 +542,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._handle_api_post(path, body)
 
     def _handle_auth_management_post(self, path: str, body: dict) -> None:
-        """Loopback-only registration management, outside normal bearer auth."""
+        """Loopback-only registration request and first bootstrap boundary."""
         if self.client_address[0] not in {"127.0.0.1", "::1"}:
             self._send_error(403, "AUTHORIZATION_LOOPBACK_REQUIRED", "Authentication management is available only on loopback.")
             return
@@ -555,10 +558,18 @@ class AppHandler(SimpleHTTPRequestHandler):
                     registration_proof=body.get("registration_proof", ""),
                 )
                 self._send_success(201, {"registration": registration})
-            elif re.match(r"^/api/auth/registrations/[^/]+/approve$", path):
-                registration_uuid = path.split("/")[4]
-                issued = auth.approve_registration(registration_uuid, approved_role=body.get("approved_role"), approved_scopes=body.get("approved_scopes"))
+            elif path == "/api/auth/bootstrap/complete":
+                issued = auth.complete_bootstrap_with_code(
+                    code=body.get("code", ""),
+                    device_name=body.get("device_name", ""),
+                    device_identity=body.get("device_identity", ""),
+                )
                 self._send_success(200, issued)
+            elif re.match(r"^/api/auth/registrations/[^/]+/approve$", path):
+                self._send_error(
+                    403, "AUTHORIZATION_ADMIN_REQUIRED",
+                    "Registration approval requires an authenticated Admin Token.",
+                )
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
         except svc.AuthenticationFailure as exc:
@@ -567,6 +578,13 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_error(403, exc.code, str(exc))
         except (svc.ServiceConflict, ValueError) as exc:
             self._send_error(409, getattr(exc, "code", "BUSINESS_CONFLICT"), str(exc))
+
+    def _handle_auth_bootstrap_status(self) -> None:
+        if self.client_address[0] not in {"127.0.0.1", "::1"}:
+            self._send_error(403, "AUTHORIZATION_LOOPBACK_REQUIRED", "Administrator bootstrap is available only on loopback.")
+            return
+        auth = svc.AuthenticationService(repo.AuthRepository(open_db))
+        self._send_success(200, {"bootstrap": auth.bootstrap_status()})
 
     def do_PUT(self):
         parsed = urlparse(self.path)
@@ -806,10 +824,34 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._post_backup_cleanup()
             elif path == "/api/rollback":
                 self._post_rollback(body)
+            elif re.match(r"^/api/auth/registrations/[^/]+/approve$", path):
+                self._post_authenticated_registration_approval(path, body)
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
         except Exception:
             self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
+
+    def _post_authenticated_registration_approval(self, path: str, body: dict) -> None:
+        principal = getattr(self, "_principal", None)
+        if principal is None or principal.get("role") != "admin":
+            self._send_error(403, "AUTHORIZATION_ADMIN_REQUIRED", "An Admin Token is required.")
+            return
+        auth = svc.AuthenticationService(
+            repo.AuthRepository(open_db),
+            operation_service=svc.OperationService(repo.OperationRepository(open_db)),
+        )
+        registration_uuid = path.split("/")[4]
+        try:
+            issued = auth.approve_registration(
+                registration_uuid,
+                approved_role=body.get("approved_role"),
+                approved_scopes=body.get("approved_scopes"),
+            )
+            self._send_success(200, issued)
+        except svc.ServiceNotFound as exc:
+            self._send_error(404, "NOT_FOUND", str(exc))
+        except (svc.ServiceConflict, ValueError) as exc:
+            self._send_error(409, getattr(exc, "code", "BUSINESS_CONFLICT"), str(exc))
 
     def _post_status(self, body: dict):
         name = body.get("name", "").strip()

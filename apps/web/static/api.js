@@ -6,6 +6,7 @@
 (function () {
   const TOKEN_KEY = 'curator.web.deviceToken';
   const BACKEND_URL_KEY = 'curator.web.backendUrl';
+  const DEVICE_IDENTITY_KEY = 'curator.web.deviceIdentity';
   const initialConfig = window.CURATOR_WEB_CONFIG || {};
 
   class CuratorApiError extends Error {
@@ -36,6 +37,38 @@
 
   function deviceToken() {
     return localValue(TOKEN_KEY, '');
+  }
+
+  function deviceIdentity() {
+    const existing = localValue(DEVICE_IDENTITY_KEY, '');
+    if (existing) return existing;
+    const generated = window.crypto?.randomUUID?.() || `browser-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    try { window.localStorage.setItem(DEVICE_IDENTITY_KEY, generated); } catch { /* session-only fallback */ }
+    return generated;
+  }
+
+  async function publicAuthFetch(path, options = {}) {
+    let response;
+    try {
+      response = await fetch(`${backendUrl()}${path}`, {
+        ...options,
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...(options.headers || {}) },
+      });
+    } catch {
+      throw new CuratorApiError('NETWORK_UNAVAILABLE', 'The Curator Backend is unavailable.');
+    }
+    let payload = {};
+    try { payload = await response.json(); } catch { /* safe generic error below */ }
+    if (!response.ok || payload.error) {
+      const error = payload.error || {};
+      throw new CuratorApiError(
+        error.code || `HTTP_${response.status}`,
+        error.message || 'The Backend rejected this request.',
+        response.status,
+        { details: error.details || null, requestId: payload.meta?.request_id || null },
+      );
+    }
+    return payload.data;
   }
 
   function legacyReadModel(path, data, meta) {
@@ -112,6 +145,9 @@
     put: (path, body) => apiFetch(path, { method: 'PUT', body: JSON.stringify(body) }),
     del: (path) => apiFetch(path, { method: 'DELETE' }),
     getConnection: () => ({ backendUrl: backendUrl(), hasToken: Boolean(deviceToken()) }),
+    getDeviceIdentity: deviceIdentity,
+    bootstrapStatus: () => publicAuthFetch('/api/auth/bootstrap/status'),
+    completeBootstrap: (body) => publicAuthFetch('/api/auth/bootstrap/complete', { method: 'POST', body: JSON.stringify(body) }),
     configure: ({ backendUrl: nextBackendUrl, token }) => {
       try {
         if (nextBackendUrl !== undefined) window.localStorage.setItem(BACKEND_URL_KEY, nextBackendUrl.trim());

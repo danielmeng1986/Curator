@@ -72,6 +72,18 @@ The supported first phase is a local command. A loopback UI may use a
 console-generated, short-lived, single-use Bootstrap Code as specified below,
 but loopback source address alone never grants administrator authority.
 
+A UI Bootstrap Code is generated only by an explicit local-console command. It
+is random, stored only as a hash, valid for ten minutes, and invalidates any
+previous unused Code. Completion requires both a loopback client address and
+the Code. Five failed attempts lock that Code. Successful completion consumes
+it and establishes the first Admin exactly once. Code values, failed inputs,
+and issued Token plaintext are never written to Operations or logs.
+
+After first bootstrap, registration approval, renewal approval, role elevation,
+and Token revocation require an authenticated Admin Token. The earlier
+loopback-only unauthenticated approval path is not a supported authorization
+boundary and must not remain available alongside Admin management.
+
 Loss of every usable Admin Token is not a new-installation condition. It must
 not reopen bootstrap automatically or through an anonymous UI/API. Recovery
 requires a separately specified, explicitly invoked offline administrator

@@ -754,7 +754,14 @@ class TestAuthenticatedApiWorkflow(_TestServerBase):
         self.assertEqual("AUTHENTICATION_INVALID_REGISTRATION_PROOF", body["error"]["code"])
 
     def test_registration_approval_and_writer_import_preview(self):
+        import repositories as repo
         import server as srv
+        import services as svc
+        auth = svc.AuthenticationService(
+            repo.AuthRepository(lambda: self._db),
+            operation_service=svc.OperationService(repo.OperationRepository(lambda: self._db)),
+        )
+        admin = auth.bootstrap_first_admin(device_name="API Admin", device_identity="api-admin")
         with patch.object(srv, "AUTH_REGISTRATION_SECRET", "test-proof"):
             status, body = self._post("/api/auth/registrations", {
                 "device_name": "workflow worker", "device_identity": "workflow-worker-1",
@@ -764,7 +771,10 @@ class TestAuthenticatedApiWorkflow(_TestServerBase):
             self.assertEqual(201, status)
             registration = body["data"]["registration"]
             self.assertEqual("PendingApproval", registration["status"])
-            status, issued_body = self._post(f"/api/auth/registrations/{registration['uuid']}/approve", {})
+            status, issued_body = self._post(
+                f"/api/v1/auth/registrations/{registration['uuid']}/approve", {},
+                {"Authorization": f"Bearer {admin['token']}"},
+            )
         self.assertEqual(200, status)
         issued = issued_body["data"]
         self.assertIn("token", issued)
@@ -781,6 +791,47 @@ class TestAuthenticatedApiWorkflow(_TestServerBase):
         self.assertEqual("AUTHENTICATION_MISSING_TOKEN", body["error"]["code"])
         after = self._db.execute("SELECT COUNT(*) FROM album").fetchone()[0]
         self.assertEqual(before, after)
+
+
+class TestAdministratorBootstrapApi(_TestServerBase):
+    """UI-004B: loopback Code is required and legacy approval is closed."""
+
+    def _code(self):
+        import repositories as repo
+        import services as svc
+        return svc.AuthenticationService(repo.AuthRepository(lambda: self._db)).create_bootstrap_code()
+
+    def test_status_and_successful_completion_disclose_token_once(self):
+        status, body = self._get("/api/auth/bootstrap/status")
+        self.assertEqual(status, 200)
+        self.assertFalse(body["data"]["bootstrap"]["initialized"])
+        code = self._code()
+        status, body = self._post("/api/auth/bootstrap/complete", {
+            "code": code["code"], "device_name": "Browser Admin", "device_identity": "browser-admin",
+        })
+        self.assertEqual(status, 200)
+        token = body["data"]["token"]
+        self.assertTrue(token)
+        self.assertNotIn("token_hash", body["data"]["token_record"])
+        status, replay = self._post("/api/auth/bootstrap/complete", {
+            "code": code["code"], "device_name": "Replay", "device_identity": "replay",
+        })
+        self.assertEqual(status, 409)
+        self.assertEqual(replay["error"]["code"], "AUTHENTICATION_BOOTSTRAP_CLOSED")
+
+    def test_legacy_unauthenticated_approval_is_rejected(self):
+        status, body = self._post("/api/auth/registrations/not-approved/approve", {})
+        self.assertEqual(status, 403)
+        self.assertEqual(body["error"]["code"], "AUTHORIZATION_ADMIN_REQUIRED")
+
+    def test_non_loopback_status_is_rejected_before_reading_state(self):
+        import server as srv
+        handler = object.__new__(srv.AppHandler)
+        handler.client_address = ("192.0.2.10", 12345)
+        captured = {}
+        handler._send_error = lambda status, code, message: captured.update(status=status, code=code)
+        handler._handle_auth_bootstrap_status()
+        self.assertEqual(captured, {"status": 403, "code": "AUTHORIZATION_LOOPBACK_REQUIRED"})
 
 
 class TestOperationHistoryDisclosure(_TestServerBase):

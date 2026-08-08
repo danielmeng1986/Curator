@@ -102,6 +102,15 @@ class AuthRepository:
                 FOREIGN KEY(registration_uuid) REFERENCES device_registration(uuid),
                 FOREIGN KEY(previous_token_uuid) REFERENCES auth_token(uuid)
             );
+            CREATE TABLE IF NOT EXISTS admin_bootstrap_code (
+                uuid TEXT PRIMARY KEY,
+                code_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT,
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                locked_at TEXT
+            );
             """
         )
         conn.commit()
@@ -293,6 +302,64 @@ class AuthRepository:
             )
             conn.execute("DELETE FROM device_registration WHERE uuid = ?", (registration_uuid,))
             conn.commit()
+
+    def create_bootstrap_code(self, fields: dict) -> dict:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "UPDATE admin_bootstrap_code SET used_at = ? WHERE used_at IS NULL",
+                (fields["created_at"],),
+            )
+            conn.execute(
+                """INSERT INTO admin_bootstrap_code
+                   (uuid, code_hash, created_at, expires_at)
+                   VALUES (?, ?, ?, ?)""",
+                (fields["uuid"], fields["code_hash"], fields["created_at"], fields["expires_at"]),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM admin_bootstrap_code WHERE uuid = ?", (fields["uuid"],)
+            ).fetchone()
+        result = dict(row)
+        result.pop("code_hash", None)
+        return result
+
+    def get_current_bootstrap_code(self) -> dict | None:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                """SELECT * FROM admin_bootstrap_code
+                   WHERE used_at IS NULL ORDER BY created_at DESC LIMIT 1"""
+            ).fetchone()
+        return dict(row) if row else None
+
+    def fail_bootstrap_code(self, code_uuid: str, now_iso: str, maximum_attempts: int) -> dict | None:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                """UPDATE admin_bootstrap_code
+                   SET failed_attempts = failed_attempts + 1,
+                       locked_at = CASE WHEN failed_attempts + 1 >= ? THEN ? ELSE locked_at END
+                   WHERE uuid = ? AND used_at IS NULL""",
+                (maximum_attempts, now_iso, code_uuid),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM admin_bootstrap_code WHERE uuid = ?", (code_uuid,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def consume_bootstrap_code(self, code_uuid: str, now_iso: str) -> bool:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            cursor = conn.execute(
+                """UPDATE admin_bootstrap_code SET used_at = ?
+                   WHERE uuid = ? AND used_at IS NULL AND locked_at IS NULL""",
+                (now_iso, code_uuid),
+            )
+            conn.commit()
+        return cursor.rowcount == 1
 
     def touch_token(self, token_uuid: str, used_at: str) -> None:
         with self._db() as conn:

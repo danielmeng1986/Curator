@@ -25,6 +25,9 @@
     if (code === 'CLIENT_ACTION_IN_PROGRESS') {
       return { kind: 'warning', title: 'Action already in progress', message: 'Wait for the current action to finish before trying again.', reference };
     }
+    if (code.includes('BOOTSTRAP_CODE')) {
+      return { kind: 'validation', title: 'Bootstrap Code unavailable', message: safeBackendMessage || 'Generate a new Bootstrap Code from the Backend console.', reference };
+    }
     if (status === 401 || code.startsWith('AUTHENTICATION_')) {
       return { kind: 'authentication', title: 'Authorization required', message: 'Connect with a valid approved device token, then try again.', reference };
     }

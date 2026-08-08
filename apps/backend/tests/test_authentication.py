@@ -142,6 +142,48 @@ class AdministratorBootstrapTests(unittest.TestCase):
         with self.assertRaisesRegex(svc.ServiceConflict, "already been established"):
             self.auth.bootstrap_first_admin(device_name="Replacement", device_identity="admin-2")
 
+    def test_console_code_is_hashed_short_lived_and_single_use(self):
+        created = self.auth.create_bootstrap_code()
+        stored = self.db.execute("SELECT code_hash FROM admin_bootstrap_code").fetchone()[0]
+        self.assertNotEqual(created["code"], stored)
+        issued = self.auth.complete_bootstrap_with_code(
+            code=created["code"], device_name="Browser Admin", device_identity="browser-admin",
+        )
+        self.assertEqual(self.auth.authenticate(issued["token"], "admin")["role"], "admin")
+        self.assertIsNotNone(self.db.execute("SELECT used_at FROM admin_bootstrap_code").fetchone()[0])
+        with self.assertRaisesRegex(svc.ServiceConflict, "closed"):
+            self.auth.complete_bootstrap_with_code(
+                code=created["code"], device_name="Replay", device_identity="replay-admin",
+            )
+
+    def test_five_wrong_code_attempts_lock_without_creating_authentication_state(self):
+        created = self.auth.create_bootstrap_code()
+        for attempt in range(5):
+            with self.assertRaises(svc.AuthenticationFailure) as context:
+                self.auth.complete_bootstrap_with_code(
+                    code=f"wrong-{attempt}", device_name="Admin", device_identity="admin",
+                )
+        self.assertEqual(context.exception.code, "AUTHENTICATION_BOOTSTRAP_CODE_LOCKED")
+        with self.assertRaisesRegex(svc.AuthenticationFailure, "locked"):
+            self.auth.complete_bootstrap_with_code(
+                code=created["code"], device_name="Admin", device_identity="admin",
+            )
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM device_registration").fetchone()[0], 0)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM auth_token").fetchone()[0], 0)
+        summaries = " ".join(row[0] for row in self.db.execute(
+            "SELECT summary FROM operation WHERE operation_type = 'administrator_bootstrap_rejected'"
+        ))
+        self.assertNotIn(created["code"], summaries)
+
+    def test_expired_code_is_rejected_without_authentication_state(self):
+        created = self.auth.create_bootstrap_code(validity=timedelta(seconds=1))
+        self.now += timedelta(seconds=2)
+        with self.assertRaisesRegex(svc.AuthenticationFailure, "expired"):
+            self.auth.complete_bootstrap_with_code(
+                code=created["code"], device_name="Admin", device_identity="admin",
+            )
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM auth_token").fetchone()[0], 0)
+
     def test_audit_failure_compensates_bootstrap_credential(self):
         class FailingOperations:
             def begin(self, *args, **kwargs):
