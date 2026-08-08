@@ -10,6 +10,7 @@ This is the index for the modular UI requirements of the local Curator web appli
 | [04 — Workspace Albums](04_Workspace_Albums.md) | Temporary `workspace_album` browsing, editing, review, batch-editing, and workspace-to-permanent link semantics. |
 | [05 — Direct Album Import](05_Direct_Album_Import.md) | Folder discovery, reviewed bulk import to `album`, mappings, including optional logical/release links, conflicts, and results. |
 | [06 — Safety and Acceptance](06_Safety_and_Acceptance.md) | Audit and recovery requirements, out-of-scope decisions, and acceptance criteria. |
+| [UI Tasks](Tasks/README.md) | Independently numbered UI specification, implementation, and browser-workflow acceptance tasks. |
 
 ## Reading Order
 
