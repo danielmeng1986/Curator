@@ -300,6 +300,8 @@ def verify_snapshot_item(item: dict) -> dict:
     append_backup_log({
         "timestamp": utc_now_iso(), "event": "verification", "snapshot": str(path),
         "reason": item.get("reason", ""), "tag": item.get("tag", ""),
+        "protected": item.get("protected", False),
+        "retention_class": item.get("retention_class", "ordinary"),
         "verification_state": state, "ok": state == "verified",
     })
     return {"verification_state": state, "verified_at": utc_now_iso(), "detail": detail}
@@ -369,9 +371,25 @@ def database_restore_state(verify: bool = False):
             return {"verified": rows == ["ok"]}
         except sqlite3.Error:
             return {"verified": False}
-    stat = DATABASE_PATH.stat()
-    raw = f"{stat.st_size}:{stat.st_mtime_ns}"
-    return hashlib.sha256(raw.encode()).hexdigest()
+    # Authentication updates token ``last_used_at`` before every protected
+    # request.  Bind Restore previews to business state, not that expected
+    # transport-level write or the single-use claim tables themselves.
+    excluded = {
+        "auth_bootstrap_code", "auth_registration", "auth_token", "auth_token_renewal",
+        "restore_preview_claim", "snapshot_cleanup_preview_claim", "import_preview_claim",
+        "quarantine_preview_claim", "sqlite_sequence",
+    }
+    digest = hashlib.sha256()
+    with sqlite3.connect(str(DATABASE_PATH)) as conn:
+        tables = [row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ) if row[0] not in excluded and not row[0].startswith("sqlite_")]
+        for table in tables:
+            quoted = table.replace('"', '""')
+            digest.update(table.encode())
+            for row in conn.execute(f'SELECT * FROM "{quoted}" ORDER BY rowid'):
+                digest.update(repr(tuple(row)).encode())
+    return digest.hexdigest()
 
 
 def next_backup_time_iso() -> str:
