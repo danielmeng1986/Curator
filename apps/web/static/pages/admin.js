@@ -8,7 +8,7 @@ const AdminCenterPage = {
         api.get('/health'), api.get('/backups'), api.get('/quarantine-items'), api.get('/operations?limit=5'),
       ]);
       const cards = [
-        ['Devices and Tokens', 'Review registrations, renewals, roles, scopes, and revocation.', '#/admin/devices', 'Awaiting UI-010A'],
+        ['Devices and Tokens', 'Review registrations, renewals, roles, scopes, and revocation.', '#/admin/devices', 'Available'],
         ['Backups and Snapshots', 'Inspect and create Backend-controlled recovery points.', '#/admin/backups', 'Awaiting UI-010B'],
         ['Database Restore', 'Protected restore from a verified recovery point.', '#/admin/restore', 'Blocked pending UI-010C contract'],
         ['Repair Quarantine', `${(quarantine.items || []).filter(item => !item.restored_at).length} item(s) currently isolated.`, '#/quarantine', 'Available'],

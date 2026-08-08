@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-010A` — Status: `Proposed`
+`UI-010A` — Status: `Complete`
 
 ## Title
 
@@ -56,3 +56,11 @@ without exposing stored secrets or allowing loss of the last usable Admin.
 
 - Existing loopback-only unauthenticated approval behavior must be retired or narrowed when authenticated administration becomes available.
 
+## Completion Notes
+
+- Added Admin registration, renewal, and Token metadata sections with explicit
+  approve/reject/revoke actions and requested-role ceilings.
+- Newly issued credentials use a one-time modal and disappear on refresh;
+  existing plaintext/hash values are never read or rendered.
+- Revocation uses typed high-risk confirmation and preserves Backend
+  `LAST_USABLE_ADMIN` protection.

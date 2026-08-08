@@ -92,7 +92,7 @@ async function bootstrapFixtureAdmin(databasePath) {
   return lines[lines.indexOf('Admin Token (shown once):') + 1];
 }
 
-export async function startBrowserFixture({ scenario = 'empty', roles = ['writer'], artifactDir = null, bootstrapAdmin = true } = {}) {
+export async function startBrowserFixture({ scenario = 'empty', roles = ['writer'], artifactDir = null, bootstrapAdmin = true, pendingRegistrations = [] } = {}) {
   const metadata = SCENARIOS[scenario];
   if (!metadata) throw new Error(`Unknown browser fixture scenario: ${scenario}`);
   if (metadata.readiness !== 'Ready') {
@@ -129,11 +129,22 @@ export async function startBrowserFixture({ scenario = 'empty', roles = ['writer
       devices[role] = await issueDevice(manifest.origin, secret, manifest.fixture_id, role, index, fixtureAdminToken);
     }
   }
+  const pending = [];
+  for (const [index, request] of pendingRegistrations.entries()) {
+    pending.push(await post(manifest.origin, '/api/auth/registrations', {
+      device_name: request.device_name || `Pending fixture ${index + 1}`,
+      device_identity: request.device_identity || `${manifest.fixture_id}-pending-${index}`,
+      requested_role: request.requested_role || 'writer',
+      requested_scopes: request.requested_scopes || ROLE_SCOPES[request.requested_role || 'writer'],
+      registration_proof: secret,
+    }));
+  }
   const secrets = [secret, fixtureAdminToken, ...Object.values(devices).map((device) => device.token)].filter(Boolean);
 
   return Object.freeze({
     ...manifest,
     devices: Object.freeze(devices),
+    pendingRegistrations: Object.freeze(pending),
     async request(path, { method = 'GET', body = undefined, role = roles[0] } = {}) {
       const token = devices[role]?.token;
       if (!token) throw new Error(`No ${role} device in this fixture.`);
