@@ -11,25 +11,45 @@ The UI follows Curator’s reviewable, traceable, and reversible workflow princi
 - Create a database snapshot before imports and material batch operations. Identify the snapshot/operation reference in the result view.
 - Confirm deletion, batch updates, and filesystem-changing imports with a dialog that names scope and irreversible effects.
 - Retain unsaved input when database locking, validation, or filesystem access fails.
+- Treat UI action visibility as guidance only; every protected request remains
+  subject to Backend Reader, Writer, or Admin authorization.
+- Never render or retain plaintext stored Tokens, token hashes, registration
+  secrets, Bootstrap Codes, or Backend diagnostics outside the role-sensitive
+  disclosure contract. One-time Token issuance is the sole permitted plaintext
+  display.
+- A rejected, cancelled, stale, repeated, or unauthorized action must not claim
+  success and must preserve the applicable durable and filesystem state.
 
 ## Out of Scope
 
-- Public access, authentication, roles, or cloud synchronization.
+- Public access, username/password accounts, cloud synchronization, or
+  client-side authorization policy. Approved device authentication and roles
+  are in scope.
 - A generic raw SQL table editor.
 - Editing generated IDs, UUIDs, or audit timestamps.
 - A top-level CRUD page for `album_model` or `album_relation`; both relationships are instead maintained in the Album form.
 - Automated acceptance of AI suggestions.
-- Silent conversion of Workspace Albums into permanent Albums; any future conversion requires a separately reviewed field-mapping flow.
+- Exposure or conversion of archived historical `workspace_album` records. A
+  future AI Collection Workspace requires UI-011A/B and a separately reviewed
+  Promotion mapping.
 
 ## Acceptance Criteria
 
 The plan is fulfilled when a local user can:
 
-1. browse, search, create, and edit Models, Studios, Statuses, Albums, Photos, and Workspace Albums under the data interaction rules;
-2. create Models and Studios either from their lists or without leaving Album/Import workflows;
-3. use readable names for all foreign-key interactions and navigate to referenced entities;
-4. add, remove, and edit Models / Additional Models from Album details, with those actions correctly creating, deleting, or updating `album_model` records rather than writing Model data to `album`;
-5. add and remove logical/release Album links from Album details, with those actions correctly creating or deleting non-self `album_relation` records;
-6. review and batch-edit Workspace Albums without editing system-managed fields, while keeping workspace-to-workspace `belongs_to_album_id` distinct from permanent Album IDs;
+1. connect with an approved device Token and receive only the routes, actions,
+   and diagnostic fields allowed by its effective Reader, Writer, or Admin role;
+2. browse, search, create, and edit Models, Studios, Statuses, Albums, and Photos under the data interaction rules;
+3. create Models and Studios either from their lists or without leaving Album/Import workflows;
+4. use readable names for all foreign-key interactions and navigate to referenced entities;
+5. add, remove, and edit Models / Additional Models from Album details, with those actions correctly creating, deleting, or updating `album_model` records rather than writing Model data to `album`;
+6. add and remove logical/release Album links from Album details, with those actions correctly creating or deleting non-self `album_relation` records;
 7. select folders, review parsed data/conflicts, and batch-import valid selections directly to `album` with related Studio, Model, `album_model`, and optional `album_relation` records;
-8. receive preview, explicit confirmation, and auditable outcomes for all material batches and imports.
+8. receive preview, explicit confirmation, truthful per-item results, and auditable Operation links for material batches and imports;
+9. inspect role-appropriate Operation history and follow supported links among
+   Imports, Issues, Repairs, Snapshots, authentication events, and affected entities; and
+10. use Admin-only authentication and recovery capabilities only after their
+    controlling UI tasks and Backend contracts are Ready.
+
+Future AI Collection Workspace acceptance is controlled separately by
+UI-011A–D and is not satisfied by restoring the historical Workspace UI.

@@ -36,11 +36,10 @@ Some Studios publish one logical Album through multiple separate releases. The A
 | Foreign key | UI label |
 | --- | --- |
 | `album.studio_id` | `studio.name` |
-| `album.status_id`, `workspace_album.status_id` | `status.name` |
-| `photo.album_id`, `workspace_album.album_id` | Album title, with Studio as supporting text when ambiguous |
+| `album.status_id` | `status.name` |
+| `photo.album_id` | Album title, with Studio as supporting text when ambiguous |
 | `album_model.model_id` | `model.display_name`, falling back to `primary_name` |
 | `album_relation.album_id`, `album_relation.related_album_id` | Album title, with Studio as supporting text when ambiguous |
-| `workspace_album.belongs_to_album_id` | Workspace Album title, with Studio name and workspace ID as supporting text; it is not a permanent `album.id` |
 
 ## Editable Fields by Table
 
@@ -53,4 +52,9 @@ Some Studios publish one logical Album through multiple separate releases. The A
 | `photo` | `album_id`, `filename`, `relative_path`, `hash`, `width`, `height`, `capture_time` | Normally managed in the parent album context. |
 | `album_model` | `model_id`, `age_when_shot`, `role`, `remarks` | Implementation table for the Album form’s Models / Additional Models section; never presented as direct table CRUD. One model may occur once per album. |
 | `album_relation` | `related_album_id`, `relation_type`, `remarks` | Implementation table for the Album form’s Belongs to / Related Releases section; never presented as direct table CRUD. The initial UI supports `BELONGS_TO`. |
-| `workspace_album` | `current_path`, `expected_path`, `primary_model`, `studio_name`, `album_name`, `additional_models`, `status_id`, `remark`, `belongs_to_album_id`, `ai_result`, `album_id` | Temporary data. `belongs_to_album_id` selects a Workspace Album, while `album_id` selects a permanent Album; neither is entered as a raw ID. AI output is non-authoritative. |
+
+The future AI Collection Workspace does not inherit editable fields from the
+retired historical `workspace_album` table. UI-011A/B must define stable review
+fields, dataset-specific presentation fields, field ownership, and permanent
+entity links before a Workspace form is implemented. AI output remains
+non-authoritative unless explicitly accepted through that review contract.

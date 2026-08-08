@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-001` — Status: `Proposed`
+`UI-001` — Status: `Complete`
 
 ## Title
 
@@ -60,3 +60,14 @@ surface, user role, browser evidence, or explicit exclusion/blocker.
 
 - This matrix controls coverage but does not replace the controlling workflow Specifications.
 
+## Completion Record
+
+- Published the initial UI Workflow Readiness Matrix with Backend evidence,
+  user role, route, browser owner, rejection evidence, and readiness gap for
+  every currently Ready Backend workflow and planned AI Workspace outcome.
+- Amended UI modules 01–06 to remove the active historical `workspace_album`
+  assumption and bring approved-device authentication, roles, Operation
+  history, administration, and the future Workspace specification boundary into
+  the UI plan.
+- Confirmed that the existing browser test remains smoke evidence only; it does
+  not silently make incomplete feature rows Ready.

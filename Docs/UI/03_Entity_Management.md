@@ -25,4 +25,8 @@ Model details show a read-only **Albums featuring this model** table. Selecting 
 
 ## Statuses
 
-`/statuses` is a compact administration screen. It lists name, description, and usage counts in Albums and Workspace Albums. Editing updates the label globally. Deletion is enabled only when both usage counts are zero; otherwise the UI explains the references.
+`/statuses` is a compact controlled-data screen. It lists name, description,
+and active permanent-entity usage counts. Editing updates the label globally.
+Deletion is enabled only when all Backend-reported active references are zero;
+otherwise the UI explains the references. Archived historical Workspace rows
+must not be exposed as an active collection merely to provide the count.
