@@ -169,6 +169,26 @@ class AuthRepository:
             row = conn.execute("SELECT * FROM device_registration WHERE device_identity = ?", (device_identity,)).fetchone()
         return self._registration(dict(row)) if row else None
 
+    def list_registrations(self) -> list[dict]:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute("SELECT * FROM device_registration ORDER BY created_at DESC").fetchall()
+        return [self._registration(dict(row)) for row in rows]
+
+    def list_tokens(self) -> list[dict]:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute("SELECT * FROM auth_token ORDER BY created_at DESC").fetchall()
+        result = [self._token(dict(row)) for row in rows]
+        for item in result: item.pop("token_hash", None)
+        return result
+
+    def list_renewals(self) -> list[dict]:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute("SELECT * FROM token_renewal_request ORDER BY created_at DESC").fetchall()
+        return [self._renewal(dict(row)) for row in rows]
+
     def approve_registration(self, registration_uuid: str, role: str, scopes: list[str], trusted: bool) -> dict | None:
         now = _utc_now_iso()
         with self._db() as conn:
@@ -378,6 +398,33 @@ class AuthRepository:
             conn.commit()
         return cur.rowcount == 1
 
+    def revoke_token_preserving_admin(self, token_uuid: str, now_iso: str) -> bool:
+        """Atomically revoke a Token unless it is the final usable Admin."""
+        with self._db() as conn:
+            self._ensure_schema(conn); conn.execute("BEGIN IMMEDIATE")
+            target = conn.execute(
+                """SELECT t.uuid,t.revoked_at,t.expires_at,t.scopes,r.approved_role,r.status,r.trusted
+                   FROM auth_token t JOIN device_registration r ON r.uuid=t.registration_uuid
+                   WHERE t.uuid=?""", (token_uuid,),
+            ).fetchone()
+            if target is None or target["revoked_at"] is not None:
+                conn.rollback(); return False
+            target_usable_admin = (
+                target["approved_role"] == "admin" and target["status"] == "Approved"
+                and bool(target["trusted"]) and target["expires_at"] > now_iso
+                and "admin" in json.loads(target["scopes"])
+            )
+            if target_usable_admin:
+                count = conn.execute(
+                    """SELECT COUNT(*) FROM auth_token t JOIN device_registration r ON r.uuid=t.registration_uuid
+                       WHERE r.approved_role='admin' AND r.status='Approved' AND r.trusted=1
+                         AND t.revoked_at IS NULL AND t.expires_at>? AND t.scopes LIKE '%admin%'""", (now_iso,),
+                ).fetchone()[0]
+                if count <= 1:
+                    conn.rollback(); raise PersistenceConflict({"reason": "last_usable_admin", "token_uuid": token_uuid})
+            conn.execute("UPDATE auth_token SET revoked_at=? WHERE uuid=? AND revoked_at IS NULL", (now_iso, token_uuid))
+            conn.commit(); return True
+
     def create_renewal_request(self, fields: dict) -> dict:
         now = _utc_now_iso()
         request_uuid = fields.get("uuid") or str(uuid.uuid4())
@@ -422,6 +469,15 @@ class AuthRepository:
             )
             conn.commit()
             row = conn.execute("SELECT * FROM token_renewal_request WHERE uuid = ?", (request_uuid,)).fetchone()
+        return self._renewal(dict(row)) if row else None
+
+    def reject_renewal(self, request_uuid: str) -> dict | None:
+        now = _utc_now_iso()
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute("""UPDATE token_renewal_request SET status='Rejected',rejected_at=?,updated_at=?
+                            WHERE uuid=? AND status='PendingApproval'""", (now, now, request_uuid))
+            conn.commit(); row = conn.execute("SELECT * FROM token_renewal_request WHERE uuid=?", (request_uuid,)).fetchone()
         return self._renewal(dict(row)) if row else None
 
 

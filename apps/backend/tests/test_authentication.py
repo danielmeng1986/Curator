@@ -149,7 +149,9 @@ class AdministratorBootstrapTests(unittest.TestCase):
 
     def test_expired_or_revoked_admin_does_not_reopen_first_bootstrap(self):
         issued = self.auth.bootstrap_first_admin(device_name="Admin", device_identity="admin-1")
-        self.auth.revoke_token(issued["token_record"]["uuid"])
+        # Construct historical revoked state below the BT-040 public safety
+        # boundary; normal service callers may no longer revoke the last Admin.
+        repo.AuthRepository(lambda: self.db).revoke_token(issued["token_record"]["uuid"])
         self.now += timedelta(days=730)
         with self.assertRaisesRegex(svc.ServiceConflict, "already been established"):
             self.auth.bootstrap_first_admin(device_name="Replacement", device_identity="admin-2")

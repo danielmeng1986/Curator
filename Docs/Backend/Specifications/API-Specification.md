@@ -108,6 +108,14 @@ configuration, directory inventory fingerprint, Repair/Item version, and target
 occupancy and is claimed once. Stale, replayed, missing, occupied, or invalid
 previews return structured conflicts before filesystem mutation.
 
+Authentication administration uses the Admin-only
+`/api/v1/auth/admin/state` read model and explicit registration, renewal, and
+Token decision routes. State contains registration/renewal lifecycle and Token
+metadata only. Approval responses may contain one newly generated Token once;
+later reads never contain plaintext or hashes. Approval cannot exceed requested
+authorization, and final-usable-Admin revocation returns
+`409 LAST_USABLE_ADMIN` before mutation.
+
 ## Album management contracts
 
 `GET /api/v1/albums` supports composable `q`, `studio_id`, `status_id`,

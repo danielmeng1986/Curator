@@ -672,6 +672,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_quarantine_item(path.split("/")[-1])
             elif path == "/api/auth/me":
                 self._send_success(200, {"principal": self._principal})
+            elif path == "/api/auth/admin/state":
+                self._get_auth_admin_state()
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
         except ValueError as exc:
@@ -929,6 +931,16 @@ class AppHandler(SimpleHTTPRequestHandler):
         if not item: raise svc.ServiceNotFound("Quarantine item not found.")
         self._send_success(200, {"item": item})
 
+    def _auth_admin_service(self):
+        return svc.AuthenticationService(
+            repo.AuthRepository(open_db),
+            operation_service=svc.OperationService(repo.OperationRepository(open_db)),
+        )
+
+    def _get_auth_admin_state(self):
+        if not self._require_admin_principal(): return
+        self._send_success(200, self._auth_admin_service().admin_read_model())
+
     # ------------------------------------------------------------------
     # POST handlers
     # ------------------------------------------------------------------
@@ -972,6 +984,12 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._post_authenticated_registration_approval(path, body)
             elif path == "/api/auth/renewals":
                 self._post_token_renewal(body)
+            elif re.match(r"^/api/auth/admin/registrations/[^/]+/(approve|reject)$", path):
+                self._post_auth_registration_decision(path, body)
+            elif re.match(r"^/api/auth/admin/renewals/[^/]+/(approve|reject)$", path):
+                self._post_auth_renewal_decision(path, body)
+            elif re.match(r"^/api/auth/admin/tokens/[^/]+/revoke$", path):
+                self._post_auth_token_revoke(path)
             elif re.match(r"^/api/issues/[^/]+/decisions$", path):
                 self._post_issue_decision(path.split("/")[3], body)
             elif re.match(r"^/api/repairs/[^/]+/decisions$", path):
@@ -1085,6 +1103,31 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_error(404, "NOT_FOUND", str(exc))
         except (svc.ServiceConflict, ValueError) as exc:
             self._send_error(409, getattr(exc, "code", "BUSINESS_CONFLICT"), str(exc))
+
+    def _post_auth_registration_decision(self, path: str, body: dict):
+        if not self._require_admin_principal(): return
+        parts = path.split("/"); registration_uuid, action = parts[5], parts[6]
+        auth = self._auth_admin_service()
+        if action == "approve":
+            self._send_success(200, auth.approve_registration(
+                registration_uuid, approved_role=body.get("approved_role"),
+                approved_scopes=body.get("approved_scopes"),
+            ))
+        else:
+            auth.reject_registration(registration_uuid); self._send_success(200, {"status": "Rejected"})
+
+    def _post_auth_renewal_decision(self, path: str, body: dict):
+        if not self._require_admin_principal(): return
+        parts = path.split("/"); renewal_uuid, action = parts[5], parts[6]
+        auth = self._auth_admin_service()
+        if action == "approve": self._send_success(200, auth.approve_renewal(renewal_uuid))
+        else: auth.reject_renewal(renewal_uuid); self._send_success(200, {"status": "Rejected"})
+
+    def _post_auth_token_revoke(self, path: str):
+        if not self._require_admin_principal(): return
+        token_uuid = path.split("/")[5]
+        self._auth_admin_service().revoke_token(token_uuid)
+        self._send_success(200, {"status": "Revoked", "token_uuid": token_uuid})
 
     def _post_token_renewal(self, body: dict) -> None:
         header = self.headers.get("Authorization", "")

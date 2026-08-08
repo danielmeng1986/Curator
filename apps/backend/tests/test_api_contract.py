@@ -1176,5 +1176,62 @@ class TestIssueRepairDecisionApi(_TestServerBase):
         self.assertTrue(any(item["uuid"] == record["uuid"] for item in listing["data"]["items"]))
 
 
+class TestAuthenticationAdministrationApi(_TestServerBase):
+    """BT-040 Admin state, bounded approval, renewal, and last-Admin safety."""
+
+    def test_complete_admin_lifecycle_contract(self):
+        import repositories as repo
+        import services as svc
+        repository = repo.AuthRepository(lambda: self._db)
+        bootstrap = svc.AuthenticationService(repository).bootstrap_first_admin(
+            device_name="BT040 Primary Admin", device_identity="bt040-primary-admin",
+        )
+        admin_headers = {"Authorization": f"Bearer {bootstrap['token']}"}
+        requester = svc.AuthenticationService(repository, registration_secret="bt040-proof")
+        writer = requester.request_registration(
+            device_name="BT040 Writer", device_identity="bt040-writer",
+            requested_role="writer", requested_scopes=["read", "write"], registration_proof="bt040-proof",
+        )
+        status, state = self._get("/api/v1/auth/admin/state", admin_headers)
+        self.assertEqual(200, status)
+        self.assertTrue(any(item["uuid"] == writer["uuid"] for item in state["data"]["registrations"]))
+        self.assertNotIn("token_hash", json.dumps(state))
+
+        status, elevated = self._post(f"/api/v1/auth/admin/registrations/{writer['uuid']}/approve", {
+            "approved_role": "admin", "approved_scopes": ["read", "write", "admin"],
+        }, admin_headers)
+        self.assertEqual(409, status); self.assertEqual("AUTHORIZATION_ELEVATION_NOT_REQUESTED", elevated["error"]["code"])
+        status, issued_writer = self._post(f"/api/v1/auth/admin/registrations/{writer['uuid']}/approve", {
+            "approved_role": "writer", "approved_scopes": ["read", "write"],
+        }, admin_headers)
+        self.assertEqual(200, status); writer_token = issued_writer["data"]["token"]
+
+        status, protected = self._post(
+            f"/api/v1/auth/admin/tokens/{bootstrap['token_record']['uuid']}/revoke", {}, admin_headers,
+        )
+        self.assertEqual(409, status); self.assertEqual("LAST_USABLE_ADMIN", protected["error"]["code"])
+
+        second_admin = requester.request_registration(
+            device_name="BT040 Secondary Admin", device_identity="bt040-secondary-admin",
+            requested_role="admin", requested_scopes=["read", "write", "admin"], registration_proof="bt040-proof",
+        )
+        status, issued_admin = self._post(f"/api/v1/auth/admin/registrations/{second_admin['uuid']}/approve", {}, admin_headers)
+        self.assertEqual(200, status); secondary_headers = {"Authorization": f"Bearer {issued_admin['data']['token']}"}
+        status, revoked = self._post(
+            f"/api/v1/auth/admin/tokens/{bootstrap['token_record']['uuid']}/revoke", {}, secondary_headers,
+        )
+        self.assertEqual(200, status); self.assertEqual("Revoked", revoked["data"]["status"])
+
+        renewal = svc.AuthenticationService(repository).request_renewal(
+            writer_token, device_identity="bt040-writer",
+        )
+        status, renewed = self._post(f"/api/v1/auth/admin/renewals/{renewal['uuid']}/approve", {}, secondary_headers)
+        self.assertEqual(200, status); self.assertTrue(renewed["data"]["token"])
+        status, final_state = self._get("/api/v1/auth/admin/state", secondary_headers)
+        self.assertEqual(200, status)
+        serialized = json.dumps(final_state)
+        self.assertNotIn(writer_token, serialized); self.assertNotIn("token_hash", serialized)
+
+
 if __name__ == "__main__":
     unittest.main()

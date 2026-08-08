@@ -89,6 +89,16 @@ not reopen bootstrap automatically or through an anonymous UI/API. Recovery
 requires a separately specified, explicitly invoked offline administrator
 recovery command and is outside the first-bootstrap tasks.
 
+Authenticated Admin management exposes registration, renewal, and Token
+metadata but never Token hashes, registration proof, or existing plaintext.
+Approval may reduce a requested role or scope set but cannot exceed it; role
+elevation therefore requires an explicit Admin-role registration request.
+Registration and renewal rejection are durable decisions. Revocation performs
+the usable-Admin count and Token update in one immediate transaction: the last
+currently unexpired, trusted, approved Admin Token cannot be revoked. A newly
+issued or renewed Token plaintext appears only in that successful approval
+response and is absent from all subsequent reads.
+
 ## Current authorization model
 
 Roles express the maximum authorization requested by a device, and scopes express the permissions granted to its token. The current role policy is deliberately small:

@@ -390,9 +390,16 @@ class AuthenticationService:
             raise ServiceNotFound("Registration request not found.")
         if registration["status"] != "PendingApproval":
             raise ServiceConflict("BUSINESS_CONFLICT", "The registration request is no longer awaiting approval.")
+        requested_role = registration["requested_role"]
+        role_order = {"reader": 0, "writer": 1, "admin": 2}
+        candidate_role = approved_role or requested_role
+        if candidate_role not in role_order or role_order[candidate_role] > role_order[requested_role]:
+            raise ServiceConflict("AUTHORIZATION_ELEVATION_NOT_REQUESTED", "Approval cannot exceed the requested role.")
+        candidate_scopes = approved_scopes if approved_scopes is not None else registration["requested_scopes"]
+        if not set(candidate_scopes).issubset(set(registration["requested_scopes"])):
+            raise ServiceConflict("AUTHORIZATION_SCOPE_NOT_REQUESTED", "Approval cannot exceed requested scopes.")
         role, scopes = self._validate_role_and_scopes(
-            approved_role or registration["requested_role"],
-            approved_scopes if approved_scopes is not None else registration["requested_scopes"],
+            candidate_role, candidate_scopes,
         )
         registration = self._repo.approve_registration(registration_uuid, role, scopes, trusted)
         if registration is None:
@@ -408,6 +415,7 @@ class AuthenticationService:
         if registration["status"] != "PendingApproval":
             raise ServiceConflict("BUSINESS_CONFLICT", "The registration request is no longer awaiting approval.")
         self._repo.reject_registration(registration_uuid)
+        self._record_operation("device_registration_rejection", registration_uuid, "Device registration rejected.")
 
     def _issue_token(self, registration: dict, scopes: list[str], validity: timedelta | None) -> dict:
         if registration["status"] != "Approved" or not registration["trusted"]:
@@ -495,12 +503,27 @@ class AuthenticationService:
         approved = self._repo.approve_renewal(renewal_uuid)
         issued = self._issue_token(registration, approved["requested_scopes"], validity)
         self._repo.revoke_token(renewal["previous_token_uuid"], replaced_by_uuid=issued["token_record"]["uuid"])
+        self._record_operation("device_token_renewal_approval", renewal_uuid, "Device Token renewal approved and previous Token replaced.")
         return issued
 
+    def reject_renewal(self, renewal_uuid: str) -> None:
+        renewal = self._repo.get_renewal_request(renewal_uuid)
+        if renewal is None: raise ServiceNotFound("Token renewal request not found.")
+        if renewal["status"] != "PendingApproval": raise ServiceConflict("BUSINESS_CONFLICT", "The renewal request is no longer awaiting approval.")
+        self._repo.reject_renewal(renewal_uuid)
+        self._record_operation("device_token_renewal_rejection", renewal_uuid, "Device Token renewal rejected.")
+
     def revoke_token(self, token_uuid: str) -> None:
-        if not self._repo.revoke_token(token_uuid):
-            raise ServiceNotFound("Active token not found.")
+        try:
+            revoked = self._repo.revoke_token_preserving_admin(token_uuid, self._now_utc().isoformat())
+        except repo.PersistenceConflict as exc:
+            raise ServiceConflict("LAST_USABLE_ADMIN", "The final usable Admin Token cannot be revoked.", exc.details) from exc
+        if not revoked: raise ServiceNotFound("Active token not found.")
         self._record_operation("device_token_revocation", token_uuid, "Device token revoked.")
+
+    def admin_read_model(self) -> dict:
+        return {"registrations": self._repo.list_registrations(), "tokens": self._repo.list_tokens(),
+                "renewals": self._repo.list_renewals()}
 
 
 # ---------------------------------------------------------------------------
