@@ -2610,6 +2610,40 @@ class OperationRepository:
             ).fetchall()
         return [_norm_operation(dict(row)) for row in rows]
 
+    def query_history(
+        self, *, limit: int, status: str | None = None,
+        operation_type: str | None = None, started_from: str | None = None,
+        started_to: str | None = None, after: tuple[str, int] | None = None,
+    ) -> tuple[list[dict], int]:
+        """Return one stable keyset page and the filtered total count."""
+        clauses: list[str] = []
+        params: list[object] = []
+        for column, value, operator in (
+            ("status", status, "="), ("operation_type", operation_type, "="),
+            ("started_at", started_from, ">="), ("started_at", started_to, "<="),
+        ):
+            if value is not None:
+                clauses.append(f"{column} {operator} ?")
+                params.append(value)
+        filter_where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        page_clauses = list(clauses)
+        page_params = list(params)
+        if after is not None:
+            page_clauses.append("(started_at < ? OR (started_at = ? AND id < ?))")
+            page_params.extend((after[0], after[0], after[1]))
+        page_where = f" WHERE {' AND '.join(page_clauses)}" if page_clauses else ""
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM operation{filter_where}", params,
+            ).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT * FROM operation{page_where} "
+                "ORDER BY started_at DESC, id DESC LIMIT ?",
+                (*page_params, limit + 1),
+            ).fetchall()
+        return [_norm_operation(dict(row)) for row in rows], int(total)
+
     def set_status(
         self,
         op_uuid: str,

@@ -114,3 +114,18 @@ The status/error taxonomy, mandatory contextual UUIDs, role-based disclosure mod
 ## Future extensions
 
 Operation history may later support reporting and archive-health dashboards. Such reporting must use the durable Operation record rather than treat JSONL as a database substitute.
+## Operation history query contract
+
+The authenticated versioned collection endpoint accepts optional exact
+`status` and `operation_type` filters, plus inclusive ISO-8601 `started_from`
+and `started_to` bounds. Results are ordered by `started_at DESC` with the
+internal row identity as a deterministic tie-breaker. `limit` is bounded to
+1–100.
+
+Pagination uses an opaque keyset cursor bound to the normalized filters. The
+cursor resumes strictly after the final item on the preceding page, so newer
+Operations created between requests do not shift the remaining result set.
+Changing filters while reusing a cursor is invalid. The endpoint returns the
+standard collection envelope with total, active filters, sort description,
+`has_more`, and `next_cursor` metadata. Role-based field projection applies
+before every page is serialized.

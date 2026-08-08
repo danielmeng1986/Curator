@@ -803,8 +803,53 @@ class AppHandler(SimpleHTTPRequestHandler):
         if reader is None:
             return
         service, role = reader
-        limit = min(max(int(qs.get("limit", ["50"])[0]), 1), 100)
-        self._send_success(200, {"items": service.list_recent(role, limit)})
+        try:
+            limit = int(qs.get("limit", ["50"])[0])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Operation limit must be an integer from 1 to 100.") from exc
+        if not 1 <= limit <= 100:
+            raise ValueError("Operation limit must be an integer from 1 to 100.")
+        status = qs.get("status", [None])[0] or None
+        if status is not None and status not in {
+            svc.OP_STATUS_PENDING, svc.OP_STATUS_RUNNING, svc.OP_STATUS_SUCCEEDED,
+            svc.OP_STATUS_FAILED, svc.OP_STATUS_NEEDS_REPAIR, svc.OP_STATUS_CANCELLED,
+        }:
+            raise ValueError("Invalid Operation status filter.")
+        operation_type = qs.get("operation_type", [None])[0] or None
+        if operation_type is not None and (len(operation_type) > 100 or not re.fullmatch(r"[A-Za-z0-9_.-]+", operation_type)):
+            raise ValueError("Invalid Operation type filter.")
+
+        def normalized_date(name: str) -> str | None:
+            value = qs.get(name, [None])[0] or None
+            if value is None:
+                return None
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed.astimezone(timezone.utc).isoformat()
+            except ValueError as exc:
+                raise ValueError(f"Invalid ISO-8601 {name} filter.") from exc
+
+        started_from = normalized_date("started_from")
+        started_to = normalized_date("started_to")
+        if started_from and started_to and started_from > started_to:
+            raise ValueError("Operation started_from must not be after started_to.")
+        cursor = qs.get("cursor", [None])[0] or None
+        result = service.query(
+            role, limit=limit, cursor=cursor, status=status,
+            operation_type=operation_type, started_from=started_from, started_to=started_to,
+        )
+        filters = [{"field": key, "operator": "eq" if key in {"status", "operation_type"} else "gte" if key == "started_from" else "lte", "value": value}
+                   for key, value in result["filters"].items()]
+        meta = api_contract.build_collection_meta(
+            cursor=cursor, limit=limit, next_cursor=result["next_cursor"],
+            has_more=result["has_more"], total=result["total"], filters=filters,
+            sort=[{"field": "started_at", "direction": "desc"}],
+        )
+        self._send_json(200, api_contract.success_response(
+            result["items"], request_id=self._request_id, meta_extras=meta,
+        ))
 
     def _get_operation(self, operation_uuid: str):
         reader = self._operation_reader()

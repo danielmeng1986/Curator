@@ -969,7 +969,7 @@ class TestOperationHistoryDisclosure(_TestServerBase):
         import services as svc
         auth = svc.AuthenticationService(repo.AuthRepository(lambda: self._db), registration_secret="ops-proof")
         registration = auth.request_registration(
-            device_name=f"{role} operations", device_identity=f"ops-{role}",
+            device_name=f"{role} operations", device_identity=f"ops-{role}-{self._testMethodName}",
             requested_role=role, requested_scopes=None, registration_proof="ops-proof",
         )
         return auth.approve_registration(registration["uuid"])
@@ -991,9 +991,75 @@ class TestOperationHistoryDisclosure(_TestServerBase):
     def test_writer_gets_operational_context_but_not_sensitive_details(self):
         operation = self._operation(); issued = self._issued("writer")
         status, body = self._get("/api/v1/operations", {"Authorization": f"Bearer {issued['token']}"})
-        self.assertEqual(200, status); item = next(x for x in body["data"]["items"] if x["uuid"] == operation["uuid"])
+        self.assertEqual(200, status); item = next(x for x in body["data"] if x["uuid"] == operation["uuid"])
         self.assertEqual("Confirm path and retry.", item["recovery_context"])
         self.assertNotIn("error_details", item)
+
+    def test_query_filters_and_stable_keyset_pagination(self):
+        import repositories as repo
+        issued = self._issued("writer")
+        repository = repo.OperationRepository(lambda: self._db)
+        for index in range(4):
+            repository.create({
+                "uuid": f"bt037-{index}", "operation_type": "bt037_import",
+                "initiator": "System", "status": "Succeeded" if index != 1 else "Failed",
+                "started_at": f"2026-08-0{index + 1}T00:00:00+00:00",
+                "summary": f"BT-037 fixture {index}",
+            })
+        headers = {"Authorization": f"Bearer {issued['token']}"}
+        status, first = self._get(
+            "/api/v1/operations?operation_type=bt037_import&limit=2", headers,
+        )
+        self.assertEqual(200, status)
+        self.assertEqual(["bt037-3", "bt037-2"], [item["uuid"] for item in first["data"]])
+        self.assertEqual(4, first["meta"]["pagination"]["total"])
+        self.assertTrue(first["meta"]["pagination"]["has_more"])
+        cursor = first["meta"]["pagination"]["next_cursor"]
+
+        repository.create({
+            "uuid": "bt037-newer", "operation_type": "bt037_import",
+            "initiator": "System", "status": "Succeeded",
+            "started_at": "2026-08-09T00:00:00+00:00",
+        })
+        status, second = self._get(
+            f"/api/v1/operations?operation_type=bt037_import&limit=2&cursor={cursor}", headers,
+        )
+        self.assertEqual(200, status)
+        self.assertEqual(["bt037-1", "bt037-0"], [item["uuid"] for item in second["data"]])
+        self.assertFalse(second["meta"]["pagination"]["has_more"])
+
+        status, filtered = self._get(
+            "/api/v1/operations?operation_type=bt037_import&status=Failed", headers,
+        )
+        self.assertEqual(200, status)
+        self.assertEqual(["bt037-1"], [item["uuid"] for item in filtered["data"]])
+
+    def test_query_rejects_invalid_or_filter_mismatched_cursor(self):
+        issued = self._issued("reader")
+        headers = {"Authorization": f"Bearer {issued['token']}"}
+        status, malformed = self._get("/api/v1/operations?cursor=not-a-cursor", headers)
+        self.assertEqual(400, status)
+        self.assertEqual("REQUEST_INVALID", malformed["error"]["code"])
+
+        status, first = self._get("/api/v1/operations?limit=1", headers)
+        self.assertEqual(200, status)
+        cursor = first["meta"]["pagination"]["next_cursor"]
+        self.assertTrue(cursor)
+        status, mismatch = self._get(
+            f"/api/v1/operations?limit=1&status=Succeeded&cursor={cursor}", headers,
+        )
+        self.assertEqual(400, status)
+        self.assertEqual("REQUEST_INVALID", mismatch["error"]["code"])
+
+    def test_query_rejects_invalid_limits_dates_and_status(self):
+        issued = self._issued("reader")
+        headers = {"Authorization": f"Bearer {issued['token']}"}
+        for query in ("limit=0", "limit=101", "limit=no", "status=Unknown",
+                      "started_from=not-a-date",
+                      "started_from=2026-08-09T00:00:00Z&started_to=2026-08-01T00:00:00Z"):
+            status, body = self._get(f"/api/v1/operations?{query}", headers)
+            self.assertEqual(400, status, query)
+            self.assertEqual("REQUEST_INVALID", body["error"]["code"])
 
     def test_unversioned_operation_history_is_not_exposed(self):
         self._operation(); status, body = self._get("/api/operations")

@@ -2798,6 +2798,53 @@ class OperationReadService:
     def list_recent(self, role: str, limit: int = 50) -> list[dict]:
         return [self._project(record, role) for record in self._repo.list_recent(limit)]
 
+    @staticmethod
+    def _filter_identity(filters: dict) -> str:
+        raw = json.dumps(filters, sort_keys=True, separators=(",", ":")).encode()
+        return hashlib.sha256(raw).hexdigest()[:20]
+
+    @classmethod
+    def _encode_cursor(cls, record: dict, filters: dict) -> str:
+        payload = {"v": 1, "started_at": record["started_at"], "id": record["id"],
+                   "query": cls._filter_identity(filters)}
+        return base64.urlsafe_b64encode(
+            json.dumps(payload, separators=(",", ":")).encode()
+        ).decode().rstrip("=")
+
+    @classmethod
+    def _decode_cursor(cls, cursor: str, filters: dict) -> tuple[str, int]:
+        try:
+            padded = cursor + "=" * (-len(cursor) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(padded).decode())
+            if payload.get("v") != 1 or payload.get("query") != cls._filter_identity(filters):
+                raise ValueError
+            started_at = str(payload["started_at"])
+            row_id = int(payload["id"])
+            if not started_at or row_id < 1:
+                raise ValueError
+            return started_at, row_id
+        except Exception as exc:
+            raise ValueError("Invalid or query-mismatched Operation cursor.") from exc
+
+    def query(self, role: str, *, limit: int, cursor: str | None = None,
+              status: str | None = None, operation_type: str | None = None,
+              started_from: str | None = None, started_to: str | None = None) -> dict:
+        filters = {key: value for key, value in {
+            "status": status, "operation_type": operation_type,
+            "started_from": started_from, "started_to": started_to,
+        }.items() if value is not None}
+        after = self._decode_cursor(cursor, filters) if cursor else None
+        records, total = self._repo.query_history(
+            limit=limit, after=after, status=status, operation_type=operation_type,
+            started_from=started_from, started_to=started_to,
+        )
+        has_more = len(records) > limit
+        page = records[:limit]
+        next_cursor = self._encode_cursor(page[-1], filters) if has_more and page else None
+        return {"items": [self._project(record, role) for record in page],
+                "total": total, "has_more": has_more, "next_cursor": next_cursor,
+                "filters": filters}
+
     def get(self, operation_uuid: str, role: str) -> dict:
         record = self._repo.get_by_uuid(operation_uuid)
         if record is None:

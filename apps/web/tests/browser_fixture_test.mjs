@@ -47,7 +47,7 @@ try {
   try {
     const operations = await evidence.request('/operations', { role: 'reader' });
     assert.equal(operations.status, 200);
-    assert.equal(operations.payload.data.items.some((item) => item.uuid === 'operation-ui-fixture'), true);
+    assert.equal(operations.payload.data.some((item) => item.uuid === 'operation-ui-fixture'), true);
   } finally {
     await evidence.stop();
   }

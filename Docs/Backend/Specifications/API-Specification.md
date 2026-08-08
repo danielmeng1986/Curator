@@ -78,6 +78,15 @@ Collection responses that require filtering, sorting, aggregation, or pagination
 
 The API adapter does not independently decide snapshots. It exposes the Service outcome, including any Operation identifier, snapshot reference, pending repair, or required confirmation. Services apply the policies in the Operation Logging, Snapshot, Repair, and Import Specifications.
 
+`GET /api/v1/operations` is a standard collection endpoint. It accepts
+`status`, `operation_type`, inclusive ISO-8601 `started_from` and `started_to`,
+`limit` from 1 through 100, and an opaque `cursor`. Results use stable newest-
+first keyset pagination. A cursor is valid only with the same normalized
+filters that created it; malformed or mismatched cursors return
+`400 REQUEST_INVALID`. The response `data` is the Operation array and `meta`
+contains pagination, active filters, and sort details. Every item is projected
+according to the authenticated principal's diagnostic-disclosure role.
+
 ## Album management contracts
 
 `GET /api/v1/albums` supports composable `q`, `studio_id`, `status_id`,
