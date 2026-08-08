@@ -654,6 +654,16 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_operations(qs)
             elif re.match(r"^/api/operations/[^/]+$", path):
                 self._get_operation(path.split("/")[-1])
+            elif path == "/api/issues":
+                self._get_issues(qs)
+            elif re.match(r"^/api/issues/[^/]+$", path):
+                self._get_issue(path.split("/")[-1])
+            elif path == "/api/repairs":
+                self._get_repairs(qs)
+            elif re.match(r"^/api/repairs/[^/]+$", path):
+                self._get_repair(path.split("/")[-1])
+            elif path == "/api/repair-suppressions":
+                self._get_repair_suppressions()
             elif path == "/api/auth/me":
                 self._send_success(200, {"principal": self._principal})
             else:
@@ -861,6 +871,42 @@ class AppHandler(SimpleHTTPRequestHandler):
         except svc.ServiceNotFound as exc:
             self._send_error(404, "NOT_FOUND", str(exc))
 
+    def _issue_repair_reader(self):
+        role = self._principal["role"]
+        return svc.IssueRepairReviewService(
+            repo.IssueRepository(open_db), repo.RepairRepository(open_db),
+            svc.OperationService(repo.OperationRepository(open_db)),
+        ), role
+
+    def _get_issues(self, qs: dict):
+        service, role = self._issue_repair_reader()
+        state = qs.get("state", [None])[0] or None
+        if state and state not in {svc.ISSUE_STATE_OPEN, svc.ISSUE_STATE_IN_PROGRESS, svc.ISSUE_STATE_RESOLVED, svc.ISSUE_STATE_ARCHIVED}:
+            raise ValueError("Invalid Issue state filter.")
+        self._send_success(200, {"items": service.list_issues(role, state=state, owner=qs.get("owner", [None])[0] or None)})
+
+    def _get_issue(self, issue_uuid: str):
+        service, role = self._issue_repair_reader()
+        self._send_success(200, {"issue": service.get_issue(issue_uuid, role)})
+
+    def _get_repairs(self, qs: dict):
+        service, role = self._issue_repair_reader()
+        state = qs.get("state", [None])[0] or None
+        category = qs.get("category", [None])[0] or None
+        if state and state not in svc._REPAIR_TRANSITIONS: raise ValueError("Invalid Repair state filter.")
+        if category and category not in {svc.REPAIR_CATEGORY_AUTOMATIC, svc.REPAIR_CATEGORY_ASSISTED, svc.REPAIR_CATEGORY_MANUAL_CONFLICT}: raise ValueError("Invalid Repair category filter.")
+        self._send_success(200, {"items": service.list_repairs(role, state=state, category=category)})
+
+    def _get_repair(self, repair_uuid: str):
+        service, role = self._issue_repair_reader()
+        self._send_success(200, {"repair": service.get_repair(repair_uuid, role)})
+
+    def _get_repair_suppressions(self):
+        if self._principal["role"] != "admin":
+            self._send_error(403, "AUTHORIZATION_ADMIN_REQUIRED", "An Admin Token is required.")
+            return
+        self._send_success(200, {"items": repo.RepairSuppressionRepository(open_db).list_records()})
+
     # ------------------------------------------------------------------
     # POST handlers
     # ------------------------------------------------------------------
@@ -904,6 +950,14 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._post_authenticated_registration_approval(path, body)
             elif path == "/api/auth/renewals":
                 self._post_token_renewal(body)
+            elif re.match(r"^/api/issues/[^/]+/decisions$", path):
+                self._post_issue_decision(path.split("/")[3], body)
+            elif re.match(r"^/api/repairs/[^/]+/decisions$", path):
+                self._post_repair_decision(path.split("/")[3], body)
+            elif path == "/api/repair-suppressions":
+                self._post_repair_suppression(body)
+            elif re.match(r"^/api/repair-suppressions/[^/]+/revoke$", path):
+                self._post_repair_suppression_revoke(path.split("/")[3])
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
         except ValueError as exc:
@@ -911,11 +965,51 @@ class AppHandler(SimpleHTTPRequestHandler):
         except svc.ServiceNotFound as exc:
             self._send_error(404, "NOT_FOUND", str(exc))
         except svc.ServiceConflict as exc:
-            self._send_error(409, exc.code, str(exc), details=exc.details)
+            if exc.code == "ADMIN_REQUIRED":
+                self._send_error(403, "AUTHORIZATION_ADMIN_REQUIRED", str(exc), details=exc.details)
+            else:
+                self._send_error(409, exc.code, str(exc), details=exc.details)
+        except svc.AuthorizationFailure as exc:
+            self._send_error(403, "AUTHORIZATION_ADMIN_REQUIRED", str(exc))
         except sqlite3.IntegrityError:
             self._send_error(409, "BUSINESS_CONFLICT", "The requested write conflicts with current data.")
         except Exception:
             self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
+
+    def _post_issue_decision(self, issue_uuid: str, body: dict):
+        service, role = self._issue_repair_reader()
+        action, expected = body.get("action", ""), body.get("expected_updated_at", "")
+        if not action or not expected: raise ValueError("action and expected_updated_at are required.")
+        self._send_success(200, service.decide_issue(issue_uuid, role, action, expected, body))
+
+    def _post_repair_decision(self, repair_uuid: str, body: dict):
+        service, role = self._issue_repair_reader()
+        action, expected = body.get("action", ""), body.get("expected_updated_at", "")
+        if not action or not expected: raise ValueError("action and expected_updated_at are required.")
+        self._send_success(200, service.decide_repair(repair_uuid, role, action, expected, body))
+
+    def _repair_decision_policy(self):
+        return svc.RepairDecisionService(
+            svc.RepairService(repo.RepairRepository(open_db), repo.IssueRepository(open_db)),
+            svc.OperationService(repo.OperationRepository(open_db)),
+            repo.RepairSuppressionRepository(open_db), APP_CONFIG.get("archive_root", ""),
+        )
+
+    def _post_repair_suppression(self, body: dict):
+        required = ("fingerprint", "scope_path", "reason", "expires_at")
+        if any(not body.get(field) for field in required): raise ValueError("fingerprint, scope_path, reason, and expires_at are required.")
+        record = self._repair_decision_policy().create_suppression(
+            fingerprint=body["fingerprint"], scope_path=body["scope_path"], reason=body["reason"],
+            creator=self._principal.get("device_name") or self._principal["role"], actor_role=self._principal["role"],
+            expires_at=body["expires_at"],
+        )
+        self._send_success(201, {"suppression": record})
+
+    def _post_repair_suppression_revoke(self, suppression_uuid: str):
+        record = self._repair_decision_policy().revoke_suppression(
+            suppression_uuid, actor=self._principal.get("device_name") or self._principal["role"], actor_role=self._principal["role"],
+        )
+        self._send_success(200, {"suppression": record})
 
     def _post_authenticated_registration_approval(self, path: str, body: dict) -> None:
         principal = getattr(self, "_principal", None)

@@ -2306,7 +2306,20 @@ class RepairDecisionService:
 
     def create_suppression(self, *, fingerprint: str, scope_path: str, reason: str, creator: str, actor_role: str, expires_at: str) -> dict:
         self._require_admin(actor_role)
-        record = self._suppressions.create({"fingerprint": fingerprint, "scope_path": scope_path, "reason": reason, "creator": creator, "expires_at": expires_at})
+        if not fingerprint.strip() or not reason.strip():
+            raise ValueError("Suppression fingerprint and reason are required.")
+        bounded_scope = self._relative(self._under_root(scope_path))
+        try:
+            expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if expiry.tzinfo is None: expiry = expiry.replace(tzinfo=timezone.utc)
+        except ValueError as exc:
+            raise ValueError("Suppression expiry must be ISO-8601.") from exc
+        if expiry <= datetime.now(timezone.utc): raise ValueError("Suppression expiry must be in the future.")
+        operation = self._operations.begin("repair_suppression_create", creator,
+                                           summary=f"Create bounded repair suppression for {bounded_scope}")
+        record = self._suppressions.create({"fingerprint": fingerprint.strip(), "scope_path": bounded_scope, "reason": reason.strip(), "creator": creator, "expires_at": expiry.astimezone(timezone.utc).isoformat()})
+        self._operations.succeed(operation["uuid"], "Repair suppression created.")
+        record["operation_uuid"] = operation["uuid"]
         self._audit({"action": "repair_suppression_created", "suppression_uuid": record["uuid"], "creator": creator})
         return record
 
@@ -2315,6 +2328,10 @@ class RepairDecisionService:
         record = self._suppressions.revoke(suppression_uuid, actor)
         if record is None:
             raise ServiceNotFound(f"Repair suppression not found: {suppression_uuid}")
+        operation = self._operations.begin("repair_suppression_revoke", actor,
+                                           summary=f"Revoke repair suppression {suppression_uuid}")
+        self._operations.succeed(operation["uuid"], "Repair suppression revoked.")
+        record["operation_uuid"] = operation["uuid"]
         self._audit({"action": "repair_suppression_revoked", "suppression_uuid": suppression_uuid, "creator": actor})
         return record
 
@@ -2521,6 +2538,133 @@ class IssueService:
             )
         self._issue.set_state(issue_uuid, to_state, **state_fields)
         return self._issue.get_by_uuid(issue_uuid)
+
+
+class IssueRepairReviewService:
+    """Role-safe read and optimistic decision boundary for Issue/Repair UI."""
+
+    def __init__(self, issue_repo, repair_repo, operation_service):
+        self._issue_repo = issue_repo
+        self._repair_repo = repair_repo
+        self._issues = IssueService(issue_repo)
+        self._repairs = RepairService(repair_repo, issue_repo)
+        self._operations = operation_service
+
+    @staticmethod
+    def _issue_actions(issue: dict, role: str) -> list[str]:
+        actions: list[str] = []
+        if issue["state"] == ISSUE_STATE_OPEN: actions.append("begin_work")
+        if issue["state"] == ISSUE_STATE_IN_PROGRESS: actions.append("reopen")
+        if role == ISSUE_ADMIN_ROLE:
+            actions.append("assign")
+            if issue["state"] == ISSUE_STATE_IN_PROGRESS: actions.append("resolve")
+            if issue["state"] in {ISSUE_STATE_OPEN, ISSUE_STATE_IN_PROGRESS, ISSUE_STATE_RESOLVED}: actions.append("archive")
+        return actions
+
+    @staticmethod
+    def _repair_actions(repair: dict, role: str) -> list[str]:
+        if role not in {"writer", "admin"}: return []
+        state = repair["state"]
+        if state == REPAIR_STATE_NEEDS_REPAIR:
+            actions = ["ignore", "escalate"]
+            if repair["category"] == REPAIR_CATEGORY_AUTOMATIC or repair.get("confirmation"):
+                actions.append("start")
+            else: actions.append("confirm")
+            return actions
+        if state == REPAIR_STATE_MANUAL_CONFLICT:
+            return ["ignore", "start"] if repair.get("confirmation") else ["ignore", "confirm"]
+        if state == REPAIR_STATE_REPAIRING: return ["complete_action"]
+        if state == REPAIR_STATE_PENDING_VERIFICATION: return ["verify_passed", "verify_failed"]
+        return []
+
+    def list_issues(self, role: str, *, state=None, owner=None) -> list[dict]:
+        return [self._issue_view(item, role) for item in self._issue_repo.list_issues(state=state, owner=owner)]
+
+    def get_issue(self, issue_uuid: str, role: str) -> dict:
+        item = self._issue_repo.get_by_uuid(issue_uuid)
+        if item is None: raise ServiceNotFound("Issue not found.")
+        return self._issue_view(item, role)
+
+    def _issue_view(self, item: dict, role: str) -> dict:
+        result = {key: value for key, value in item.items() if key != "id"}
+        result["links"] = self._issue_repo.list_links(item["uuid"])
+        result["allowed_actions"] = self._issue_actions(item, role)
+        return result
+
+    def list_repairs(self, role: str, *, state=None, category=None) -> list[dict]:
+        return [self._repair_view(item, role) for item in self._repair_repo.list_cases(state=state, category=category)]
+
+    def get_repair(self, repair_uuid: str, role: str) -> dict:
+        item = self._repair_repo.get_by_uuid(repair_uuid)
+        if item is None: raise ServiceNotFound("Repair case not found.")
+        return self._repair_view(item, role)
+
+    def _repair_view(self, item: dict, role: str) -> dict:
+        hidden = {"id", "confirmation", "expected_path", "failure_reason", "verification_result"}
+        if role in {"writer", "admin"}: hidden = {"id"}
+        result = {key: value for key, value in item.items() if key not in hidden}
+        result["allowed_actions"] = self._repair_actions(item, role)
+        if role == "admin" and item["state"] in {REPAIR_STATE_NEEDS_REPAIR, REPAIR_STATE_MANUAL_CONFLICT} and item.get("expected_path"):
+            fingerprint_input = f"{item['uuid']}\0{item['expected_path']}\0{item.get('failure_reason') or ''}"
+            result["suppression_candidate"] = {
+                "fingerprint": hashlib.sha256(fingerprint_input.encode()).hexdigest(),
+                "scope_path": item["expected_path"],
+            }
+        return result
+
+    @staticmethod
+    def _require_current(item: dict | None, expected: str, kind: str) -> dict:
+        if item is None: raise ServiceNotFound(f"{kind} not found.")
+        if not expected or item.get("updated_at") != expected:
+            raise ServiceConflict("WORKFLOW_STALE", f"{kind} changed; reload before deciding.",
+                                  {"current_updated_at": item.get("updated_at")})
+        return item
+
+    def decide_issue(self, issue_uuid: str, role: str, action: str, expected: str, body: dict) -> dict:
+        item = self._require_current(self._issue_repo.get_by_uuid(issue_uuid), expected, "Issue")
+        if action not in self._issue_actions(item, role):
+            raise ServiceConflict("INVALID_TRANSITION", "The Issue action is not currently allowed.",
+                                  {"allowed": self._issue_actions(item, role)})
+        if action == "resolve" and (not isinstance(body.get("verification"), str) or not body["verification"].strip()):
+            raise ValueError("Resolution verification is required.")
+        if action == "assign" and body.get("owner") is not None and (not isinstance(body["owner"], str) or not body["owner"].strip()):
+            raise ValueError("Issue owner must be a non-empty name or null.")
+        operation = self._operations.begin(f"issue_{action}", OP_INITIATOR_WEB_UI,
+                                           issue_uuid=issue_uuid, summary=f"Issue decision: {action}")
+        if action == "begin_work": updated = self._issues.begin_work(issue_uuid)
+        elif action == "reopen": updated = self._issues.reopen(issue_uuid)
+        elif action == "assign": updated = self._issues.assign(issue_uuid, body.get("owner"), actor_role=role)
+        elif action == "resolve": updated = self._issues.resolve(issue_uuid, body.get("verification", ""), actor_role=role)
+        elif action == "archive": updated = self._issues.archive(issue_uuid, actor_role=role)
+        else: raise ValueError("Unknown Issue action.")
+        self._operations.succeed(operation["uuid"], f"Issue {action} completed.")
+        return {"issue": self._issue_view(updated, role), "operation_uuid": operation["uuid"]}
+
+    def decide_repair(self, repair_uuid: str, role: str, action: str, expected: str, body: dict) -> dict:
+        item = self._require_current(self._repair_repo.get_by_uuid(repair_uuid), expected, "Repair")
+        if action not in self._repair_actions(item, role):
+            raise ServiceConflict("INVALID_TRANSITION", "The Repair action is not currently allowed.",
+                                  {"allowed": self._repair_actions(item, role)})
+        if action == "confirm" and (not isinstance(body.get("confirmation"), str) or not body["confirmation"].strip()):
+            raise ValueError("Confirmation is required.")
+        if action in {"verify_passed", "verify_failed"} and (not isinstance(body.get("verification"), str) or not body["verification"].strip()):
+            raise ValueError("Verification evidence is required.")
+        operation = self._operations.begin(f"repair_{action}", OP_INITIATOR_WEB_UI,
+                                           repair_uuid=repair_uuid, related_operation_uuid=item.get("operation_uuid"),
+                                           summary=f"Repair decision: {action}")
+        if action == "confirm":
+            confirmation = body.get("confirmation", "")
+            updated = self._repairs.confirm(repair_uuid, confirmation.strip())
+        elif action == "start": updated = self._repairs.start_repair(repair_uuid)
+        elif action == "escalate": updated = self._repairs.escalate_to_manual(repair_uuid)
+        elif action == "complete_action": updated = self._repairs.complete_action(repair_uuid)
+        elif action in {"verify_passed", "verify_failed"}:
+            result = body.get("verification", "")
+            updated = self._repairs.verify(repair_uuid, action == "verify_passed", result.strip())
+        elif action == "ignore": updated = self._repairs.ignore(repair_uuid)
+        else: raise ValueError("Unknown Repair action.")
+        self._operations.succeed(operation["uuid"], f"Repair {action} completed.")
+        return {"repair": self._repair_view(updated, role), "operation_uuid": operation["uuid"]}
 
 
 # ---------------------------------------------------------------------------

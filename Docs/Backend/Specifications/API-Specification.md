@@ -87,6 +87,18 @@ filters that created it; malformed or mismatched cursors return
 contains pagination, active filters, and sort details. Every item is projected
 according to the authenticated principal's diagnostic-disclosure role.
 
+Issue and Repair review is exposed through authenticated `/api/v1/issues` and
+`/api/v1/repairs` collection/detail routes. Each detail contains the actions
+currently allowed for the caller's role and durable state. Decisions are
+submitted to `/{uuid}/decisions` with an action and the exact
+`expected_updated_at` returned by review. A changed or repeated decision is
+rejected with `409 WORKFLOW_STALE` or `409 INVALID_TRANSITION`; clients never
+construct a transition that the read model did not permit. Writer/Admin may
+perform ordinary workflow decisions; ownership, Issue resolution/archive, and
+bounded repair suppression remain Admin-only. Accepted decisions return their
+durable Operation identifier. Reader projections omit repair paths,
+confirmation, failure evidence, and verification detail.
+
 ## Album management contracts
 
 `GET /api/v1/albums` supports composable `q`, `studio_id`, `status_id`,

@@ -20,7 +20,7 @@ import sqlite3
 import sys
 import threading
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from http.client import HTTPConnection
 from http.server import HTTPServer
 from pathlib import Path
@@ -1064,6 +1064,116 @@ class TestOperationHistoryDisclosure(_TestServerBase):
     def test_unversioned_operation_history_is_not_exposed(self):
         self._operation(); status, body = self._get("/api/operations")
         self.assertEqual(404, status); self.assertEqual("NOT_FOUND", body["error"]["code"])
+
+
+class TestIssueRepairDecisionApi(_TestServerBase):
+    """BT-038 authenticated review, disclosure, optimistic decision contract."""
+
+    def _issued(self, role):
+        import repositories as repo
+        import services as svc
+        auth = svc.AuthenticationService(repo.AuthRepository(lambda: self._db), registration_secret="bt038-proof")
+        registration = auth.request_registration(
+            device_name=f"BT038 {role}", device_identity=f"bt038-{role}-{self._testMethodName}",
+            requested_role=role, requested_scopes=None, registration_proof="bt038-proof",
+        )
+        return auth.approve_registration(registration["uuid"])
+
+    def _headers(self, role):
+        return {"Authorization": f"Bearer {self._issued(role)['token']}"}
+
+    def _issue(self):
+        import repositories as repo
+        import services as svc
+        return svc.IssueService(repo.IssueRepository(lambda: self._db)).create({
+            "category": "Repair", "description": "BT038 issue",
+            "source_workflow": "test", "suggested_resolution": "Review",
+        })
+
+    def _repair(self):
+        import repositories as repo
+        return repo.RepairRepository(lambda: self._db).create({
+            "operation_uuid": "original-operation", "album_uuid": "album-bt038",
+            "expected_path": "B/BT/Studio/Album", "category": "Assisted",
+            "failure_reason": "Source move failed",
+        })
+
+    def test_issue_review_decision_and_stale_replay(self):
+        issue, headers = self._issue(), self._headers("writer")
+        status, listing = self._get("/api/v1/issues?state=Open", headers)
+        self.assertEqual(200, status)
+        item = next(row for row in listing["data"]["items"] if row["uuid"] == issue["uuid"])
+        self.assertIn("begin_work", item["allowed_actions"])
+        status, decided = self._post(f"/api/v1/issues/{issue['uuid']}/decisions", {
+            "action": "begin_work", "expected_updated_at": item["updated_at"],
+        }, headers)
+        self.assertEqual(200, status)
+        self.assertEqual("InProgress", decided["data"]["issue"]["state"])
+        self.assertTrue(decided["data"]["operation_uuid"])
+        status, stale = self._post(f"/api/v1/issues/{issue['uuid']}/decisions", {
+            "action": "begin_work", "expected_updated_at": item["updated_at"],
+        }, headers)
+        self.assertEqual(409, status)
+        self.assertIn(stale["error"]["code"], {"WORKFLOW_STALE", "INVALID_TRANSITION"})
+
+    def test_admin_issue_resolution_and_writer_admin_boundary(self):
+        issue = self._issue(); writer = self._headers("writer")
+        status, begun = self._post(f"/api/v1/issues/{issue['uuid']}/decisions", {
+            "action": "begin_work", "expected_updated_at": issue["updated_at"],
+        }, writer)
+        self.assertEqual(200, status)
+        current = begun["data"]["issue"]
+        status, denied = self._post(f"/api/v1/issues/{issue['uuid']}/decisions", {
+            "action": "resolve", "expected_updated_at": current["updated_at"], "verification": "Checked",
+        }, writer)
+        self.assertEqual(409, status); self.assertEqual("INVALID_TRANSITION", denied["error"]["code"])
+        admin = self._headers("admin")
+        status, resolved = self._post(f"/api/v1/issues/{issue['uuid']}/decisions", {
+            "action": "resolve", "expected_updated_at": current["updated_at"], "verification": "Archive verified",
+        }, admin)
+        self.assertEqual(200, status); self.assertEqual("Resolved", resolved["data"]["issue"]["state"])
+
+    def test_repair_confirmation_start_and_reader_redaction(self):
+        repair = self._repair(); reader = self._headers("reader")
+        status, detail = self._get(f"/api/v1/repairs/{repair['uuid']}", reader)
+        self.assertEqual(200, status); self.assertNotIn("expected_path", detail["data"]["repair"])
+        writer = self._headers("writer")
+        status, detail = self._get(f"/api/v1/repairs/{repair['uuid']}", writer)
+        current = detail["data"]["repair"]
+        self.assertEqual(200, status); self.assertEqual(["ignore", "escalate", "confirm"], current["allowed_actions"])
+        status, confirmed = self._post(f"/api/v1/repairs/{repair['uuid']}/decisions", {
+            "action": "confirm", "expected_updated_at": current["updated_at"],
+            "confirmation": "I reviewed the candidate and evidence.",
+        }, writer)
+        self.assertEqual(200, status); confirmed_repair = confirmed["data"]["repair"]
+        self.assertIn("start", confirmed_repair["allowed_actions"])
+        status, started = self._post(f"/api/v1/repairs/{repair['uuid']}/decisions", {
+            "action": "start", "expected_updated_at": confirmed_repair["updated_at"],
+        }, writer)
+        self.assertEqual(200, status); self.assertEqual("Repairing", started["data"]["repair"]["state"])
+
+    def test_reader_cannot_submit_decision(self):
+        issue, headers = self._issue(), self._headers("reader")
+        status, body = self._post(f"/api/v1/issues/{issue['uuid']}/decisions", {
+            "action": "begin_work", "expected_updated_at": issue["updated_at"],
+        }, headers)
+        self.assertEqual(403, status); self.assertEqual("AUTHORIZATION_INSUFFICIENT_SCOPE", body["error"]["code"])
+
+    def test_suppression_is_admin_only_bounded_and_audited(self):
+        payload = {"fingerprint": "bt038-fingerprint", "scope_path": "B/BT/Studio/Album",
+                   "reason": "Reviewed bounded exception",
+                   "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()}
+        status, denied = self._post("/api/v1/repair-suppressions", payload, self._headers("writer"))
+        self.assertEqual(403, status); self.assertEqual("AUTHORIZATION_ADMIN_REQUIRED", denied["error"]["code"])
+        admin = self._headers("admin")
+        status, created = self._post("/api/v1/repair-suppressions", payload, admin)
+        self.assertEqual(201, status)
+        record = created["data"]["suppression"]
+        self.assertEqual(payload["scope_path"], record["scope_path"])
+        self.assertTrue(record["operation_uuid"])
+        status, listing = self._get("/api/v1/repair-suppressions", admin)
+        self.assertEqual(200, status)
+        self.assertTrue(any(item["uuid"] == record["uuid"] for item in listing["data"]["items"]))
 
 
 if __name__ == "__main__":

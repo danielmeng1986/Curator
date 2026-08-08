@@ -90,6 +90,11 @@ The canonical database path is the intended source of truth. A real path that di
 - A failed or incomplete repair remains visible in `NeedsRepair` or `ManualConflict`; it is never represented as resolved.
 - A detected discrepancy creates or updates a related Issue when persistent review is required.
 - Ignoring a repair requires an explicit decision and remains auditable.
+- UI decisions bind the Repair `updated_at` observed during review and may use
+  only the Backend-returned allowed actions. Confirmation and verification
+  evidence are mandatory where the state machine requires them. Every accepted
+  decision creates a linked Operation; stale or repeated decisions do not
+  execute workflow or filesystem work.
 
 ## Snapshot requirements
 

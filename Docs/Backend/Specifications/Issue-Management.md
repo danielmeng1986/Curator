@@ -74,6 +74,10 @@ The badge provides continuous awareness of unresolved problems without interrupt
 - Failure to create a required Issue must not cause the underlying discrepancy to be represented as resolved.
 - An invalid lifecycle transition is rejected.
 - An Issue cannot be resolved without the verification required by its category/workflow.
+- Review responses include Backend-computed allowed actions. A decision binds
+  the Issue `updated_at` observed during review; stale and repeated decisions
+  are rejected before state mutation. Every accepted lifecycle or ownership
+  decision creates a linked Operation.
 
 ## Future extensions
 

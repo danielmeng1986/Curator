@@ -2086,6 +2086,16 @@ class RepairRepository:
     def __init__(self, db_factory):
         self._db = db_factory
 
+    @staticmethod
+    def _ensure_schema(conn) -> None:
+        conn.execute("""CREATE TABLE IF NOT EXISTS repair_case (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
+            operation_uuid TEXT, album_uuid TEXT, expected_path TEXT,
+            state TEXT NOT NULL DEFAULT 'NeedsRepair', category TEXT NOT NULL DEFAULT 'Assisted',
+            confirmation TEXT, failure_reason TEXT, verification_result TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+        conn.commit()
+
     def create(self, fields: dict) -> dict:
         """Create a new repair case and return the normalised record.
 
@@ -2103,6 +2113,7 @@ class RepairRepository:
         category = fields.get("category", "Assisted")
         state = fields.get("state", "NeedsRepair")
         with self._db() as conn:
+            self._ensure_schema(conn)
             cur = conn.execute(
                 """
                 INSERT INTO repair_case
@@ -2134,14 +2145,28 @@ class RepairRepository:
     def get_by_uuid(self, repair_uuid: str) -> dict | None:
         """Return the normalised repair case for *repair_uuid*, or ``None``."""
         with self._db() as conn:
+            self._ensure_schema(conn)
             row = conn.execute(
                 "SELECT * FROM repair_case WHERE uuid = ?", (repair_uuid,)
             ).fetchone()
         return _norm_repair_case(dict(row)) if row else None
 
+    def list_cases(self, *, state: str | None = None, category: str | None = None) -> list[dict]:
+        clauses, params = [], []
+        if state: clauses.append("state = ?"); params.append(state)
+        if category: clauses.append("category = ?"); params.append(category)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                f"SELECT * FROM repair_case{where} ORDER BY created_at DESC, id DESC", params,
+            ).fetchall()
+        return [_norm_repair_case(dict(row)) for row in rows]
+
     def get_state(self, repair_uuid: str) -> str | None:
         """Return the current state string for *repair_uuid*, or ``None``."""
         with self._db() as conn:
+            self._ensure_schema(conn)
             row = conn.execute(
                 "SELECT state FROM repair_case WHERE uuid = ?", (repair_uuid,)
             ).fetchone()
@@ -2151,6 +2176,7 @@ class RepairRepository:
         """Persist a state transition for *repair_uuid*."""
         now = datetime.now(timezone.utc).isoformat()
         with self._db() as conn:
+            self._ensure_schema(conn)
             conn.execute(
                 "UPDATE repair_case SET state = ?, updated_at = ? WHERE uuid = ?",
                 (state, now, repair_uuid),
@@ -2161,6 +2187,7 @@ class RepairRepository:
         """Persist a confirmation text for an Assisted or ManualConflict repair."""
         now = datetime.now(timezone.utc).isoformat()
         with self._db() as conn:
+            self._ensure_schema(conn)
             conn.execute(
                 "UPDATE repair_case SET confirmation = ?, updated_at = ? WHERE uuid = ?",
                 (confirmation, now, repair_uuid),
@@ -2171,6 +2198,7 @@ class RepairRepository:
         """Persist the post-action verification result."""
         now = datetime.now(timezone.utc).isoformat()
         with self._db() as conn:
+            self._ensure_schema(conn)
             conn.execute(
                 "UPDATE repair_case"
                 " SET verification_result = ?, updated_at = ? WHERE uuid = ?",
@@ -2257,6 +2285,14 @@ class RepairSuppressionRepository:
             conn.commit()
             row = conn.execute("SELECT * FROM repair_suppression WHERE uuid = ?", (record_uuid,)).fetchone()
         return self._normalise(dict(row)) if row else None
+
+    def list_records(self) -> list[dict]:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                "SELECT * FROM repair_suppression ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        return [self._normalise(dict(row)) for row in rows]
 
 
 class QuarantineRepository:
@@ -2390,6 +2426,18 @@ class IssueRepository:
                 "SELECT * FROM issue WHERE uuid = ?", (issue_uuid,)
             ).fetchone()
         return _norm_issue(dict(row)) if row else None
+
+    def list_issues(self, *, state: str | None = None, owner: str | None = None) -> list[dict]:
+        clauses, params = [], []
+        if state: clauses.append("state = ?"); params.append(state)
+        if owner: clauses.append("owner = ?"); params.append(owner)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(
+                f"SELECT * FROM issue{where} ORDER BY created_at DESC, id DESC", params,
+            ).fetchall()
+        return [_norm_issue(dict(row)) for row in rows]
 
     def get_state(self, issue_uuid: str) -> str | None:
         """Return the current state string for *issue_uuid*, or ``None``."""
