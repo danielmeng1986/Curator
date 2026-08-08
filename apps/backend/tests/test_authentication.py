@@ -55,6 +55,10 @@ class AuthenticationLifecycleTests(unittest.TestCase):
         self.assertNotIn("token_hash", issued["token_record"])
         persisted = self.db.execute("SELECT token_hash FROM auth_token").fetchone()[0]
         self.assertNotEqual(persisted, issued["token"])
+        self.assertEqual(principal["device_identity"], "ai-worker-001")
+        self.assertEqual(principal["token_uuid"], issued["token_record"]["uuid"])
+        self.assertEqual(principal["expires_at"], issued["token_record"]["expires_at"])
+        self.assertIsNone(principal["renewal"])
 
     def test_expired_token_is_rejected(self):
         registration = self._request()
@@ -90,6 +94,14 @@ class AuthenticationLifecycleTests(unittest.TestCase):
         self.assertEqual(
             self.auth.authenticate(replacement["token"], "write")["device_name"], "AI Worker"
         )
+
+    def test_duplicate_pending_renewal_is_rejected_and_visible_in_principal(self):
+        issued = self.auth.approve_registration(self._request()["uuid"])
+        renewal = self.auth.request_renewal(issued["token"], device_identity="ai-worker-001")
+        principal = self.auth.authenticate(issued["token"], "read")
+        self.assertEqual(principal["renewal"]["uuid"], renewal["uuid"])
+        with self.assertRaisesRegex(svc.ServiceConflict, "already pending"):
+            self.auth.request_renewal(issued["token"], device_identity="ai-worker-001")
 
 
 class AdministratorBootstrapTests(unittest.TestCase):

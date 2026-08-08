@@ -401,6 +401,17 @@ class AuthRepository:
             row = conn.execute("SELECT * FROM token_renewal_request WHERE uuid = ?", (request_uuid,)).fetchone()
         return self._renewal(dict(row)) if row else None
 
+    def get_pending_renewal_for_token(self, token_uuid: str) -> dict | None:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                """SELECT * FROM token_renewal_request
+                   WHERE previous_token_uuid = ? AND status = 'PendingApproval'
+                   ORDER BY created_at DESC LIMIT 1""",
+                (token_uuid,),
+            ).fetchone()
+        return self._renewal(dict(row)) if row else None
+
     def approve_renewal(self, request_uuid: str) -> dict | None:
         now = _utc_now_iso()
         with self._db() as conn:

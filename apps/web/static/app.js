@@ -12,7 +12,7 @@ const ROUTES = [
   { pattern: /^#\/studios\/new$/, page: 'studio-new', params: [] },
   { pattern: /^#\/studios\/(\d+)$/, page: 'studio-detail', params: ['id'] },
   { pattern: /^#\/statuses$/, page: 'statuses', params: [] },
-  { pattern: /^#\/import\/albums$/, page: 'import', params: [] },
+  { pattern: /^#\/import\/albums$/, page: 'import', params: [], scope: 'write' },
 ];
 
 function navigate(hash) {
@@ -28,6 +28,16 @@ function route() {
       const paramValues = {};
       r.params.forEach((name, i) => { paramValues[name] = m[i + 1]; });
 
+      if (r.scope && !ui.can(window.curatorPrincipal?.role, r.scope)) {
+        const hasToken = api.getConnection().hasToken;
+        renderRequestError(new api.Error(
+          hasToken ? 'AUTHORIZATION_INSUFFICIENT_SCOPE' : 'AUTHENTICATION_MISSING_TOKEN',
+          hasToken ? 'This device does not have permission.' : 'A device Token is required.',
+          hasToken ? 403 : 401,
+        ));
+        return;
+      }
+
       updateNavActive(hash);
 
       const btn = document.getElementById('pageActionBtn');
@@ -36,24 +46,30 @@ function route() {
       btn.onclick = null;
 
       switch (r.page) {
-        case 'dashboard':       void DashboardPage.render(paramValues).catch(renderRequestError); break;
-        case 'albums-list':     void AlbumsPage.renderList(paramValues).catch(renderRequestError); break;
-        case 'album-new':       void AlbumsPage.renderDetail({ id: null }).catch(renderRequestError); break;
-        case 'album-detail':    void AlbumsPage.renderDetail(paramValues).catch(renderRequestError); break;
-        case 'models-list':     void ModelsPage.renderList(paramValues).catch(renderRequestError); break;
-        case 'model-new':       void ModelsPage.renderDetail({ id: null }).catch(renderRequestError); break;
-        case 'model-detail':    void ModelsPage.renderDetail(paramValues).catch(renderRequestError); break;
-        case 'studios-list':    void StudiosPage.renderList(paramValues).catch(renderRequestError); break;
-        case 'studio-new':      void StudiosPage.renderDetail({ id: null }).catch(renderRequestError); break;
-        case 'studio-detail':   void StudiosPage.renderDetail(paramValues).catch(renderRequestError); break;
-        case 'statuses':        void StatusesPage.render(paramValues).catch(renderRequestError); break;
-        case 'import':          void ImportPage.render(paramValues).catch(renderRequestError); break;
+        case 'dashboard':       renderPage(DashboardPage.render(paramValues)); break;
+        case 'albums-list':     renderPage(AlbumsPage.renderList(paramValues)); break;
+        case 'album-new':       renderPage(AlbumsPage.renderDetail({ id: null })); break;
+        case 'album-detail':    renderPage(AlbumsPage.renderDetail(paramValues)); break;
+        case 'models-list':     renderPage(ModelsPage.renderList(paramValues)); break;
+        case 'model-new':       renderPage(ModelsPage.renderDetail({ id: null })); break;
+        case 'model-detail':    renderPage(ModelsPage.renderDetail(paramValues)); break;
+        case 'studios-list':    renderPage(StudiosPage.renderList(paramValues)); break;
+        case 'studio-new':      renderPage(StudiosPage.renderDetail({ id: null })); break;
+        case 'studio-detail':   renderPage(StudiosPage.renderDetail(paramValues)); break;
+        case 'statuses':        renderPage(StatusesPage.render(paramValues)); break;
+        case 'import':          renderPage(ImportPage.render(paramValues)); break;
         default:                renderNotFound();
       }
       return;
     }
   }
   renderNotFound();
+}
+
+function renderPage(promise) {
+  void Promise.resolve(promise)
+    .then(() => ui.applyPermissions(document, window.curatorPrincipal))
+    .catch(renderRequestError);
 }
 
 function updateNavActive(hash) {
@@ -115,31 +131,96 @@ function openConnectionSettings() {
     return;
   }
   const connection = api.getConnection();
+  const principal = window.curatorPrincipal;
+  const expiry = principal?.expires_at ? new Date(principal.expires_at).toLocaleString() : 'Unknown';
+  const renewal = principal?.renewal;
   showModal(`
     <h3 class="modal-title">Connect to Curator</h3>
+    ${principal ? `<div class="connection-summary">
+      <strong>${esc(principal.device_name)}</strong>
+      <span class="chip">${esc(principal.role)}</span>
+      <div>Scopes: ${esc(principal.scopes.join(', '))}</div>
+      <div>Expires: ${esc(expiry)}</div>
+      <div>Renewal: ${renewal ? `Pending · ${esc(renewal.uuid)}` : 'Not requested'}</div>
+    </div>` : '<p>No valid device connection is active.</p>'}
     <div class="form-field">
-      <label>Backend URL</label>
+      <label for="backendUrl">Backend URL</label>
       <input id="backendUrl" value="${esc(connection.backendUrl)}" placeholder="Same origin when empty">
     </div>
     <div class="form-field">
-      <label>Approved device token</label>
-      <input id="deviceToken" type="password" placeholder="${connection.hasToken ? 'Stored locally; enter a replacement to change it' : 'Required'}">
+      <label for="deviceToken">Approved device Token</label>
+      <input id="deviceToken" type="password" autocomplete="off" placeholder="${connection.hasToken ? 'Enter a validated replacement to change it' : 'Required'}">
     </div>
-    <p style="font-size:.8rem;color:var(--ink-soft)">Stored only in this browser profile; never in source files.</p>
+    <p style="font-size:.8rem;color:var(--ink-soft)">A replacement is validated before the current connection changes.</p>
     <div class="modal-footer">
-      <button class="btn btn-secondary" id="connectionCancel">Cancel</button>
-      <button class="btn btn-primary" id="connectionSave">Save</button>
+      ${principal && !renewal ? '<button class="btn btn-secondary" id="connectionRenew">Request renewal</button>' : ''}
+      ${connection.hasToken ? '<button class="btn btn-danger" id="connectionDisconnect">Disconnect</button>' : ''}
+      <button class="btn btn-secondary" id="connectionCancel">Close</button>
+      <button class="btn btn-primary" id="connectionSave">Validate and connect</button>
     </div>
   `);
   document.getElementById('connectionCancel').onclick = closeModal;
-  document.getElementById('connectionSave').onclick = () => {
+  document.getElementById('connectionDisconnect')?.addEventListener('click', () => {
+    api.clearToken();
+    window.curatorPrincipal = null;
+    closeModal();
+    ui.applyPermissions(document, null);
+    void checkBootstrap();
+    void checkHealth();
+    route();
+  });
+  document.getElementById('connectionRenew')?.addEventListener('click', async (event) => {
+    const result = await ui.runAction(
+      'request-token-renewal',
+      () => api.post('/auth/renewals', { device_identity: principal.device_identity }),
+      { trigger: event.currentTarget, context: 'request Token renewal' },
+    );
+    if (result.ok) {
+      await refreshPrincipal();
+      closeModal();
+      toast('Token renewal requested. An administrator must approve it.', 'ok');
+    }
+  });
+  document.getElementById('connectionSave').onclick = async (event) => {
     const token = document.getElementById('deviceToken').value;
-    api.configure({ backendUrl: document.getElementById('backendUrl').value, ...(token ? { token } : {}) });
+    const nextBackendUrl = document.getElementById('backendUrl').value.trim();
+    if (!token) { toast('Enter an approved device Token to connect or replace the current Token.', 'error'); return; }
+    const result = await ui.runAction(
+      'validate-device-connection',
+      () => api.validateConnection({ backendUrl: nextBackendUrl, token }),
+      { trigger: event.currentTarget, context: 'validate the device connection' },
+    );
+    document.getElementById('deviceToken').value = '';
+    if (!result.ok) return;
+    api.configure({ backendUrl: nextBackendUrl, token });
+    window.curatorPrincipal = result.value;
     closeModal();
     void checkBootstrap();
     void checkHealth();
     route();
   };
+}
+
+async function refreshPrincipal() {
+  if (!api.getConnection().hasToken) {
+    window.curatorPrincipal = null;
+    ui.applyPermissions(document, null);
+    return null;
+  }
+  try {
+    const data = await api.get('/auth/me');
+    window.curatorPrincipal = data.principal;
+    const button = document.getElementById('connectionBtn');
+    button.textContent = `${data.principal.device_name} · ${data.principal.role}`;
+    ui.applyPermissions(document, data.principal);
+    return data.principal;
+  } catch (error) {
+    window.curatorPrincipal = null;
+    const button = document.getElementById('connectionBtn');
+    button.textContent = api.isAuthenticationError(error) ? 'Reconnect' : 'Connect';
+    ui.applyPermissions(document, null);
+    return null;
+  }
 }
 
 async function checkBootstrap() {
@@ -152,7 +233,9 @@ async function checkBootstrap() {
       button.classList.add('btn-accent');
       button.classList.remove('btn-secondary');
     } else {
-      button.textContent = 'Connect';
+      button.textContent = window.curatorPrincipal
+        ? `${window.curatorPrincipal.device_name} · ${window.curatorPrincipal.role}`
+        : 'Connect';
       button.classList.remove('btn-accent');
       button.classList.add('btn-secondary');
     }
@@ -213,7 +296,7 @@ function openAdministratorBootstrap() {
       closeModal();
       void checkBootstrap();
       void checkHealth();
-      route();
+      void refreshPrincipal().then(route);
     };
   };
 }
@@ -233,7 +316,7 @@ window.addEventListener('hashchange', route);
 window.addEventListener('load', () => {
   document.getElementById('connectionBtn').onclick = openConnectionSettings;
   void checkBootstrap();
-  route();
+  void refreshPrincipal().then(route);
   checkHealth();
   setInterval(checkHealth, 60000);
 });

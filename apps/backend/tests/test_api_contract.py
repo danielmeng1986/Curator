@@ -738,6 +738,34 @@ class TestVersionedApiAuthorization(_TestServerBase):
         self.assertEqual(status, 403)
         self.assertEqual(body["error"]["code"], "AUTHORIZATION_INSUFFICIENT_SCOPE")
 
+    def test_current_principal_and_renewal_request_are_token_safe(self):
+        issued = self._issue(role="writer")
+        headers = self._bearer(issued)
+        status, body = self._get("/api/v1/auth/me", headers)
+        self.assertEqual(status, 200)
+        principal = body["data"]["principal"]
+        self.assertEqual(principal["role"], "writer")
+        self.assertEqual(principal["scopes"], ["read", "write"])
+        self.assertNotIn("token", principal)
+        self.assertNotIn("token_hash", principal)
+        import repositories as repo
+        registration = repo.AuthRepository(lambda: self._db).get_registration(principal["registration_uuid"])
+        status, renewal = self._post(
+            "/api/v1/auth/renewals",
+            {"device_identity": registration["device_identity"]}, headers,
+        )
+        self.assertEqual(status, 202)
+        renewal_uuid = renewal["data"]["renewal"]["uuid"]
+        status, refreshed = self._get("/api/v1/auth/me", headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(refreshed["data"]["principal"]["renewal"]["uuid"], renewal_uuid)
+        status, duplicate = self._post(
+            "/api/v1/auth/renewals",
+            {"device_identity": registration["device_identity"]}, headers,
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(duplicate["error"]["code"], "BUSINESS_CONFLICT")
+
 
 class TestAuthenticatedApiWorkflow(_TestServerBase):
     """BT-024: loopback enrolment then protected import entry."""

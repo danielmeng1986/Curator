@@ -144,8 +144,8 @@ const ModelsPage = {
           </details>` : ''}
 
           <div class="detail-actions">
-            <button class="btn btn-primary" onclick="ModelsPage._save()">Save</button>
-            ${!isNew ? `<button class="btn btn-danger" onclick="ModelsPage._delete(${id})">Delete Model</button>` : ''}
+            <button class="btn btn-primary" data-required-scope="write" onclick="ModelsPage._save()">Save</button>
+            ${!isNew ? `<button class="btn btn-danger" data-required-scope="write" onclick="ModelsPage._delete(${id})">Delete Model</button>` : ''}
           </div>
         </div>
 

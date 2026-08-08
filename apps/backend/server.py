@@ -460,6 +460,8 @@ class AppHandler(SimpleHTTPRequestHandler):
     @staticmethod
     def _required_scope(path: str, method: str) -> str:
         """Return the least privilege required by a versioned API route."""
+        if path in {"/api/auth/me", "/api/auth/renewals"}:
+            return "read"
         if path in {"/api/backup", "/api/backup/cleanup", "/api/rollback"} or path.startswith("/api/backups") or path.startswith("/api/auth/"):
             return "admin"
         return "read" if method == "GET" else "write"
@@ -649,6 +651,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_operations(qs)
             elif re.match(r"^/api/operations/[^/]+$", path):
                 self._get_operation(path.split("/")[-1])
+            elif path == "/api/auth/me":
+                self._send_success(200, {"principal": self._principal})
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
         except Exception:
@@ -826,6 +830,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._post_rollback(body)
             elif re.match(r"^/api/auth/registrations/[^/]+/approve$", path):
                 self._post_authenticated_registration_approval(path, body)
+            elif path == "/api/auth/renewals":
+                self._post_token_renewal(body)
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
         except Exception:
@@ -850,6 +856,24 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_success(200, issued)
         except svc.ServiceNotFound as exc:
             self._send_error(404, "NOT_FOUND", str(exc))
+        except (svc.ServiceConflict, ValueError) as exc:
+            self._send_error(409, getattr(exc, "code", "BUSINESS_CONFLICT"), str(exc))
+
+    def _post_token_renewal(self, body: dict) -> None:
+        header = self.headers.get("Authorization", "")
+        token = header[7:].strip() if header.startswith("Bearer ") else ""
+        auth = svc.AuthenticationService(
+            repo.AuthRepository(open_db),
+            operation_service=svc.OperationService(repo.OperationRepository(open_db)),
+        )
+        try:
+            renewal = auth.request_renewal(
+                token,
+                device_identity=body.get("device_identity", ""),
+            )
+            self._send_success(202, {"renewal": renewal})
+        except svc.AuthenticationFailure as exc:
+            self._send_error(401, exc.code, str(exc))
         except (svc.ServiceConflict, ValueError) as exc:
             self._send_error(409, getattr(exc, "code", "BUSINESS_CONFLICT"), str(exc))
 

@@ -164,8 +164,21 @@
     return Boolean(ROLE_SCOPES[role]?.includes(requiredScope));
   }
 
+  function applyPermissions(root = document, principal = null) {
+    root.querySelectorAll?.('[data-required-scope]').forEach((element) => {
+      const allowed = Boolean(principal && can(principal.role, element.dataset.requiredScope));
+      if (element.matches('a, [role="link"]')) {
+        element.classList.toggle('hidden', !allowed);
+        element.setAttribute('aria-hidden', String(!allowed));
+      } else {
+        element.disabled = !allowed;
+        element.classList.toggle('hidden', !allowed);
+      }
+    });
+  }
+
   window.ui = Object.freeze({
-    ROLE_SCOPES, can, escapeHtml, errorPresentation, errorHtml, renderPageError,
+    ROLE_SCOPES, can, applyPermissions, escapeHtml, errorPresentation, errorHtml, renderPageError,
     toast, toastError, showModal, closeModal, confirmDialog, runAction,
   });
 })();

@@ -75,6 +75,13 @@ export async function createBootstrapCode(databasePath) {
   return lines[lines.indexOf('Administrator UI Bootstrap Code (shown once; valid for 10 minutes):') + 1];
 }
 
+export async function setFixtureTokenState(databasePath, tokenUuid, state) {
+  await execFileAsync('python3', [
+    'apps/web/tests/fixture_token_state.py', '--database', databasePath,
+    '--token-uuid', tokenUuid, '--state', state,
+  ], { cwd: process.cwd() });
+}
+
 async function bootstrapFixtureAdmin(databasePath) {
   const { stdout } = await execFileAsync('python3', [
     '-m', 'apps.backend', 'auth', 'bootstrap-admin',

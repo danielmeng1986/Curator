@@ -203,13 +203,13 @@ const AlbumsPage = {
           <div class="form-section">
             <div class="form-section-title">Models</div>
             <div id="modelsSection"></div>
-            <button class="btn btn-sm btn-secondary" style="margin-top:8px" onclick="AlbumsPage._openAddModel()">+ Add Model</button>
+            <button class="btn btn-sm btn-secondary" data-required-scope="write" style="margin-top:8px" onclick="AlbumsPage._openAddModel()">+ Add Model</button>
           </div>
 
           <div class="form-section">
             <div class="form-section-title">Relations</div>
             <div id="relationsSection"></div>
-            <button class="btn btn-sm btn-secondary" style="margin-top:8px" onclick="AlbumsPage._openAddRelation()">+ Add Relation</button>
+            <button class="btn btn-sm btn-secondary" data-required-scope="write" style="margin-top:8px" onclick="AlbumsPage._openAddRelation()">+ Add Relation</button>
           </div>
 
           ${!isNew ? `
@@ -221,7 +221,7 @@ const AlbumsPage = {
                 <td class="path-mono">${esc(p.filename)}</td>
                 <td>${p.width && p.height ? `${p.width}×${p.height}` : ''}</td>
                 <td>${esc(p.capture_time || '')}</td>
-                <td><button class="btn btn-sm btn-danger" onclick="AlbumsPage._deletePhoto(${p.id})">×</button></td>
+                <td><button class="btn btn-sm btn-danger" data-required-scope="write" onclick="AlbumsPage._deletePhoto(${p.id})">×</button></td>
               </tr>`).join('')}</tbody></table></div>` : '<p style="color:var(--ink-soft);font-size:.88rem">No photos</p>'}
             </div>
           </div>` : ''}
@@ -238,8 +238,8 @@ const AlbumsPage = {
           </details>` : ''}
 
           <div class="detail-actions">
-            <button class="btn btn-primary" onclick="AlbumsPage._save()">Save</button>
-            ${!isNew ? `<button class="btn btn-danger" onclick="AlbumsPage._delete(${id})">Delete Album</button>` : ''}
+            <button class="btn btn-primary" data-required-scope="write" onclick="AlbumsPage._save()">Save</button>
+            ${!isNew ? `<button class="btn btn-danger" data-required-scope="write" onclick="AlbumsPage._delete(${id})">Delete Album</button>` : ''}
           </div>
         </div>
       `;

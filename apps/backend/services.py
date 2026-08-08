@@ -440,8 +440,21 @@ class AuthenticationService:
             raise AuthenticationFailure("AUTHENTICATION_UNAPPROVED_DEVICE", "The device is not approved for access.")
         if required_scope is not None and required_scope not in token["scopes"]:
             raise AuthorizationFailure(required_scope)
-        self._repo.touch_token(token["uuid"], self._now_utc().isoformat())
-        return {"device_name": token["device_name"], "registration_uuid": token["registration_uuid"], "scopes": token["scopes"], "role": registration["approved_role"]}
+        used_at = self._now_utc().isoformat()
+        self._repo.touch_token(token["uuid"], used_at)
+        renewal = self._repo.get_pending_renewal_for_token(token["uuid"])
+        return {
+            "device_name": token["device_name"],
+            "device_identity": registration["device_identity"],
+            "registration_uuid": token["registration_uuid"],
+            "token_uuid": token["uuid"],
+            "scopes": token["scopes"],
+            "role": registration["approved_role"],
+            "created_at": token["created_at"],
+            "expires_at": token["expires_at"],
+            "last_used_at": used_at,
+            "renewal": renewal,
+        }
 
     def request_renewal(self, token_plaintext: str, *, device_identity: str) -> dict:
         principal = self.authenticate(token_plaintext)
@@ -449,10 +462,21 @@ class AuthenticationService:
         if registration is None or registration["device_identity"] != device_identity:
             raise AuthenticationFailure("AUTHENTICATION_INVALID_DEVICE", "The device identity does not match the token.")
         old_token = self._repo.get_token_by_hash(self._hash_token(token_plaintext))
-        return self._repo.create_renewal_request({
+        existing = self._repo.get_pending_renewal_for_token(old_token["uuid"])
+        if existing is not None:
+            raise ServiceConflict(
+                "BUSINESS_CONFLICT",
+                "A renewal request is already pending for this Token.",
+                {"renewal_uuid": existing["uuid"]},
+            )
+        renewal = self._repo.create_renewal_request({
             "registration_uuid": registration["uuid"], "previous_token_uuid": old_token["uuid"],
             "requested_role": registration["approved_role"], "requested_scopes": registration["approved_scopes"],
         })
+        self._record_operation(
+            "device_token_renewal", renewal["uuid"], "Device Token renewal requested."
+        )
+        return renewal
 
     def approve_renewal(self, renewal_uuid: str, *, validity: timedelta | None = None) -> dict:
         renewal = self._repo.get_renewal_request(renewal_uuid)

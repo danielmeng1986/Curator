@@ -71,6 +71,30 @@
     return payload.data;
   }
 
+  async function validateConnection({ backendUrl: candidateBackendUrl = '', token }) {
+    const origin = String(candidateBackendUrl || '').replace(/\/$/, '');
+    let response;
+    try {
+      response = await fetch(`${origin}/api/v1/auth/me`, {
+        headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      throw new CuratorApiError('NETWORK_UNAVAILABLE', 'The Curator Backend is unavailable.');
+    }
+    let payload = {};
+    try { payload = await response.json(); } catch { /* safe generic error below */ }
+    if (!response.ok || payload.error) {
+      const error = payload.error || {};
+      throw new CuratorApiError(
+        error.code || `HTTP_${response.status}`,
+        error.message || 'The Backend rejected this request.',
+        response.status,
+        { details: error.details || null, requestId: payload.meta?.request_id || null },
+      );
+    }
+    return payload.data.principal;
+  }
+
   function legacyReadModel(path, data, meta) {
     if (!Array.isArray(data)) return data;
     const route = path.split('?')[0];
@@ -146,6 +170,7 @@
     del: (path) => apiFetch(path, { method: 'DELETE' }),
     getConnection: () => ({ backendUrl: backendUrl(), hasToken: Boolean(deviceToken()) }),
     getDeviceIdentity: deviceIdentity,
+    validateConnection,
     bootstrapStatus: () => publicAuthFetch('/api/auth/bootstrap/status'),
     completeBootstrap: (body) => publicAuthFetch('/api/auth/bootstrap/complete', { method: 'POST', body: JSON.stringify(body) }),
     configure: ({ backendUrl: nextBackendUrl, token }) => {

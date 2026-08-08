@@ -23,7 +23,7 @@
       <li><a class="rail-link" href="#/studios" data-route="studios">
         <span class="rail-icon">◈</span> Studios
       </a></li>
-      <li><a class="rail-link" href="#/import/albums" data-route="import">
+      <li><a class="rail-link" href="#/import/albums" data-route="import" data-required-scope="write">
         <span class="rail-icon">↧</span> Import
       </a></li>
       <li><a class="rail-link" href="#/statuses" data-route="statuses">
@@ -40,7 +40,7 @@
         <span id="healthText">Loading…</span>
       </div>
       <button class="btn btn-secondary btn-sm" id="connectionBtn">Connect</button>
-      <button class="btn btn-primary page-action hidden" id="pageActionBtn"></button>
+      <button class="btn btn-primary page-action hidden" id="pageActionBtn" data-required-scope="write"></button>
     </header>
     <main id="page-content"></main>
   </div>

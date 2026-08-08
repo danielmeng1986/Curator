@@ -26,8 +26,8 @@ const StatusesPage = {
             <td>${s.album_count || 0}</td>
             <td>${s.workspace_album_count || 0}</td>
             <td class="actions-cell">
-              <button class="btn btn-sm btn-secondary" onclick="StatusesPage._openEdit(${s.id}, '${esc(s.name)}', '${esc(s.description || '')}')">Edit</button>
-              <button class="btn btn-sm btn-danger" ${used > 0 ? 'disabled title="In use"' : ''} onclick="StatusesPage._delete(${s.id})">Delete</button>
+              <button class="btn btn-sm btn-secondary" data-required-scope="write" onclick="StatusesPage._openEdit(${s.id}, '${esc(s.name)}', '${esc(s.description || '')}')">Edit</button>
+              <button class="btn btn-sm btn-danger" data-required-scope="write" ${used > 0 ? 'disabled title="In use"' : ''} onclick="StatusesPage._delete(${s.id})">Delete</button>
             </td>
           </tr>`;
       }).join('');

@@ -134,8 +134,8 @@ const StudiosPage = {
           </details>` : ''}
 
           <div class="detail-actions">
-            <button class="btn btn-primary" onclick="StudiosPage._save()">Save</button>
-            ${!isNew ? `<button class="btn btn-danger" onclick="StudiosPage._delete(${id})">Delete Studio</button>` : ''}
+            <button class="btn btn-primary" data-required-scope="write" onclick="StudiosPage._save()">Save</button>
+            ${!isNew ? `<button class="btn btn-danger" data-required-scope="write" onclick="StudiosPage._delete(${id})">Delete Studio</button>` : ''}
           </div>
         </div>
 

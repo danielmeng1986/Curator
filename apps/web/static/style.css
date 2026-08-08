@@ -361,6 +361,7 @@ input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; }
 [aria-busy="true"] { cursor: progress; }
 .one-time-token { padding: 12px; overflow-wrap: anywhere; white-space: pre-wrap; background: #fff; border: 1px solid var(--line); border-radius: 8px; user-select: all; }
 .acknowledgement { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-weight: 600; }
+.connection-summary { display: grid; gap: 6px; padding: 12px; margin-bottom: 16px; border: 1px solid var(--line); border-radius: 8px; background: rgba(0,95,115,.04); font-size: .85rem; }
 
 .actions-cell { display: flex; gap: 4px; }
 

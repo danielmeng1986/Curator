@@ -13,8 +13,8 @@ try {
   await page.getByRole('heading', { name:'Authorization required' }).waitFor();
   await page.getByRole('button', { name:'Connect' }).click();
   await page.getByPlaceholder('Same origin when empty').fill(fixture.origin);
-  await page.getByPlaceholder('Required').fill(fixture.devices.writer.token);
-  await page.getByRole('button', { name:'Save' }).click();
+  await page.getByLabel('Approved device Token').fill(fixture.devices.writer.token);
+  await page.getByRole('button', { name:'Validate and connect' }).click();
   await page.getByText(/DB OK/).waitFor();
   await page.getByRole('link', { name:/Albums/ }).click();
   await page.getByRole('heading', { name:'Albums' }).waitFor();

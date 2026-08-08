@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-004C` — Status: `Proposed`
+`UI-004C` — Status: `Complete`
 
 ## Title
 
@@ -57,3 +57,13 @@ experience for active, expiring, expired, revoked, and replacement Tokens.
 
 - Client-side route hiding never substitutes for Backend scope enforcement.
 
+## Completion Record
+
+- Added `/api/v1/auth/me` with safe device, role, scope, Token lifetime, and
+  pending-renewal metadata plus an authenticated renewal-request endpoint.
+- Rebuilt connection handling so a candidate Token is validated before current
+  browser settings change; disconnect removes local credentials immediately.
+- Added role-aware navigation/action presentation and direct-route rejection,
+  while retaining Backend enforcement as the authority.
+- Added browser acceptance for active metadata, renewal Pending state, failed
+  and successful replacement, Reader gating, disconnect, expiry, and revocation.

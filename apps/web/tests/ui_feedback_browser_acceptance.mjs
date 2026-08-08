@@ -16,7 +16,7 @@ try {
   await connect.focus();
   await connect.click();
   assert.equal(await page.getByPlaceholder('Same origin when empty').evaluate((node) => node === document.activeElement), true);
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('button', { name: 'Close' }).click();
   assert.equal(await connect.evaluate((node) => node === document.activeElement), true, 'closing a modal restores focus');
 
   const presentations = await page.evaluate(() => ({
