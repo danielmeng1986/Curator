@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-010C` — Status: `Proposed`
+`UI-010C` — Status: `Completed`
 
 ## Title
 
@@ -57,3 +57,12 @@ impact review, protective Snapshot, verified completion, and truthful failure.
 
 - This is the highest-risk UI mutation and remains Blocked until the confirmation and recovery Specification is explicit.
 
+## Result
+
+- Added an Admin-only selector containing only Backend-listed recovery points
+  with a passed verification state.
+- Restore uses the Backend-issued exact confirmation phrase and preview token;
+  the browser never supplies a path.
+- Verified success displays the protective recovery point, clears the current
+  browser connection and cached page state, and requires reconnection against
+  the restored database.

@@ -10,7 +10,7 @@ const AdminCenterPage = {
       const cards = [
         ['Devices and Tokens', 'Review registrations, renewals, roles, scopes, and revocation.', '#/admin/devices', 'Available'],
         ['Backups and Snapshots', 'Inspect and create Backend-controlled recovery points.', '#/admin/backups', 'Available'],
-        ['Database Restore', 'Protected restore from a verified recovery point.', '#/admin/restore', 'Blocked pending UI-010C contract'],
+        ['Database Restore', 'Protected restore from a verified recovery point.', '#/admin/restore', 'Available'],
         ['Repair Quarantine', `${(quarantine.items || []).filter(item => !item.restored_at).length} item(s) currently isolated.`, '#/quarantine', 'Available'],
         ['Operation History', 'Read durable administrative and workflow outcomes.', '#/operations?operation_type=backup', 'Available'],
       ];
