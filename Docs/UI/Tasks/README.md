@@ -46,7 +46,7 @@ snapshot, archive, and output resources.
 | [UI-010A](UI-010A-administer-devices-and-tokens.md) | Device registration and token administration | Proposed |
 | [UI-010B](UI-010B-administer-backups-and-snapshots.md) | Backup and Snapshot administration | Completed |
 | [UI-010C](UI-010C-administer-database-restore.md) | Database restore administration | Completed |
-| [UI-010D](UI-010D-admin-workflow-browser-acceptance.md) | Administrator workflow browser acceptance | Proposed |
+| [UI-010D](UI-010D-admin-workflow-browser-acceptance.md) | Administrator workflow browser acceptance | Completed |
 | [UI-010E](UI-010E-administer-digital-asset-trash.md) | Digital Asset Trash review, restore, and purge | Blocked |
 | [UI-011A](UI-011A-specify-ai-collection-workspace.md) | AI Collection Workspace product/data contract | Proposed |
 | [UI-011B](UI-011B-specify-workspace-review-state-machine.md) | Stable review state machine and read model | Proposed |

@@ -32,5 +32,13 @@ try {
   const revoked = await fixture.request('/auth/admin/state', { role: 'admin' });
   assert.ok(revoked.payload.data.tokens.find(item => item.uuid === writerToken.uuid).revoked_at);
   assert.equal(JSON.stringify(revoked.payload).includes(issued), false);
+
+  const adminToken = revoked.payload.data.tokens.find(item => item.scopes.includes('admin') && !item.revoked_at);
+  const adminRow = admin.getByRole('row').filter({ hasText: adminToken.uuid });
+  await adminRow.getByRole('button', { name: 'Revoke' }).click();
+  await admin.getByLabel(/Type/).fill('REVOKE'); await admin.getByRole('button', { name: 'Execute reviewed action' }).click();
+  await admin.getByRole('alert').filter({ hasText: /final usable Admin Token/i }).last().waitFor();
+  const protectedState = await fixture.request('/auth/admin/state', { role: 'admin' });
+  assert.equal(protectedState.payload.data.tokens.find(item => item.uuid === adminToken.uuid).revoked_at, null);
   await admin.close(); console.log('UI-010A authentication administration browser acceptance: OK');
 } finally { await browser.close(); await fixture.stop(); }

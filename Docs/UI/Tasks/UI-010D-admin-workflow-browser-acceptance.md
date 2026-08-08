@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-010D` — Status: `Proposed`
+`UI-010D` — Status: `Completed`
 
 ## Title
 
@@ -55,3 +55,19 @@ Backup/Snapshot, and Restore workflows through isolated browser scenarios.
 ## Risks or Notes
 
 - Playwright tracing must be disabled or sanitized during secret-entry and one-time Token display steps.
+
+## Implemented Suite
+
+- First-Admin lockout/success/replay and secret-redaction acceptance.
+- Token connection, renewal request, replacement rejection, expiry, revocation,
+  role denial, one-time issuance, and last-usable-Admin protection.
+- Administrator Center access and safe-data loading.
+- Recovery-point creation, verification, cleanup cancellation, and path redaction.
+- Protected database Restore with durable content rollback, protected safety
+  snapshot evidence, and browser credential/cache clearing.
+
+## Result
+
+- Six isolated Administrator browser scenarios passed twice from clean fixtures.
+- Web API and interaction contracts passed.
+- Backend workflow-readiness and full regression passed after the browser runs.
