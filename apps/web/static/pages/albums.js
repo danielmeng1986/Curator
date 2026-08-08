@@ -31,7 +31,7 @@ const AlbumsPage = {
       this._studios = studios;
       await this._loadList(el, statuses, studios);
     } catch (e) {
-      el.innerHTML = `<div class="error-msg">Error: ${esc(e.message)}</div>`;
+      ui.renderPageError(el, e, 'Albums');
     }
   },
 
@@ -248,7 +248,7 @@ const AlbumsPage = {
       this._renderRelationsSection();
 
     } catch (e) {
-      el.innerHTML = `<div class="error-msg">Error: ${esc(e.message)}</div>`;
+      ui.renderPageError(el, e, 'this Album');
     }
   },
 
@@ -382,7 +382,7 @@ const AlbumsPage = {
         navigate(`#/albums/${res.id}`);
       }
     } catch (e) {
-      toast('Save failed: ' + e.message, 'error');
+      ui.toastError(e, 'save the Album');
     }
   },
 
@@ -394,7 +394,7 @@ const AlbumsPage = {
       toast('Album deleted');
       navigate('#/albums');
     } catch (e) {
-      toast('Delete failed: ' + e.message, 'error');
+      ui.toastError(e, 'delete the Album');
     }
   },
 
@@ -406,7 +406,7 @@ const AlbumsPage = {
       toast('Photo deleted');
       this.renderDetail({ id: this._currentId });
     } catch (e) {
-      toast('Delete failed: ' + e.message, 'error');
+      ui.toastError(e, 'delete the Photo');
     }
   },
 };

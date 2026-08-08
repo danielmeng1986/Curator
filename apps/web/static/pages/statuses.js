@@ -45,7 +45,7 @@ const StatusesPage = {
         </div>
       `;
     } catch (e) {
-      el.innerHTML = `<div class="error-msg">Error: ${esc(e.message)}</div>`;
+      ui.renderPageError(el, e, 'Statuses');
     }
   },
 
@@ -86,7 +86,7 @@ const StatusesPage = {
       toast('Status created');
       await this._load(document.getElementById('page-content'));
     } catch (e) {
-      toast('Error: ' + e.message, 'error');
+      ui.toastError(e, 'create the Status');
     }
   },
 
@@ -99,7 +99,7 @@ const StatusesPage = {
       toast('Status saved');
       await this._load(document.getElementById('page-content'));
     } catch (e) {
-      toast('Error: ' + e.message, 'error');
+      ui.toastError(e, 'save the Status');
     }
   },
 
@@ -111,7 +111,7 @@ const StatusesPage = {
       toast('Status deleted');
       await this._load(document.getElementById('page-content'));
     } catch (e) {
-      toast('Delete failed: ' + e.message, 'error');
+      ui.toastError(e, 'delete the Status');
     }
   },
 };

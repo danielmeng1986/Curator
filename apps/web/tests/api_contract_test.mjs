@@ -41,5 +41,28 @@ nextResponse = {
 };
 await assert.rejects(api.get('/statuses'), (error) => error.code === 'AUTHENTICATION_REVOKED_TOKEN' && api.isAuthenticationError(error));
 
+nextResponse = {
+  ok: false,
+  status: 403,
+  json: async () => ({ error: { code: 'AUTHORIZATION_INSUFFICIENT_SCOPE', message: 'Admin required.' } }),
+};
+await assert.rejects(api.post('/backup', {}), (error) => (
+  !api.isAuthenticationError(error) && api.isAuthorizationError(error)
+));
+
+let releaseMutation;
+const pendingMutation = new Promise((resolve) => { releaseMutation = resolve; });
+context.fetch = async (...args) => {
+  calls.push(args);
+  await pendingMutation;
+  return { ok: true, status: 200, json: async () => ({ data: { id: 2 }, meta: {} }) };
+};
+const firstMutation = api.post('/albums', { title: 'One' });
+await assert.rejects(api.post('/albums', { title: 'One' }), (error) => api.isActionInProgressError(error));
+releaseMutation();
+await firstMutation;
+
+assert.equal(new api.Error('X', 'x', 409, { requestId: 'req-1' }).requestId, 'req-1');
+
 assert.ok(!source.includes("fetch('/api'"), 'client must not call a pre-versioned API base');
 console.log('apps/web API contract: OK');

@@ -267,6 +267,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .toast-ok { background: var(--ok); }
 .toast-error { background: var(--error); }
+.toast-warning { background: #8f4e0a; }
 @keyframes slideIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
 
 .pagination {
@@ -342,6 +343,22 @@ input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; }
 
 .loading { padding: 40px; text-align: center; color: var(--ink-soft); }
 .error-msg { padding: 16px; color: var(--error); background: rgba(193,18,31,0.06); border-radius: 8px; }
+
+.feedback {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-left-width: 5px;
+  border-radius: 8px;
+  background: #fff;
+  outline: none;
+}
+.feedback h2 { margin: 0 0 6px; font-size: 1rem; }
+.feedback p { margin: 0; }
+.feedback-reference { margin-top: 8px !important; font-family: "SF Mono", "Fira Code", monospace; font-size: .78rem; color: var(--ink-soft); }
+.feedback-authentication, .feedback-authorization, .feedback-unexpected { border-left-color: var(--error); }
+.feedback-validation, .feedback-conflict, .feedback-warning { border-left-color: #8f4e0a; }
+.feedback-network, .feedback-not-found { border-left-color: var(--primary); }
+[aria-busy="true"] { cursor: progress; }
 
 .actions-cell { display: flex; gap: 4px; }
 

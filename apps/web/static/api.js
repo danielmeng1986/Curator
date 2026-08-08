@@ -9,13 +9,17 @@
   const initialConfig = window.CURATOR_WEB_CONFIG || {};
 
   class CuratorApiError extends Error {
-    constructor(code, message, status = 0) {
+    constructor(code, message, status = 0, { details = null, requestId = null } = {}) {
       super(message);
       this.name = 'CuratorApiError';
       this.code = code;
       this.status = status;
+      this.details = details;
+      this.requestId = requestId;
     }
   }
+
+  const inFlightMutations = new Set();
 
   function localValue(key, fallback = '') {
     try { return window.localStorage.getItem(key) || fallback; } catch { return fallback; }
@@ -45,16 +49,7 @@
     return key ? { [key]: data, total: meta?.total ?? data.length } : data;
   }
 
-  async function apiFetch(path, options = {}) {
-    const token = deviceToken();
-    if (!token) {
-      throw new CuratorApiError(
-        'AUTHENTICATION_MISSING_TOKEN',
-        'Device access is required. Configure an approved device token before continuing.',
-        401,
-      );
-    }
-
+  async function performFetch(path, options, token) {
     let response;
     try {
       response = await fetch(`${versionedBaseUrl()}${path}`, {
@@ -78,9 +73,37 @@
         error.code || `HTTP_${response.status}`,
         error.message || 'The Backend rejected this request.',
         response.status,
+        { details: error.details || null, requestId: payload.meta?.request_id || null },
       );
     }
     return legacyReadModel(path, payload.data, payload.meta);
+  }
+
+  async function apiFetch(path, options = {}) {
+    const token = deviceToken();
+    if (!token) {
+      throw new CuratorApiError(
+        'AUTHENTICATION_MISSING_TOKEN',
+        'Device access is required. Configure an approved device token before continuing.',
+        401,
+      );
+    }
+
+    const method = (options.method || 'GET').toUpperCase();
+    const mutationKey = method === 'GET' ? null : `${method} ${path}`;
+    if (mutationKey && inFlightMutations.has(mutationKey)) {
+      throw new CuratorApiError(
+        'CLIENT_ACTION_IN_PROGRESS',
+        'This action is already in progress.',
+        0,
+      );
+    }
+    if (mutationKey) inFlightMutations.add(mutationKey);
+    try {
+      return await performFetch(path, options, token);
+    } finally {
+      if (mutationKey) inFlightMutations.delete(mutationKey);
+    }
   }
 
   const api = Object.freeze({
@@ -99,8 +122,10 @@
     },
     clearToken: () => { try { window.localStorage.removeItem(TOKEN_KEY); } catch { /* no fallback */ } },
     isAuthenticationError: (error) => error instanceof CuratorApiError && (
-      error.code === 'AUTHENTICATION_MISSING_TOKEN' || error.status === 401 || error.status === 403
+      error.code === 'AUTHENTICATION_MISSING_TOKEN' || error.status === 401
     ),
+    isAuthorizationError: (error) => error instanceof CuratorApiError && error.status === 403,
+    isActionInProgressError: (error) => error instanceof CuratorApiError && error.code === 'CLIENT_ACTION_IN_PROGRESS',
     Error: CuratorApiError,
   });
 

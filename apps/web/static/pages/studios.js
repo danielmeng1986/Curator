@@ -150,7 +150,7 @@ const StudiosPage = {
         </div>` : ''}
       `;
     } catch (e) {
-      el.innerHTML = `<div class="error-msg">Error: ${esc(e.message)}</div>`;
+      ui.renderPageError(el, e, 'this Studio');
     }
   },
 
@@ -175,7 +175,7 @@ const StudiosPage = {
         navigate(`#/studios/${res.id}`);
       }
     } catch (e) {
-      toast('Save failed: ' + e.message, 'error');
+      ui.toastError(e, 'save the Studio');
     }
   },
 
@@ -187,7 +187,7 @@ const StudiosPage = {
       toast('Studio deleted');
       navigate('#/studios');
     } catch (e) {
-      toast('Delete failed: ' + e.message, 'error');
+      ui.toastError(e, 'delete the Studio');
     }
   },
 };

@@ -57,7 +57,7 @@ const DashboardPage = {
         </div>
       `;
     } catch (e) {
-      el.innerHTML = `<div class="error-msg">Error loading dashboard: ${esc(e.message)}</div>`;
+      ui.renderPageError(el, e, 'the dashboard');
     }
   }
 };

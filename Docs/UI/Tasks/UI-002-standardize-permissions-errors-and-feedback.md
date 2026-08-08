@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-002` — Status: `Proposed`
+`UI-002` — Status: `Complete`
 
 ## Title
 
@@ -58,3 +58,13 @@ conflicts, progress, and traceable operation results.
 
 - UI permission hiding is convenience only; Backend authorization remains authoritative.
 
+## Completion Record
+
+- Added a shared interaction contract for role capability checks, safe error
+  presentation, accessible feedback, focus-preserving dialogs, confirmation,
+  action locking, and pending-button state.
+- Corrected 403 handling so insufficient scope is presented as authorization
+  failure rather than an authentication failure, and retained Backend request
+  references without exposing unexpected diagnostic messages.
+- Added client-wide duplicate in-flight mutation prevention and focused
+  contract tests for role, error, escaping, and repeated-action behavior.

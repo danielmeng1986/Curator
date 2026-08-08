@@ -14,7 +14,7 @@ const ImportPage = {
       const cfg = await api.get('/config');
       this._config = cfg;
     } catch (error) {
-      el.innerHTML = `<div class="error-msg">${esc(error.message)}</div>`;
+      ui.renderPageError(el, error, 'Import');
       return;
     }
 
@@ -135,7 +135,7 @@ const ImportPage = {
       this._step = 3;
       this._renderStep();
     } catch (e) {
-      toast('Preview failed: ' + e.message, 'error');
+      ui.toastError(e, 'preview the Import');
       this._step = 1;
       this._renderStep();
     }
@@ -244,7 +244,7 @@ const ImportPage = {
       this._step = 5;
       this._renderStep();
     } catch (e) {
-      toast('Import failed: ' + e.message, 'error');
+      ui.toastError(e, 'execute the Import');
       this._step = 4;
       this._renderStep();
     }

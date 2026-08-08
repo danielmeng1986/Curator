@@ -160,7 +160,7 @@ const ModelsPage = {
         </div>` : ''}
       `;
     } catch (e) {
-      el.innerHTML = `<div class="error-msg">Error: ${esc(e.message)}</div>`;
+      ui.renderPageError(el, e, 'this Model');
     }
   },
 
@@ -188,7 +188,7 @@ const ModelsPage = {
         navigate(`#/models/${res.id}`);
       }
     } catch (e) {
-      toast('Save failed: ' + e.message, 'error');
+      ui.toastError(e, 'save the Model');
     }
   },
 
@@ -200,7 +200,7 @@ const ModelsPage = {
       toast('Model deleted');
       navigate('#/models');
     } catch (e) {
-      toast('Delete failed: ' + e.message, 'error');
+      ui.toastError(e, 'delete the Model');
     }
   },
 };

@@ -21,7 +21,7 @@ try {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   await page.goto(origin);
-  await page.getByText('Authorization required').waitFor();
+  await page.getByRole('heading', { name:'Authorization required' }).waitFor();
   await page.getByRole('button', { name:'Connect' }).click();
   await page.getByPlaceholder('Same origin when empty').fill(origin);
   await page.getByPlaceholder('Required').fill(token);

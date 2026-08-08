@@ -71,51 +71,27 @@ function renderNotFound() {
 }
 
 function renderRequestError(error) {
-  const message = api.isAuthenticationError(error)
-    ? 'Authorization is required. Select Connect and provide an approved device token.'
-    : `Unable to load this view: ${esc(error.message || 'Backend request failed.')}`;
-  document.getElementById('page-content').innerHTML = `<div class="error-msg">${message}</div>`;
+  ui.renderPageError(document.getElementById('page-content'), error, 'this view');
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 
 function toast(msg, type = 'ok', duration = 3500) {
-  const c = document.getElementById('toast-container');
-  const t = document.createElement('div');
-  t.className = `toast toast-${type}`;
-  t.textContent = msg;
-  c.appendChild(t);
-  setTimeout(() => t.remove(), duration);
+  return ui.toast(msg, type, duration);
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
 function showModal(html) {
-  const overlay = document.getElementById('modal-overlay');
-  const box = document.getElementById('modal-box');
-  box.innerHTML = html;
-  overlay.classList.remove('hidden');
-  overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+  return ui.showModal(html);
 }
 
 function closeModal() {
-  document.getElementById('modal-overlay').classList.add('hidden');
-  document.getElementById('modal-box').innerHTML = '';
+  return ui.closeModal();
 }
 
 function confirmDialog(msg) {
-  return new Promise(resolve => {
-    showModal(`
-      <h3 class="modal-title">Confirm</h3>
-      <p style="margin:0 0 4px">${msg}</p>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" id="confirmNo">Cancel</button>
-        <button class="btn btn-danger" id="confirmYes">Confirm</button>
-      </div>
-    `);
-    document.getElementById('confirmYes').onclick = () => { closeModal(); resolve(true); };
-    document.getElementById('confirmNo').onclick  = () => { closeModal(); resolve(false); };
-  });
+  return ui.confirmDialog(msg);
 }
 
 // ─── Health check ─────────────────────────────────────────────────────────────

@@ -47,9 +47,9 @@
 </div>
 
 <div id="modal-overlay" class="modal-overlay hidden">
-  <div id="modal-box" class="modal-box"></div>
+  <div id="modal-box" class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-title"></div>
 </div>
-<div id="toast-container"></div>
+<div id="toast-container" aria-live="polite" aria-atomic="false"></div>
 
 <script src="pages/dashboard.js"></script>
 <script src="pages/albums.js"></script>
@@ -58,6 +58,7 @@
 <script src="pages/statuses.js"></script>
 <script src="pages/import.js"></script>
 <script src="api.js"></script>
+<script src="ui.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
