@@ -1398,6 +1398,91 @@ class TestBackupAdministrationContract(unittest.TestCase):
         with self.assertRaises(svc.ServiceNotFound): self.service.verify("unknown")
 
 
+class TestProtectedDatabaseRestoreContract(unittest.TestCase):
+    class Claims:
+        def __init__(self): self.values = set()
+        def preview_is_claimed(self, value): return value in self.values
+        def claim_preview(self, value, _at):
+            if value in self.values: raise repo.PersistenceConflict({})
+            self.values.add(value)
+
+    def setUp(self):
+        self.catalog = [{"filename": "Curator_target.db", "path": "/managed/Curator_target.db",
+                         "size_bytes": 20, "created_at": "2024-01-01T00:00:00+00:00",
+                         "reason": "manual", "tag": "target", "verification_state": "verified"}]
+        self.claims = self.Claims(); self.snapshots = []; self.restores = []; self.state = "state-one"
+        def snapshot(reason, tag):
+            path = Path("/managed/Curator_safety.db"); self.snapshots.append(reason)
+            self.catalog.append({"filename": path.name, "path": str(path), "size_bytes": 21,
+                                 "created_at": datetime.now(timezone.utc).isoformat(),
+                                 "reason": reason, "tag": tag, "verification_state": "not_verified"})
+            return path
+        def restore(path):
+            self.restores.append(path); self.claims.values.clear(); self.state = "restored"
+        def db_state(verify=False): return {"verified": True} if verify else self.state
+        self.service = svc.BackupService(
+            snapshot_fn=snapshot, restore_fn=restore, backup_log_fn=MagicMock(), rollback_log_fn=MagicMock(),
+            catalog_fn=lambda: self.catalog, last_change_fn=lambda: None, public_item_fn=lambda x: x,
+            parse_tag_fn=lambda p: "", preview_secret=b"restore-secret", restore_preview_repo=self.claims,
+            database_state_fn=db_state, verify_snapshot_fn=lambda x: {"verification_state": "verified"},
+        )
+        self.identity = self.service.recovery_points()[0]["identity"]
+
+    def test_unverified_target_cannot_be_previewed(self):
+        self.catalog[0]["verification_state"] = "not_verified"
+        with self.assertRaisesRegex(svc.ServiceConflict, "Verify"):
+            self.service.preview_restore(self.identity)
+
+    def test_confirmation_mismatch_has_zero_restore_effect(self):
+        preview = self.service.preview_restore(self.identity)
+        with self.assertRaises(svc.ServiceConflict):
+            self.service.execute_restore(preview["preview_token"], "RESTORE something-else")
+        self.assertEqual(self.snapshots, []); self.assertEqual(self.restores, [])
+
+    def test_stale_database_has_zero_restore_effect(self):
+        preview = self.service.preview_restore(self.identity); self.state = "state-two"
+        with self.assertRaisesRegex(svc.ServiceConflict, "changed"):
+            self.service.execute_restore(preview["preview_token"], preview["confirmation_phrase"])
+        self.assertEqual(self.restores, [])
+
+    def test_success_requires_safety_snapshot_and_reauthentication(self):
+        preview = self.service.preview_restore(self.identity)
+        result = self.service.execute_restore(preview["preview_token"], preview["confirmation_phrase"])
+        self.assertEqual(self.snapshots, ["pre_restore_safety"])
+        self.assertEqual(self.restores, [Path("/managed/Curator_target.db")])
+        self.assertTrue(result["database_verified"]); self.assertTrue(result["reauthentication_required"])
+        with self.assertRaisesRegex(svc.ServiceConflict, "already used"):
+            self.service.execute_restore(preview["preview_token"], preview["confirmation_phrase"])
+
+    def test_disposable_sqlite_restore_preserves_pre_restore_safety_copy(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root); active, target, safety = root / "active.db", root / "target.db", root / "safety.db"
+            for path, value in ((active, "current"), (target, "target")):
+                with sqlite3.connect(path) as conn:
+                    conn.execute("CREATE TABLE marker (value TEXT)"); conn.execute("INSERT INTO marker VALUES (?)", (value,))
+            catalog = [{"filename": target.name, "path": str(target), "size_bytes": target.stat().st_size,
+                        "created_at": "2024-01-01T00:00:00+00:00", "verification_state": "verified"}]
+            claims = self.Claims()
+            def copy_db(source, destination):
+                with sqlite3.connect(source) as src, sqlite3.connect(destination) as dst: src.backup(dst)
+            def snapshot(_reason, _tag):
+                copy_db(active, safety); catalog.append({"filename": safety.name, "path": str(safety),
+                    "size_bytes": safety.stat().st_size, "created_at": datetime.now(timezone.utc).isoformat()}); return safety
+            def restore(path): copy_db(path, active); claims.values.clear()
+            def state(verify=False):
+                with sqlite3.connect(active) as conn:
+                    if verify: return {"verified": conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"}
+                    return conn.execute("SELECT value FROM marker").fetchone()[0]
+            service = svc.BackupService(snapshot, restore, MagicMock(), MagicMock(), lambda: catalog,
+                lambda: None, lambda x: x, lambda p: "", preview_secret=b"actual-restore",
+                restore_preview_repo=claims, database_state_fn=state,
+                verify_snapshot_fn=lambda item: {"verification_state": "verified"})
+            identity = service.recovery_points()[0]["identity"]; preview = service.preview_restore(identity)
+            service.execute_restore(preview["preview_token"], preview["confirmation_phrase"])
+            with sqlite3.connect(active) as conn: self.assertEqual(conn.execute("SELECT value FROM marker").fetchone()[0], "target")
+            with sqlite3.connect(safety) as conn: self.assertEqual(conn.execute("SELECT value FROM marker").fetchone()[0], "current")
+
+
 class TestBackupServiceRollback(unittest.TestCase):
 
     def setUp(self):

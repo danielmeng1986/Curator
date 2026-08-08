@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -80,6 +81,7 @@ ALBUM_BATCH_PREVIEW_SECRET = secrets.token_bytes(32)
 IMPORT_PREVIEW_SECRET = secrets.token_bytes(32)
 QUARANTINE_PREVIEW_SECRET = secrets.token_bytes(32)
 SNAPSHOT_CLEANUP_PREVIEW_SECRET = secrets.token_bytes(32)
+RESTORE_EXECUTION_LOCK = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # DB helpers
@@ -356,6 +358,20 @@ def restore_database_from_snapshot(snapshot_path: Path) -> None:
             dst_conn.close()
     finally:
         src_conn.close()
+
+
+def database_restore_state(verify: bool = False):
+    """Return a bounded database-state fingerprint or post-Restore integrity result."""
+    if verify:
+        try:
+            with sqlite3.connect(str(DATABASE_PATH)) as conn:
+                rows = [row[0] for row in conn.execute("PRAGMA integrity_check")]
+            return {"verified": rows == ["ok"]}
+        except sqlite3.Error:
+            return {"verified": False}
+    stat = DATABASE_PATH.stat()
+    raw = f"{stat.st_size}:{stat.st_mtime_ns}"
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 def next_backup_time_iso() -> str:
@@ -853,6 +869,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             cleanup_repo=repo.SnapshotCleanupRepository(open_db),
             delete_snapshot_fn=delete_snapshot_item, verify_snapshot_fn=verify_snapshot_item,
             operation_service=svc.OperationService(repo.OperationRepository(open_db)),
+            restore_preview_repo=repo.RestorePreviewRepository(open_db),
+            database_state_fn=database_restore_state,
         )
 
     def _operation_reader(self):
@@ -1030,10 +1048,23 @@ class AppHandler(SimpleHTTPRequestHandler):
                 token = body.get("preview_token", "")
                 if not token: raise ValueError("preview_token is required.")
                 self._send_success(200, self._backup_admin_service().execute_cleanup(token))
+            elif path == "/api/backups/restore/preview":
+                identity = body.get("identity", "")
+                if not identity: raise ValueError("identity is required.")
+                self._send_success(200, {"preview": self._backup_admin_service().preview_restore(identity)})
+            elif path == "/api/backups/restore/execute":
+                token, confirmation = body.get("preview_token", ""), body.get("confirmation", "")
+                if not token or not confirmation: raise ValueError("preview_token and confirmation are required.")
+                if not RESTORE_EXECUTION_LOCK.acquire(blocking=False):
+                    raise svc.ServiceConflict("RESTORE_IN_PROGRESS", "Another database Restore is in progress.")
+                try:
+                    self._send_success(200, self._backup_admin_service().execute_restore(token, confirmation))
+                finally:
+                    RESTORE_EXECUTION_LOCK.release()
             elif path == "/api/backup/cleanup":
                 self._send_error(409, "SNAPSHOT_CLEANUP_PREVIEW_REQUIRED", "Create a cleanup preview before execution.")
             elif path == "/api/rollback":
-                self._post_rollback(body)
+                self._send_error(409, "RESTORE_PREVIEW_REQUIRED", "Create a protected Restore preview before execution.")
             elif re.match(r"^/api/auth/registrations/[^/]+/approve$", path):
                 self._post_authenticated_registration_approval(path, body)
             elif path == "/api/auth/renewals":

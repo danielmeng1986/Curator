@@ -2377,6 +2377,26 @@ class SnapshotCleanupRepository:
             ).fetchone())
 
 
+class RestorePreviewRepository:
+    """Durable single-use claims for protected database Restore previews."""
+
+    def __init__(self, db_factory): self._db = db_factory
+
+    def claim_preview(self, preview_uuid: str, claimed_at: str) -> None:
+        with self._db() as conn:
+            conn.execute("""CREATE TABLE IF NOT EXISTS restore_preview_claim (
+                preview_uuid TEXT PRIMARY KEY, claimed_at TEXT NOT NULL)""")
+            try:
+                conn.execute("INSERT INTO restore_preview_claim VALUES (?,?)", (preview_uuid, claimed_at)); conn.commit()
+            except sqlite3.IntegrityError as exc:
+                raise PersistenceConflict({"preview_uuid": preview_uuid, "reason": "already_claimed"}) from exc
+
+    def preview_is_claimed(self, preview_uuid: str) -> bool:
+        with self._db() as conn:
+            exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='restore_preview_claim'").fetchone()
+            return bool(exists and conn.execute("SELECT 1 FROM restore_preview_claim WHERE preview_uuid=?", (preview_uuid,)).fetchone())
+
+
 class QuarantineRepository:
     """Durable metadata for intact quarantined directories."""
     def __init__(self, db_factory): self._db = db_factory

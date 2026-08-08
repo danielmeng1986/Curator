@@ -1767,6 +1767,8 @@ class BackupService:
         delete_snapshot_fn=None,
         verify_snapshot_fn=None,
         operation_service=None,
+        restore_preview_repo=None,
+        database_state_fn=None,
     ):
         self._snapshot = snapshot_fn
         self._restore = restore_fn
@@ -1782,6 +1784,8 @@ class BackupService:
         self._delete_snapshot = delete_snapshot_fn
         self._verify_snapshot = verify_snapshot_fn
         self._operations = operation_service
+        self._restore_previews = restore_preview_repo
+        self._database_state = database_state_fn
 
     @staticmethod
     def _identity(item: dict) -> str:
@@ -1891,6 +1895,75 @@ class BackupService:
                 self._operations.succeed(operation["uuid"], summary=f"Deleted {len(deleted)} recovery points")
         return {"deleted": deleted, "failed": failed,
                 "operation_uuid": operation["uuid"] if operation else None}
+
+    def preview_restore(self, identity: str, now: datetime | None = None) -> dict:
+        """Create an expiring Restore preview for one verified catalog identity."""
+        raw = next((x for x in self._catalog() if self._identity(x) == identity), None)
+        if raw is None:
+            raise ServiceNotFound("Recovery point not found.")
+        if raw.get("verification_state") != "verified":
+            raise ServiceConflict("RESTORE_TARGET_NOT_VERIFIED", "Verify the recovery point before Restore.")
+        now = now or datetime.now(timezone.utc)
+        phrase = f"RESTORE {raw['filename']}"
+        payload = {
+            "preview_uuid": str(_uuid_mod.uuid4()), "identity": identity,
+            "database_state": self._database_state(), "confirmation_phrase": phrase,
+            "expires_at": (now + timedelta(minutes=10)).isoformat(),
+        }
+        return {"target": next(x for x in self.recovery_points() if x["identity"] == identity),
+                "confirmation_phrase": phrase, "expires_at": payload["expires_at"],
+                "preview_token": self._sign_cleanup(payload)}
+
+    def execute_restore(self, token: str, confirmation: str) -> dict:
+        """Execute one protected, preview-bound database Restore attempt."""
+        if not self._restore_previews or not self._database_state or not self._verify_snapshot:
+            raise RuntimeError("Protected Restore is not configured.")
+        payload = self._read_cleanup(token)
+        if not secrets.compare_digest(confirmation, payload.get("confirmation_phrase", "")):
+            raise ServiceConflict("RESTORE_CONFIRMATION_MISMATCH", "The Restore confirmation phrase does not match.")
+        if self._restore_previews.preview_is_claimed(payload["preview_uuid"]):
+            raise ServiceConflict("RESTORE_PREVIEW_REPLAYED", "The Restore preview was already used.")
+        if self._database_state() != payload["database_state"]:
+            raise ServiceConflict("RESTORE_PREVIEW_STALE", "The database changed after Restore preview.")
+        current = {self._identity(x): x for x in self._catalog()}
+        target = current.get(payload["identity"])
+        if target is None or target.get("verification_state") != "verified":
+            raise ServiceConflict("RESTORE_PREVIEW_STALE", "The verified recovery point changed after preview.")
+        try:
+            self._restore_previews.claim_preview(payload["preview_uuid"], _utc_now_iso())
+        except repo.PersistenceConflict as exc:
+            raise ServiceConflict("RESTORE_PREVIEW_REPLAYED", "The Restore preview was already used.") from exc
+
+        safety = self._snapshot("pre_restore_safety", f"restore-{payload['preview_uuid'][:8]}")
+        self._backup_log({"timestamp": _utc_now_iso(), "reason": "pre_restore_safety", "ok": True,
+                          "snapshot": str(safety), "tag": f"restore-{payload['preview_uuid'][:8]}",
+                          "protected": True, "retention_class": SNAP_RETENTION_HIGH_RISK})
+        safety_raw = next((x for x in self._catalog() if x.get("filename") == safety.name), None)
+        if safety_raw is None or self._verify_snapshot(safety_raw).get("verification_state") != "verified":
+            raise ServiceConflict("RESTORE_SAFETY_SNAPSHOT_FAILED", "The protective recovery point could not be verified.")
+        try:
+            self._restore(Path(target["path"]))
+            # The database replacement also replaces the first claim table;
+            # recreate the consumed claim in the restored database before any
+            # success can be reported.
+            self._restore_previews.claim_preview(payload["preview_uuid"], _utc_now_iso())
+            database_verification = self._database_state(verify=True)
+            if not database_verification.get("verified"):
+                raise ServiceConflict("RESTORE_DATABASE_VERIFICATION_FAILED", "The restored database failed integrity verification.",
+                                      {"safety_recovery_point": safety.name})
+            operation = self._operations.begin(
+                "database_restore", OP_INITIATOR_WEB_UI, summary=f"Restore from {target['filename']}",
+                recovery_context=f"Protective recovery point: {safety.name}") if self._operations else None
+            if operation:
+                self._operations.succeed(operation["uuid"], summary="Database Restore verified successfully")
+        except ServiceConflict:
+            raise
+        except Exception as exc:
+            raise ServiceConflict("RESTORE_EXECUTION_FAILED", "Database Restore did not complete.",
+                                  {"safety_recovery_point": safety.name}) from exc
+        return {"restored_identity": payload["identity"], "safety_recovery_point": safety.name,
+                "operation_uuid": operation["uuid"] if operation else None,
+                "database_verified": True, "cache_reset_required": True, "reauthentication_required": True}
 
     def create(self, reason: str, tag: str = "") -> dict:
         """Create a named snapshot and log the outcome.
