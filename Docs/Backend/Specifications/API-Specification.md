@@ -99,6 +99,15 @@ bounded repair suppression remain Admin-only. Accepted decisions return their
 durable Operation identifier. Reader projections omit repair paths,
 confirmation, failure evidence, and verification detail.
 
+Repair Quarantine is exposed only to Admin principals through
+`/api/v1/quarantine-items` and signed `/api/v1/quarantine/preview|execute`
+routes. Quarantine preview derives the candidate path from the reviewed Repair;
+restore preview derives the destination from the item's retained original path.
+Clients cannot submit arbitrary filesystem paths. The short-lived preview binds
+configuration, directory inventory fingerprint, Repair/Item version, and target
+occupancy and is claimed once. Stale, replayed, missing, occupied, or invalid
+previews return structured conflicts before filesystem mutation.
+
 ## Album management contracts
 
 `GET /api/v1/albums` supports composable `q`, `studio_id`, `status_id`,

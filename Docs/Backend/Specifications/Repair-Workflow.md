@@ -72,6 +72,13 @@ The Backend retains quarantined items for 30 days from quarantine, unless an Adm
 
 Restoration requires an Administrator to select the quarantined item and a destination, confirm that the destination is safe and non-conflicting, create any required snapshot, move the item intact, and run the applicable consistency validation. Restoration must not overwrite an existing path. At retention expiry, the Backend must create an auditable expiry disposition: a held item remains retained; an unheld item may be permanently removed only by an authorized retention job after recording the item identity, expiry decision, and deletion outcome. Expiry removal is irreversible and must follow the snapshot policy below when it affects multiple directories or otherwise meets the required-snapshot criteria.
 
+For the initial Web management API, the selectable quarantine candidate is the
+managed-relative path retained by the Repair case, and the only selectable
+restore destination is the item's retained original managed-relative path.
+Both actions require signed, expiring, single-use preview identity bound to the
+directory inventory and current workflow state. This narrower contract fulfills
+safe selection without exposing general filesystem browsing.
+
 ## Validation rules
 
 After any repair, the Backend validates at least:

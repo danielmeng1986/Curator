@@ -2304,7 +2304,13 @@ class QuarantineRepository:
             original_path TEXT NOT NULL, quarantine_path TEXT NOT NULL,
             repair_uuid TEXT, operation_uuid TEXT NOT NULL, reason TEXT NOT NULL,
             inventory TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
-            hold INTEGER NOT NULL DEFAULT 0)""")
+            hold INTEGER NOT NULL DEFAULT 0, restored_at TEXT,
+            restore_operation_uuid TEXT, restore_destination TEXT)""")
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(quarantine_item)")}
+        for column in ("restored_at", "restore_operation_uuid", "restore_destination"):
+            if column not in existing: conn.execute(f"ALTER TABLE quarantine_item ADD COLUMN {column} TEXT")
+        conn.execute("""CREATE TABLE IF NOT EXISTS quarantine_preview_claim (
+            preview_uuid TEXT PRIMARY KEY, claimed_at TEXT NOT NULL)""")
         conn.commit()
     def create(self, fields):
         now = datetime.now(timezone.utc).isoformat(); item_uuid = fields.get("uuid") or str(uuid.uuid4())
@@ -2321,6 +2327,24 @@ class QuarantineRepository:
         with self._db() as conn:
             self._schema(conn); rows = conn.execute("SELECT * FROM quarantine_item ORDER BY created_at").fetchall()
         return [dict(row) for row in rows]
+    def mark_restored(self, item_uuid, operation_uuid, destination):
+        now = datetime.now(timezone.utc).isoformat()
+        with self._db() as conn:
+            self._schema(conn); conn.execute(
+                "UPDATE quarantine_item SET restored_at=?,restore_operation_uuid=?,restore_destination=? WHERE uuid=?",
+                (now, operation_uuid, destination, item_uuid)); conn.commit()
+        return self.get(item_uuid)
+    def preview_is_claimed(self, preview_uuid):
+        with self._db() as conn:
+            self._schema(conn); row = conn.execute("SELECT 1 FROM quarantine_preview_claim WHERE preview_uuid=?", (preview_uuid,)).fetchone()
+        return bool(row)
+    def claim_preview(self, preview_uuid):
+        with self._db() as conn:
+            self._schema(conn)
+            try:
+                conn.execute("INSERT INTO quarantine_preview_claim VALUES (?,?)", (preview_uuid, datetime.now(timezone.utc).isoformat())); conn.commit()
+            except Exception as exc:
+                raise PersistenceConflict({"preview_uuid": preview_uuid}) from exc
 
 
 # ---------------------------------------------------------------------------

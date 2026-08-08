@@ -129,6 +129,10 @@ def main() -> None:
         source_album = resources["source"] / "Fixture Model in Fixture Album"
         source_album.mkdir()
         (source_album / "cover.jpg").touch()
+    if args.scenario == "workflow-evidence":
+        repair_candidate = resources["archive"] / "F" / "Fixture Model" / "Fixture Studio" / "Fixture Album"
+        repair_candidate.mkdir(parents=True)
+        (repair_candidate / "conflict.jpg").write_bytes(b"fixture-conflict")
 
     _initialize_database(resources["database"], args.scenario)
     config_path = root / "backend.json"
@@ -136,6 +140,7 @@ def main() -> None:
         json.dumps({
             "import_source_root": str(resources["source"]),
             "archive_root": str(resources["archive"]),
+            "quarantine_root": str(resources["quarantine"]),
             "default_import_studio": "Fixture Studio",
         }),
         encoding="utf-8",

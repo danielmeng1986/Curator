@@ -2401,6 +2401,7 @@ class QuarantineService:
         op = self._operations.begin("repair_restore", initiator, repair_uuid=item["repair_uuid"], related_operation_uuid=item["operation_uuid"])
         target.parent.mkdir(parents=True, exist_ok=True); shutil.move(str(source), str(target))
         self._operations.succeed(op["uuid"], "Quarantined directory restored intact.")
+        self._repo.mark_restored(item_uuid, op["uuid"], destination)
         self._audit({"action":"restore","quarantine_uuid":item_uuid,"operation_uuid":op["uuid"],"snapshot":str(snapshot)})
         return op
 
@@ -2415,6 +2416,94 @@ class QuarantineService:
         resolved = (root / p).resolve()
         if root not in resolved.parents: raise ValueError("Quarantine path escapes its root.")
         return resolved
+
+
+class QuarantineContractService:
+    """Signed review/execute contract for Admin repair Quarantine actions."""
+    def __init__(self, quarantine_repo, repair_repo, service, archive_root, quarantine_root, preview_secret):
+        self._repo, self._repairs, self._service = quarantine_repo, repair_repo, service
+        self._archive, self._quarantine = Path(archive_root).resolve(), Path(quarantine_root).resolve()
+        self._secret = preview_secret
+
+    @staticmethod
+    def _fingerprint(path: Path) -> dict:
+        if not path.is_dir(): return {"exists": False, "digest": None}
+        entries = []
+        for item in sorted(path.rglob("*"), key=lambda value: str(value.relative_to(path))):
+            stat = item.stat(); entries.append([str(item.relative_to(path)), item.is_dir(), stat.st_size, stat.st_mtime_ns])
+        return {"exists": True, "digest": hashlib.sha256(json.dumps(entries, separators=(",", ":")).encode()).hexdigest()}
+
+    def _token(self, payload):
+        raw = base64.urlsafe_b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).decode().rstrip("=")
+        return f"{raw}.{hmac.new(self._secret, raw.encode(), hashlib.sha256).hexdigest()}"
+
+    def _read(self, token):
+        try:
+            raw, signature = token.rsplit(".", 1)
+            if not hmac.compare_digest(signature, hmac.new(self._secret, raw.encode(), hashlib.sha256).hexdigest()): raise ValueError
+            payload = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+            if datetime.fromisoformat(payload["expires_at"]) <= datetime.now(timezone.utc):
+                raise ServiceConflict("QUARANTINE_PREVIEW_EXPIRED", "The Quarantine preview expired.")
+            return payload
+        except ServiceConflict: raise
+        except Exception as exc: raise ServiceConflict("QUARANTINE_PREVIEW_INVALID", "The Quarantine preview is invalid.") from exc
+
+    def _base_payload(self, action):
+        return {"v": 1, "preview_uuid": str(_uuid_mod.uuid4()), "action": action,
+                "archive_root": str(self._archive), "quarantine_root": str(self._quarantine),
+                "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+
+    def preview_quarantine(self, repair_uuid, reason):
+        repair = self._repairs.get_by_uuid(repair_uuid)
+        if not repair: raise ServiceNotFound("Repair case not found.")
+        if repair["state"] not in {REPAIR_STATE_NEEDS_REPAIR, REPAIR_STATE_MANUAL_CONFLICT}:
+            raise ServiceConflict("INVALID_TRANSITION", "Repair is not eligible for Quarantine.")
+        relative = repair.get("expected_path")
+        if not relative: raise ServiceConflict("QUARANTINE_NOT_ELIGIBLE", "Repair has no Backend-approved candidate path.")
+        source = self._service._within(self._archive, relative); state = self._fingerprint(source)
+        if not state["exists"]: raise ServiceNotFound("The approved managed directory was not found.")
+        if not isinstance(reason, str) or not reason.strip(): raise ValueError("Quarantine reason is required.")
+        payload = self._base_payload("quarantine"); payload.update({"repair_uuid": repair_uuid, "repair_updated_at": repair["updated_at"],
+            "relative_path": relative, "reason": reason.strip(), "source_state": state})
+        return {"preview_token": self._token(payload), "preview_uuid": payload["preview_uuid"], "expires_at": payload["expires_at"],
+                "action": "quarantine", "repair_uuid": repair_uuid, "managed_path": relative,
+                "file_count": len([p for p in source.rglob("*") if p.is_file()]), "consequence": "Move the directory intact into repair Quarantine; this does not resolve the Issue."}
+
+    def preview_restore(self, item_uuid):
+        item = self._repo.get(item_uuid)
+        if not item: raise ServiceNotFound("Quarantine item not found.")
+        if item.get("restored_at"): raise ServiceConflict("QUARANTINE_ALREADY_RESTORED", "The item was already restored.")
+        source = self._service._within(self._quarantine, item["quarantine_path"]); state = self._fingerprint(source)
+        if not state["exists"]: raise ServiceConflict("QUARANTINE_ITEM_MISSING", "Quarantined content is missing.")
+        target = self._service._within(self._archive, item["original_path"])
+        if target.exists(): raise ServiceConflict("RESTORE_DESTINATION_EXISTS", "The original managed path is occupied.")
+        payload = self._base_payload("restore"); payload.update({"item_uuid": item_uuid, "source_state": state,
+            "original_path": item["original_path"], "created_at": item["created_at"]})
+        return {"preview_token": self._token(payload), "preview_uuid": payload["preview_uuid"], "expires_at": payload["expires_at"],
+                "action": "restore", "item_uuid": item_uuid, "managed_destination": item["original_path"],
+                "consequence": "Restore the intact directory to its recorded original managed path after a snapshot."}
+
+    def execute(self, token, actor_role):
+        payload = self._read(token)
+        if self._repo.preview_is_claimed(payload["preview_uuid"]): raise ServiceConflict("QUARANTINE_PREVIEW_REPLAYED", "The preview was already used.")
+        if payload["archive_root"] != str(self._archive) or payload["quarantine_root"] != str(self._quarantine):
+            raise ServiceConflict("QUARANTINE_PREVIEW_STALE", "Quarantine configuration changed.")
+        if payload["action"] == "quarantine":
+            repair = self._repairs.get_by_uuid(payload["repair_uuid"]); source = self._service._within(self._archive, payload["relative_path"])
+            if not repair or repair["updated_at"] != payload["repair_updated_at"] or self._fingerprint(source) != payload["source_state"]:
+                raise ServiceConflict("QUARANTINE_PREVIEW_STALE", "Repair or managed directory changed after preview.")
+        else:
+            item = self._repo.get(payload["item_uuid"]); source = self._service._within(self._quarantine, item["quarantine_path"] if item else "missing")
+            target = self._service._within(self._archive, payload["original_path"])
+            if not item or item.get("restored_at") or item["created_at"] != payload["created_at"] or target.exists() or self._fingerprint(source) != payload["source_state"]:
+                raise ServiceConflict("QUARANTINE_PREVIEW_STALE", "Quarantine item or restore destination changed after preview.")
+        try: self._repo.claim_preview(payload["preview_uuid"])
+        except repo.PersistenceConflict as exc: raise ServiceConflict("QUARANTINE_PREVIEW_REPLAYED", "The preview was already used.", exc.details) from exc
+        if payload["action"] == "quarantine":
+            record = self._service.quarantine(payload["relative_path"], repair_uuid=payload["repair_uuid"], reason=payload["reason"], actor_role=actor_role, initiator=OP_INITIATOR_WEB_UI)
+            return {"action": "quarantine", "item": record, "operation_uuid": record["operation_uuid"]}
+        operation = self._service.restore(payload["item_uuid"], payload["original_path"], actor_role=actor_role, initiator=OP_INITIATOR_WEB_UI)
+        return {"action": "restore", "item": self._repo.get(payload["item_uuid"]), "operation_uuid": operation["uuid"]}
 
 
 # ---------------------------------------------------------------------------
@@ -2610,6 +2699,7 @@ class IssueRepairReviewService:
                 "fingerprint": hashlib.sha256(fingerprint_input.encode()).hexdigest(),
                 "scope_path": item["expected_path"],
             }
+            result["quarantine_candidate"] = {"repair_uuid": item["uuid"], "managed_path": item["expected_path"]}
         return result
 
     @staticmethod

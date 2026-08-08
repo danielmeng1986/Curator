@@ -45,6 +45,7 @@ DEFAULT_APP_CONFIG = {
     "import_source_root": "",
     "archive_root": "",
     "default_import_studio": "",
+    "quarantine_root": "",
 }
 
 # ---------------------------------------------------------------------------
@@ -65,7 +66,7 @@ def load_app_config() -> dict:
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
                 on_disk = json.load(fh)
-            for key in ("import_source_root", "archive_root", "default_import_studio"):
+            for key in ("import_source_root", "archive_root", "default_import_studio", "quarantine_root"):
                 if key in on_disk:
                     cfg[key] = on_disk[key]
         except Exception:
@@ -77,6 +78,7 @@ APP_CONFIG = load_app_config()
 AUTH_REGISTRATION_SECRET = os.environ.get("CURATOR_REGISTRATION_SECRET", "")
 ALBUM_BATCH_PREVIEW_SECRET = secrets.token_bytes(32)
 IMPORT_PREVIEW_SECRET = secrets.token_bytes(32)
+QUARANTINE_PREVIEW_SECRET = secrets.token_bytes(32)
 
 # ---------------------------------------------------------------------------
 # DB helpers
@@ -664,6 +666,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_repair(path.split("/")[-1])
             elif path == "/api/repair-suppressions":
                 self._get_repair_suppressions()
+            elif path == "/api/quarantine-items":
+                self._get_quarantine_items()
+            elif re.match(r"^/api/quarantine-items/[^/]+$", path):
+                self._get_quarantine_item(path.split("/")[-1])
             elif path == "/api/auth/me":
                 self._send_success(200, {"principal": self._principal})
             else:
@@ -907,6 +913,22 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
         self._send_success(200, {"items": repo.RepairSuppressionRepository(open_db).list_records()})
 
+    def _require_admin_principal(self) -> bool:
+        if self._principal["role"] != "admin":
+            self._send_error(403, "AUTHORIZATION_ADMIN_REQUIRED", "An Admin Token is required.")
+            return False
+        return True
+
+    def _get_quarantine_items(self):
+        if not self._require_admin_principal(): return
+        self._send_success(200, {"items": repo.QuarantineRepository(open_db).list()})
+
+    def _get_quarantine_item(self, item_uuid):
+        if not self._require_admin_principal(): return
+        item = repo.QuarantineRepository(open_db).get(item_uuid)
+        if not item: raise svc.ServiceNotFound("Quarantine item not found.")
+        self._send_success(200, {"item": item})
+
     # ------------------------------------------------------------------
     # POST handlers
     # ------------------------------------------------------------------
@@ -958,6 +980,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._post_repair_suppression(body)
             elif re.match(r"^/api/repair-suppressions/[^/]+/revoke$", path):
                 self._post_repair_suppression_revoke(path.split("/")[3])
+            elif path == "/api/quarantine/preview":
+                self._post_quarantine_preview(body)
+            elif path == "/api/quarantine/execute":
+                self._post_quarantine_execute(body)
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
         except ValueError as exc:
@@ -1010,6 +1036,33 @@ class AppHandler(SimpleHTTPRequestHandler):
             suppression_uuid, actor=self._principal.get("device_name") or self._principal["role"], actor_role=self._principal["role"],
         )
         self._send_success(200, {"suppression": record})
+
+    def _quarantine_contract(self):
+        archive_root = APP_CONFIG.get("archive_root", "")
+        quarantine_root = APP_CONFIG.get("quarantine_root") or str(RUNTIME_DIR / "quarantine")
+        quarantine_repo = repo.QuarantineRepository(open_db)
+        service = svc.QuarantineService(
+            quarantine_repo, svc.OperationService(repo.OperationRepository(open_db)),
+            archive_root, quarantine_root, create_db_snapshot,
+        )
+        return svc.QuarantineContractService(
+            quarantine_repo, repo.RepairRepository(open_db), service,
+            archive_root, quarantine_root, QUARANTINE_PREVIEW_SECRET,
+        )
+
+    def _post_quarantine_preview(self, body: dict):
+        if not self._require_admin_principal(): return
+        action = body.get("action")
+        if action == "quarantine": result = self._quarantine_contract().preview_quarantine(body.get("repair_uuid", ""), body.get("reason", ""))
+        elif action == "restore": result = self._quarantine_contract().preview_restore(body.get("item_uuid", ""))
+        else: raise ValueError("Quarantine preview action must be quarantine or restore.")
+        self._send_success(200, {"preview": result})
+
+    def _post_quarantine_execute(self, body: dict):
+        if not self._require_admin_principal(): return
+        token = body.get("preview_token", "")
+        if not token: raise ValueError("preview_token is required.")
+        self._send_success(200, self._quarantine_contract().execute(token, self._principal["role"]))
 
     def _post_authenticated_registration_approval(self, path: str, body: dict) -> None:
         principal = getattr(self, "_principal", None)
