@@ -77,10 +77,11 @@ def _initialize_database(database_path: Path, scenario: str) -> None:
             connection.execute(
                 """INSERT INTO operation
                    (uuid, operation_type, initiator, status, summary, started_at,
-                    issue_uuid, repair_uuid)
+                    issue_uuid, repair_uuid, recovery_context)
                    VALUES (?, 'import', 'web_ui', 'NeedsRepair', ?,
-                           '2026-08-08T00:00:00+00:00', ?, ?)""",
-                (operation_uuid, "Fixture import requires review.", issue_uuid, repair_uuid),
+                           '2026-08-08T00:00:00+00:00', ?, ?, ?)""",
+                (operation_uuid, "Fixture import requires review.", issue_uuid, repair_uuid,
+                 "Review the linked Repair before retrying."),
             )
             connection.execute(
                 """INSERT INTO issue

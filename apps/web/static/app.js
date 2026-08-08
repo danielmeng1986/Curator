@@ -13,6 +13,8 @@ const ROUTES = [
   { pattern: /^#\/studios\/(\d+)$/, page: 'studio-detail', params: ['id'] },
   { pattern: /^#\/statuses$/, page: 'statuses', params: [] },
   { pattern: /^#\/import\/albums$/, page: 'import', params: [], scope: 'write' },
+  { pattern: /^#\/operations(?:\?.*)?$/, page: 'operations-list', params: [] },
+  { pattern: /^#\/operations\/([^/?]+)$/, page: 'operation-detail', params: ['uuid'] },
 ];
 
 function navigate(hash) {
@@ -58,6 +60,8 @@ function route() {
         case 'studio-detail':   renderPage(StudiosPage.renderDetail(paramValues)); break;
         case 'statuses':        renderPage(StatusesPage.render(paramValues)); break;
         case 'import':          renderPage(ImportPage.render(paramValues)); break;
+        case 'operations-list': renderPage(OperationsPage.renderList(paramValues)); break;
+        case 'operation-detail': renderPage(OperationsPage.renderDetail(paramValues)); break;
         default:                renderNotFound();
       }
       return;

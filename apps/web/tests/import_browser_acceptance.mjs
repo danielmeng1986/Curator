@@ -36,7 +36,8 @@ try {
   await page.getByRole('button', { name: /Execute reviewed COPY/ }).click();
   await page.getByText('Import Results').waitFor();
   await page.getByText('Succeeded', { exact: true }).waitFor();
-  await page.getByRole('link', { name: 'View Operation' }).waitFor();
+  await page.getByRole('link', { name: 'View Operation' }).click();
+  await page.getByRole('heading', { name: 'Operation Detail' }).waitFor();
 
   await access(join(sourceAlbum, 'cover.jpg'));
   const albums = await fixture.request('/albums', { role: 'writer' });

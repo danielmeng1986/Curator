@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-007` — Status: `Proposed`
+`UI-007` — Status: `Complete`
 
 ## Title
 
@@ -58,3 +58,13 @@ enforcing role-sensitive diagnostic disclosure.
 
 - Absolute filesystem paths and secret-bearing error strings require Backend-side redaction before serialization.
 
+## Completion Notes
+
+- Added a read-only Operation list with status, type, and inclusive date filters,
+  stable cursor navigation, totals, and durable status summaries.
+- Added role-safe detail rendering and links to related Operations, Issues, and
+  Repairs; retained identifiers without a supported detail route are explicitly
+  marked unavailable.
+- Import results now land on a functional Operation detail route.
+- Focused Writer/Reader browser acceptance verifies traceability and that no
+  sensitive diagnostic path is rendered.
