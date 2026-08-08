@@ -15,6 +15,10 @@ const ROUTES = [
   { pattern: /^#\/import\/albums$/, page: 'import', params: [], scope: 'write' },
   { pattern: /^#\/operations(?:\?.*)?$/, page: 'operations-list', params: [] },
   { pattern: /^#\/operations\/([^/?]+)$/, page: 'operation-detail', params: ['uuid'] },
+  { pattern: /^#\/issues(?:\?.*)?$/, page: 'issues-list', params: [] },
+  { pattern: /^#\/issues\/([^/?]+)$/, page: 'issue-detail', params: ['uuid'] },
+  { pattern: /^#\/repairs(?:\?.*)?$/, page: 'repairs-list', params: [] },
+  { pattern: /^#\/repairs\/([^/?]+)$/, page: 'repair-detail', params: ['uuid'] },
 ];
 
 function navigate(hash) {
@@ -62,6 +66,10 @@ function route() {
         case 'import':          renderPage(ImportPage.render(paramValues)); break;
         case 'operations-list': renderPage(OperationsPage.renderList(paramValues)); break;
         case 'operation-detail': renderPage(OperationsPage.renderDetail(paramValues)); break;
+        case 'issues-list':     renderPage(IssuesPage.renderList(paramValues)); break;
+        case 'issue-detail':    renderPage(IssuesPage.renderDetail(paramValues)); break;
+        case 'repairs-list':    renderPage(IssuesPage.renderRepairs(paramValues)); break;
+        case 'repair-detail':   renderPage(IssuesPage.renderRepairDetail(paramValues)); break;
         default:                renderNotFound();
       }
       return;
@@ -72,8 +80,18 @@ function route() {
 
 function renderPage(promise) {
   void Promise.resolve(promise)
-    .then(() => ui.applyPermissions(document, window.curatorPrincipal))
+    .then(() => { ui.applyPermissions(document, window.curatorPrincipal); void refreshIssueBadge(); })
     .catch(renderRequestError);
+}
+
+async function refreshIssueBadge() {
+  const badge = document.getElementById('issueBadge');
+  if (!badge || !api.getConnection().hasToken) return;
+  try {
+    const [open, active] = await Promise.all([api.get('/issues?state=Open'), api.get('/issues?state=InProgress')]);
+    const count = (open.items || []).length + (active.items || []).length;
+    badge.textContent = String(count); badge.classList.toggle('hidden', count === 0);
+  } catch { badge.classList.add('hidden'); }
 }
 
 function updateNavActive(hash) {

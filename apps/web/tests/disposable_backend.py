@@ -86,16 +86,17 @@ def _initialize_database(database_path: Path, scenario: str) -> None:
             connection.execute(
                 """INSERT INTO issue
                    (uuid, category, description, affected_operation,
-                    suggested_resolution, state, source_workflow, created_at)
+                    suggested_resolution, state, source_workflow, created_at, updated_at)
                    VALUES (?, 'Filesystem', ?, ?, ?, 'Open', 'fixture',
-                           '2026-08-08T00:00:00+00:00')""",
+                           '2026-08-08T00:00:00+00:00', '2026-08-08T00:00:00+00:00')""",
                 (issue_uuid, "Fixture Issue", operation_uuid, "Review fixture repair."),
             )
             connection.execute(
                 """INSERT INTO repair_case
-                   (uuid, operation_uuid, state, category, created_at)
-                   VALUES (?, ?, 'NeedsRepair', 'Assisted',
-                           '2026-08-08T00:00:00+00:00')""",
+                   (uuid, operation_uuid, expected_path, state, category, failure_reason, created_at, updated_at)
+                   VALUES (?, ?, 'F/Fixture Model/Fixture Studio/Fixture Album',
+                           'NeedsRepair', 'Assisted', 'Fixture filesystem failure',
+                           '2026-08-08T00:00:00+00:00', '2026-08-08T00:00:00+00:00')""",
                 (repair_uuid, operation_uuid),
             )
         connection.commit()

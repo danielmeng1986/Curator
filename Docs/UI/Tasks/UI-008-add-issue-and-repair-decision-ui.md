@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-008` — Status: `Proposed`
+`UI-008` — Status: `Complete`
 
 ## Title
 
@@ -56,3 +56,14 @@ Repair decisions with explicit evidence, confirmation, and traceability.
 
 - Current Backend Service readiness does not imply that every required UI endpoint/read model already exists.
 
+## Completion Notes
+
+- Added persistent active-Issue badge, Issue queue/filter/detail, Repair queue
+  and role-sensitive details, and traceability links.
+- Every action button comes from Backend `allowed_actions`; decisions bind the
+  reviewed `updated_at` and duplicate submission is suppressed client-side.
+- Confirmation and verification evidence are collected only for the action
+  types that require them. Reader path/evidence redaction and Admin-only Issue
+  resolution/ownership/suppression are preserved.
+- Admin suppression uses the Backend-provided immutable fingerprint/scope and
+  allows only a reason and bounded expiry to be supplied by the UI.
