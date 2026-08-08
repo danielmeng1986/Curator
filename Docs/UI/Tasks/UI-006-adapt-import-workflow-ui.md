@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-006` — Status: `Proposed`
+`UI-006` — Status: `Complete`
 
 ## Title
 
@@ -57,3 +57,16 @@ database-only imports with truthful per-item and Operation outcomes.
 ## Risks or Notes
 
 - Browser tests must assert filesystem outcomes through disposable fixtures, not only visible success text.
+
+## Completion Notes
+
+- The Import Action is selected explicitly for the batch and its COPY, MOVE, or
+  database-only consequence is repeated on the confirmation screen.
+- Valid preview rows can be selected. Changing that selection creates a fresh
+  preview so execution identity covers exactly the confirmed items.
+- Execution submits only the signed preview token. Per-item `ok`, `skipped`, and
+  `needs_repair` outcomes and the aggregate Backend summary are rendered without
+  inventing a client-side rollback or repair result.
+- The focused browser acceptance uses disposable source/archive roots and proves
+  that COPY preserves the source while creating both the archive content and
+  durable Album record.
