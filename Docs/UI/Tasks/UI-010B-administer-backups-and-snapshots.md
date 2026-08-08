@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-010B` — Status: `Proposed`
+`UI-010B` — Status: `Completed`
 
 ## Title
 
@@ -56,3 +56,10 @@ Snapshot resources with truthful verification and retention evidence.
 
 - If current endpoints predate `/api/v1` role enforcement, API hardening is a prerequisite rather than UI work.
 
+## Result
+
+- Added the Admin-only recovery-point catalog, manual creation, integrity
+  verification, and reviewed retention-cleanup interactions.
+- The UI accepts no filesystem paths and displays no Backend absolute path.
+- Reader denial, disposable creation/verification, zero-impact cleanup
+  cancellation, and API redaction are covered by browser acceptance.

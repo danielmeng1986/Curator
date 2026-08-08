@@ -23,6 +23,7 @@ const ROUTES = [
   { pattern: /^#\/quarantine\/([^/?]+)$/, page: 'quarantine-detail', params: ['uuid'], scope: 'admin' },
   { pattern: /^#\/admin$/, page: 'admin-center', params: [], scope: 'admin' },
   { pattern: /^#\/admin\/devices$/, page: 'admin-devices', params: [], scope: 'admin' },
+  { pattern: /^#\/admin\/backups$/, page: 'admin-backups', params: [], scope: 'admin' },
 ];
 
 function navigate(hash) {
@@ -78,6 +79,7 @@ function route() {
         case 'quarantine-detail': renderPage(QuarantinePage.renderDetail(paramValues)); break;
         case 'admin-center':    renderPage(AdminCenterPage.render(paramValues)); break;
         case 'admin-devices':   renderPage(AdminAuthPage.render(paramValues)); break;
+        case 'admin-backups':   renderPage(AdminBackupsPage.render(paramValues)); break;
         default:                renderNotFound();
       }
       return;
