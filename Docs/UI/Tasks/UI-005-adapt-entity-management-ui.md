@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-005` — Status: `Blocked`
+`UI-005` — Status: `Complete`
 
 ## Title
 
@@ -63,3 +63,10 @@ minimum routine digital-asset management unit.
 
 - Any mismatch between UI editable fields and Backend writable fields must be resolved in Specification/API contracts, not patched by silent field omission.
 - Read-only Photo evidence selected by a future AI review workflow belongs to `UI-011*` or a later native-client specification, not this task.
+
+## Completion Record
+
+- Added composable Album search/date/rating/Model filters with URL-preserved list context and reviewed batch editing.
+- Added readable Album relation selection, duplicate/self prevention, inline Model/Studio creation, and role-aware actions.
+- Removed routine Photo presentation and the unsafe database-only Album hard-delete action pending Digital Asset Trash.
+- Added focused browser acceptance against disposable authenticated Backend state.

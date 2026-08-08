@@ -2,13 +2,13 @@
 
 const ROUTES = [
   { pattern: /^#\/$/, page: 'dashboard', params: [] },
-  { pattern: /^#\/albums$/, page: 'albums-list', params: [] },
+  { pattern: /^#\/albums(?:\?.*)?$/, page: 'albums-list', params: [] },
   { pattern: /^#\/albums\/new$/, page: 'album-new', params: [] },
   { pattern: /^#\/albums\/(\d+)$/, page: 'album-detail', params: ['id'] },
-  { pattern: /^#\/models$/, page: 'models-list', params: [] },
+  { pattern: /^#\/models(?:\?.*)?$/, page: 'models-list', params: [] },
   { pattern: /^#\/models\/new$/, page: 'model-new', params: [] },
   { pattern: /^#\/models\/(\d+)$/, page: 'model-detail', params: ['id'] },
-  { pattern: /^#\/studios$/, page: 'studios-list', params: [] },
+  { pattern: /^#\/studios(?:\?.*)?$/, page: 'studios-list', params: [] },
   { pattern: /^#\/studios\/new$/, page: 'studio-new', params: [] },
   { pattern: /^#\/studios\/(\d+)$/, page: 'studio-detail', params: ['id'] },
   { pattern: /^#\/statuses$/, page: 'statuses', params: [] },

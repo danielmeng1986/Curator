@@ -39,6 +39,7 @@ try {
     await page.getByRole('button', { name: 'Validate and connect' }).click();
     await page.getByRole('button', { name: /Browser fixture reader · reader/ }).waitFor();
     const importLink = page.locator('a[data-route="import"]');
+    await importLink.waitFor({ state: 'hidden' });
     assert.equal(await importLink.isVisible(), false);
     assert.equal(await importLink.getAttribute('aria-hidden'), 'true');
     await page.evaluate(() => { location.hash = '#/import/albums'; });

@@ -20,7 +20,6 @@ const StatusesPage = {
         const used = (s.album_count || 0) + (s.workspace_album_count || 0);
         return `
           <tr>
-            <td>${s.id}</td>
             <td><strong>${esc(s.name)}</strong></td>
             <td>${esc(s.description || '')}</td>
             <td>${s.album_count || 0}</td>
@@ -38,9 +37,9 @@ const StatusesPage = {
         </div>
         <div class="card table-wrap">
           <table><thead><tr>
-            <th>ID</th><th>Name</th><th>Description</th><th>Albums</th><th>Workspace</th><th>Actions</th>
+            <th>Name</th><th>Description</th><th>Albums</th><th>Historical Workspace</th><th>Actions</th>
           </tr></thead>
-          <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:var(--ink-soft)">No statuses</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="5" style="text-align:center;color:var(--ink-soft)">No statuses</td></tr>'}</tbody>
           </table>
         </div>
       `;
@@ -65,7 +64,7 @@ const StatusesPage = {
 
   _openEdit(id, name, description) {
     showModal(`
-      <h3 class="modal-title">Edit Status #${id}</h3>
+      <h3 class="modal-title">Edit Status</h3>
       <div class="form-grid">
         <div class="form-field form-field-full"><label>Name *</label><input id="sName" value="${esc(name)}"></div>
         <div class="form-field form-field-full"><label>Description</label><textarea id="sDesc">${esc(description)}</textarea></div>
