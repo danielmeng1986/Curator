@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-009` — Status: `Proposed`
+`UI-009` — Status: `Complete`
 
 ## Title
 
@@ -57,3 +57,15 @@ items with scope preview, confirmation, and verified outcomes.
 
 - UI labels must not imply that moving an item to Quarantine repairs the originating Issue automatically.
 - Repair Quarantine must never be labelled or presented as Digital Asset Trash; the former isolates repair conflicts, while the latter is a user/admin asset-removal lifecycle.
+
+## Completion Notes
+
+- Added Admin-only Repair Quarantine navigation, list, inventory detail,
+  retention state, and Repair/Operation traceability.
+- Quarantine begins only from the Backend-provided Repair candidate; restore
+  has no editable destination and uses the retained original managed path.
+- Both actions require an explicit signed preview confirmation and submit only
+  the preview token. Duplicate client execution is suppressed.
+- Disposable browser/filesystem acceptance proves Writer denial, zero-write
+  preview, intact isolation, inventory, snapshot-protected restore, and durable
+  restoration evidence.

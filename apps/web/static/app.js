@@ -19,6 +19,8 @@ const ROUTES = [
   { pattern: /^#\/issues\/([^/?]+)$/, page: 'issue-detail', params: ['uuid'] },
   { pattern: /^#\/repairs(?:\?.*)?$/, page: 'repairs-list', params: [] },
   { pattern: /^#\/repairs\/([^/?]+)$/, page: 'repair-detail', params: ['uuid'] },
+  { pattern: /^#\/quarantine$/, page: 'quarantine-list', params: [], scope: 'admin' },
+  { pattern: /^#\/quarantine\/([^/?]+)$/, page: 'quarantine-detail', params: ['uuid'], scope: 'admin' },
 ];
 
 function navigate(hash) {
@@ -70,6 +72,8 @@ function route() {
         case 'issue-detail':    renderPage(IssuesPage.renderDetail(paramValues)); break;
         case 'repairs-list':    renderPage(IssuesPage.renderRepairs(paramValues)); break;
         case 'repair-detail':   renderPage(IssuesPage.renderRepairDetail(paramValues)); break;
+        case 'quarantine-list': renderPage(QuarantinePage.renderList(paramValues)); break;
+        case 'quarantine-detail': renderPage(QuarantinePage.renderDetail(paramValues)); break;
         default:                renderNotFound();
       }
       return;
