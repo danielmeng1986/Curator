@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-003` — Status: `Proposed`
+`UI-003` — Status: `Complete`
 
 ## Title
 
@@ -57,4 +57,19 @@ fixtures for all UI workflows without accessing live Curator resources.
 ## Risks or Notes
 
 - Filesystem workflow fixtures must use explicit temporary roots, never paths derived from the live configuration.
+- The future AI Workspace scenario is registered as `Blocked by Specification`
+  and deliberately has no invented fixture schema until UI-011A/B are approved.
 
+## Completion Record
+
+- Replaced the in-memory smoke composition root with an on-disk disposable
+  Backend whose database, source, archive, Snapshot, Quarantine, Backup, log,
+  and output resources all live beneath one unique temporary root.
+- Added reusable scenario and Reader/Writer/Admin device builders, authenticated
+  request helpers, explicit failure-artifact directories, secret redaction, and
+  shutdown cleanup assertions.
+- Added empty, permanent-entity, workflow-evidence, and filesystem scenarios;
+  retained a specification-blocked registration point for the future AI
+  Workspace rather than fabricating its contract.
+- Migrated the existing browser smoke gate to the shared fixture and proved two
+  clean entity-fixture runs with unique roots and rejected-write side effects.
