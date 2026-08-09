@@ -68,3 +68,18 @@ class AlbumRemarkMigrationTests(unittest.TestCase):
             with sqlite3.connect(database) as conn:
                 self.assertEqual("kept", conn.execute("SELECT remark FROM album WHERE id = 7").fetchone()[0])
 
+
+class AIWorkspaceContainerMigrationTests(unittest.TestCase):
+    def test_0003_is_repeatable_and_keeps_container_and_item_state_separate(self):
+        sql = (Path(__file__).parents[1] / "migrations" / "0003_ai_workspace_container.sql").read_text()
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "workspace.db"
+            with sqlite3.connect(database) as conn:
+                conn.execute("PRAGMA foreign_keys=ON"); conn.executescript(sql); conn.executescript(sql)
+                conn.execute("INSERT INTO ai_dataset_schema VALUES ('album_analysis',1,'Active','{}','2026-08-09')")
+                conn.execute("""INSERT INTO ai_workspace
+                    (uuid,dataset_type,schema_version,title,created_at)
+                    VALUES ('workspace-1','album_analysis',1,'Comparison','2026-08-09')""")
+                row = conn.execute("SELECT dataset_type,schema_version,lifecycle_state,version FROM ai_workspace").fetchone()
+                self.assertEqual([], conn.execute("PRAGMA foreign_key_check").fetchall())
+            self.assertEqual(("album_analysis", 1, "Open", 1), row)

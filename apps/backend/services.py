@@ -1744,6 +1744,56 @@ def is_retention_eligible(
     return age_days >= retain_days
 
 
+class AIWorkspaceService:
+    """Own the Dataset-independent AI Workspace container lifecycle."""
+
+    def __init__(self, workspace_repo, operation_service=None):
+        self._repo, self._operations = workspace_repo, operation_service
+
+    def create(self, title: str, created_by_token_uuid: str | None = None) -> dict:
+        title = str(title or "").strip()
+        if not title or len(title) > 200: raise ValueError("Workspace title must contain 1 to 200 characters.")
+        workspace = self._repo.create({"dataset_type": "album_analysis", "schema_version": 1,
+            "title": title, "created_by_token_uuid": created_by_token_uuid, "created_at": _utc_now_iso()})
+        if self._operations:
+            op = self._operations.begin("ai_workspace_create", OP_INITIATOR_WEB_UI,
+                entity_uuid=workspace["uuid"], summary=f"Created AI Workspace {title}")
+            self._operations.succeed(op["uuid"], summary="AI Workspace created")
+        return workspace
+
+    def list(self, lifecycle_state=None):
+        if lifecycle_state and lifecycle_state not in {"Open", "Closed", "Archived"}:
+            raise ValueError("AI Workspace lifecycle filter is invalid.")
+        return self._repo.list(lifecycle_state)
+
+    def get(self, workspace_uuid):
+        item = self._repo.get(workspace_uuid)
+        if not item: raise ServiceNotFound("AI Workspace not found.")
+        return item
+
+    def _transition(self, workspace_uuid, expected_version, from_state, to_state, operation_type):
+        current = self.get(workspace_uuid)
+        if current["version"] != expected_version:
+            raise ServiceConflict("AI_WORKSPACE_STALE", "The AI Workspace changed after it was read.", {"current": current})
+        if current["lifecycle_state"] != from_state:
+            raise ServiceConflict("AI_WORKSPACE_TRANSITION_INVALID", f"Cannot transition {current['lifecycle_state']} to {to_state}.", {"current": current})
+        operation = self._operations.begin(operation_type, OP_INITIATOR_WEB_UI,
+            entity_uuid=workspace_uuid, summary=f"AI Workspace {to_state}") if self._operations else None
+        updated = self._repo.transition(workspace_uuid, expected_version, from_state, to_state,
+                                        operation["uuid"] if operation else "", _utc_now_iso())
+        if not updated or updated["version"] == expected_version:
+            if operation: self._operations.fail(operation["uuid"], "concurrency", "AI_WORKSPACE_STALE")
+            raise ServiceConflict("AI_WORKSPACE_STALE", "The AI Workspace changed during transition.")
+        if operation: self._operations.succeed(operation["uuid"], summary=f"AI Workspace transitioned to {to_state}")
+        return updated
+
+    def close(self, workspace_uuid, expected_version):
+        return self._transition(workspace_uuid, expected_version, "Open", "Closed", "ai_workspace_close")
+
+    def archive(self, workspace_uuid, expected_version):
+        return self._transition(workspace_uuid, expected_version, "Closed", "Archived", "ai_workspace_archive")
+
+
 class BackupService:
     """Workflow owner for snapshot creation, cleanup, and rollback operations.
 

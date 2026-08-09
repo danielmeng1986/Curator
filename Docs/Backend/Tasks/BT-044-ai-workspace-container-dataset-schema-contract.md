@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-044` — Status: `Proposed`
+`BT-044` — Status: `Complete`
 
 ## Title
 
@@ -57,3 +57,10 @@ Dataset boundary without coupling it to historical `workspace_album` storage.
 
 - Schema evolution must preserve stable review fields and evidence even when
   Dataset-specific JSON changes.
+
+## Completion Record
+
+- Added the explicit `0003` Dataset/container migration and idempotent repository schema boundary.
+- Added `album_analysis` schema version 1 and independent `Open → Closed → Archived` containers.
+- Added Admin-only create/list/detail/close/archive APIs with optimistic versions and Operations.
+- Migration, service, API isolation, stale-transition, and 689 complete regression tests passed.

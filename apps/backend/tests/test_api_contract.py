@@ -778,6 +778,21 @@ class TestVersionedApiAuthorization(_TestServerBase):
         status, detail = self._get(f"/api/v1/admin/history/workspace-albums/{history_id}", admin)
         self.assertEqual(200, status); self.assertEqual("op-history", detail["data"]["item"]["archive_operation_uuid"])
 
+    def test_ai_workspace_container_is_admin_only_versioned_and_separate(self):
+        status, denied = self._get("/api/v1/ai-workspaces", self._bearer(self._issue(role="writer")))
+        self.assertEqual(403, status); self.assertEqual("AUTHORIZATION_INSUFFICIENT_SCOPE", denied["error"]["code"])
+        admin = self._bearer(self._issue(role="admin"))
+        status, created = self._post("/api/v1/ai-workspaces", {"title": "API Album Analysis"}, admin)
+        self.assertEqual(201, status); workspace = created["data"]["workspace"]
+        self.assertEqual("Open", workspace["lifecycle_state"]); self.assertEqual("album_analysis", workspace["dataset_type"])
+        status, closed = self._post(f"/api/v1/ai-workspaces/{workspace['uuid']}/close", {"expected_version": 1}, admin)
+        self.assertEqual(200, status); self.assertEqual("Closed", closed["data"]["workspace"]["lifecycle_state"])
+        status, stale = self._post(f"/api/v1/ai-workspaces/{workspace['uuid']}/archive", {"expected_version": 1}, admin)
+        self.assertEqual(409, status); self.assertEqual("AI_WORKSPACE_STALE", stale["error"]["code"])
+        status, archived = self._post(f"/api/v1/ai-workspaces/{workspace['uuid']}/archive", {"expected_version": 2}, admin)
+        self.assertEqual(200, status); self.assertEqual("Archived", archived["data"]["workspace"]["lifecycle_state"])
+        self.assertEqual(0, self._db.execute("SELECT COUNT(*) FROM workspace_album WHERE uuid=?", (workspace["uuid"],)).fetchone()[0])
+
     def test_current_principal_and_renewal_request_are_token_safe(self):
         issued = self._issue(role="writer")
         headers = self._bearer(issued)

@@ -534,7 +534,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         """Return the least privilege required by a versioned API route."""
         if path in {"/api/auth/me", "/api/auth/renewals"}:
             return "read"
-        if path in {"/api/backup", "/api/backup/cleanup", "/api/rollback"} or path.startswith("/api/backups") or path.startswith("/api/auth/") or path.startswith("/api/admin/"):
+        if path in {"/api/backup", "/api/backup/cleanup", "/api/rollback"} or path.startswith("/api/backups") or path.startswith("/api/auth/") or path.startswith("/api/admin/") or path.startswith("/api/ai-workspaces"):
             return "admin"
         return "read" if method == "GET" else "write"
 
@@ -718,6 +718,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_historical_workspace_albums(qs)
             elif re.match(r"^/api/admin/history/workspace-albums/\d+$", path):
                 self._get_historical_workspace_album(int(path.split("/")[-1]))
+            elif path == "/api/ai-workspaces":
+                self._get_ai_workspaces(qs)
+            elif re.match(r"^/api/ai-workspaces/[^/]+$", path):
+                self._get_ai_workspace(path.split("/")[-1])
             elif path == "/api/backups":
                 self._get_backups()
             elif path == "/api/operations":
@@ -884,6 +888,20 @@ class AppHandler(SimpleHTTPRequestHandler):
         item = repo.WorkspaceAlbumRepository(open_db).get_historical(wa_id)
         if item is None: raise svc.ServiceNotFound("Historical Workspace Album not found.")
         self._send_success(200, {"item": item})
+
+    def _ai_workspace_service(self):
+        return svc.AIWorkspaceService(
+            repo.AIWorkspaceRepository(open_db),
+            svc.OperationService(repo.OperationRepository(open_db)),
+        )
+
+    def _get_ai_workspaces(self, qs: dict):
+        if not self._require_admin_principal(): return
+        self._send_success(200, {"items": self._ai_workspace_service().list(qs.get("lifecycle_state", [None])[0])})
+
+    def _get_ai_workspace(self, workspace_uuid: str):
+        if not self._require_admin_principal(): return
+        self._send_success(200, {"workspace": self._ai_workspace_service().get(workspace_uuid)})
 
     def _get_backups(self):
         if not self._require_admin_principal(): return
@@ -1070,6 +1088,18 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._post_import_preview(body)
             elif path == "/api/import/execute":
                 self._post_import_execute(body)
+            elif path == "/api/ai-workspaces":
+                if not self._require_admin_principal(): return
+                created = self._ai_workspace_service().create(body.get("title", ""), self._principal.get("token_uuid"))
+                self._send_success(201, {"workspace": created})
+            elif re.match(r"^/api/ai-workspaces/[^/]+/(close|archive)$", path):
+                if not self._require_admin_principal(): return
+                parts = path.split("/"); workspace_uuid, action = parts[3], parts[4]
+                expected = body.get("expected_version")
+                if not isinstance(expected, int): raise ValueError("expected_version is required and must be an integer.")
+                service = self._ai_workspace_service()
+                updated = service.close(workspace_uuid, expected) if action == "close" else service.archive(workspace_uuid, expected)
+                self._send_success(200, {"workspace": updated})
             elif path == "/api/backup":
                 self._post_backup(body)
             elif re.match(r"^/api/backups/[^/]+/verify$", path):

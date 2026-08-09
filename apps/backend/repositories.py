@@ -1936,6 +1936,84 @@ class WorkspaceAlbumRepository:
 # ImportRepository
 # ---------------------------------------------------------------------------
 
+class AIWorkspaceRepository:
+    """Persistence for versioned AI Workspace containers, never legacy rows."""
+
+    DATASET_TYPE = "album_analysis"
+    SCHEMA_VERSION = 1
+
+    def __init__(self, db_factory): self._db = db_factory
+
+    @classmethod
+    def _ensure_schema(cls, conn) -> None:
+        conn.execute("""CREATE TABLE IF NOT EXISTS ai_dataset_schema (
+            dataset_type TEXT NOT NULL, schema_version INTEGER NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('Active','Retired')),
+            definition_json TEXT NOT NULL, created_at TEXT NOT NULL,
+            PRIMARY KEY(dataset_type,schema_version))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS ai_workspace (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
+            dataset_type TEXT NOT NULL, schema_version INTEGER NOT NULL,
+            title TEXT NOT NULL, lifecycle_state TEXT NOT NULL DEFAULT 'Open'
+                CHECK(lifecycle_state IN ('Open','Closed','Archived')),
+            created_by_token_uuid TEXT, created_at TEXT NOT NULL, closed_at TEXT,
+            archived_at TEXT, version INTEGER NOT NULL DEFAULT 1,
+            close_operation_uuid TEXT, archive_operation_uuid TEXT,
+            FOREIGN KEY(dataset_type,schema_version)
+                REFERENCES ai_dataset_schema(dataset_type,schema_version))""")
+        now = datetime.now(timezone.utc).isoformat()
+        definition = json.dumps({"dataset_type": cls.DATASET_TYPE, "schema_version": cls.SCHEMA_VERSION,
+                                 "item_type": "workspace_album_ai_worker"}, sort_keys=True)
+        conn.execute("INSERT OR IGNORE INTO ai_dataset_schema VALUES (?,?,?,?,?)",
+                     (cls.DATASET_TYPE, cls.SCHEMA_VERSION, "Active", definition, now))
+        conn.commit()
+
+    @staticmethod
+    def _norm(row) -> dict:
+        return {key: row[key] for key in (
+            "id", "uuid", "dataset_type", "schema_version", "title", "lifecycle_state",
+            "created_by_token_uuid", "created_at", "closed_at", "archived_at", "version",
+            "close_operation_uuid", "archive_operation_uuid")}
+
+    def create(self, fields: dict) -> dict:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            cur = conn.execute("""INSERT INTO ai_workspace
+                (uuid,dataset_type,schema_version,title,lifecycle_state,created_by_token_uuid,created_at)
+                VALUES (?,?,?,?, 'Open', ?,?)""", (
+                fields.get("uuid") or str(uuid.uuid4()), fields["dataset_type"],
+                fields["schema_version"], fields["title"], fields.get("created_by_token_uuid"),
+                fields["created_at"],
+            )); conn.commit()
+            row = conn.execute("SELECT * FROM ai_workspace WHERE id=?", (cur.lastrowid,)).fetchone()
+        return self._norm(row)
+
+    def get(self, workspace_uuid: str) -> dict | None:
+        with self._db() as conn:
+            self._ensure_schema(conn); row = conn.execute("SELECT * FROM ai_workspace WHERE uuid=?", (workspace_uuid,)).fetchone()
+        return self._norm(row) if row else None
+
+    def list(self, lifecycle_state: str | None = None) -> list[dict]:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            if lifecycle_state:
+                rows = conn.execute("SELECT * FROM ai_workspace WHERE lifecycle_state=? ORDER BY created_at DESC,id DESC", (lifecycle_state,)).fetchall()
+            else: rows = conn.execute("SELECT * FROM ai_workspace ORDER BY created_at DESC,id DESC").fetchall()
+        return [self._norm(row) for row in rows]
+
+    def transition(self, workspace_uuid: str, expected_version: int, from_state: str,
+                   to_state: str, operation_uuid: str, at: str) -> dict | None:
+        time_field = "closed_at" if to_state == "Closed" else "archived_at"
+        op_field = "close_operation_uuid" if to_state == "Closed" else "archive_operation_uuid"
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            cur = conn.execute(f"""UPDATE ai_workspace SET lifecycle_state=?, {time_field}=?,
+                {op_field}=?, version=version+1 WHERE uuid=? AND version=? AND lifecycle_state=?""",
+                (to_state, at, operation_uuid, workspace_uuid, expected_version, from_state))
+            conn.commit(); row = conn.execute("SELECT * FROM ai_workspace WHERE uuid=?", (workspace_uuid,)).fetchone()
+        return self._norm(row) if cur.rowcount == 1 else (self._norm(row) if row else None)
+
+
 class ImportRepository:
     """Persistence operations for the album import workflow."""
 

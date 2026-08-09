@@ -1346,6 +1346,34 @@ class TestBackupServiceCreate(unittest.TestCase):
         self.assertEqual(self.log_calls[0]["tag"], "my-tag")
 
 
+class TestAIWorkspaceContainerContract(unittest.TestCase):
+    def setUp(self):
+        self.conn = _make_db()
+        self.repo = repo.AIWorkspaceRepository(_db_factory(self.conn))
+        self.service = svc.AIWorkspaceService(self.repo)
+
+    def tearDown(self): self.conn.close()
+
+    def test_open_close_archive_are_versioned_and_terminal(self):
+        item = self.service.create("Album comparison")
+        self.assertEqual("album_analysis", item["dataset_type"]); self.assertEqual("Open", item["lifecycle_state"])
+        closed = self.service.close(item["uuid"], item["version"])
+        self.assertEqual("Closed", closed["lifecycle_state"]); self.assertEqual(2, closed["version"])
+        archived = self.service.archive(item["uuid"], closed["version"])
+        self.assertEqual("Archived", archived["lifecycle_state"]); self.assertEqual(3, archived["version"])
+        with self.assertRaises(svc.ServiceConflict): self.service.close(item["uuid"], archived["version"])
+
+    def test_stale_transition_and_unknown_dataset_filter_are_rejected(self):
+        item = self.service.create("Versioned")
+        with self.assertRaisesRegex(svc.ServiceConflict, "changed"):
+            self.service.close(item["uuid"], item["version"] + 1)
+        with self.assertRaises(ValueError): self.service.list("active")
+
+    def test_title_is_bounded(self):
+        with self.assertRaises(ValueError): self.service.create("")
+        with self.assertRaises(ValueError): self.service.create("x" * 201)
+
+
 class TestBackupAdministrationContract(unittest.TestCase):
     class Claims:
         def __init__(self): self.claimed = set()
