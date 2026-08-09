@@ -534,7 +534,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         """Return the least privilege required by a versioned API route."""
         if path in {"/api/auth/me", "/api/auth/renewals"}:
             return "read"
-        if path in {"/api/backup", "/api/backup/cleanup", "/api/rollback"} or path.startswith("/api/backups") or path.startswith("/api/auth/"):
+        if path in {"/api/backup", "/api/backup/cleanup", "/api/rollback"} or path.startswith("/api/backups") or path.startswith("/api/auth/") or path.startswith("/api/admin/"):
             return "admin"
         return "read" if method == "GET" else "write"
 
@@ -712,11 +712,12 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif re.match(r"^/api/albums/\d+$", path):
                 album_id = int(path.split("/")[-1])
                 self._get_album(album_id)
-            elif path == "/api/workspace/albums":
-                self._get_workspace_albums(qs)
-            elif re.match(r"^/api/workspace/albums/\d+$", path):
-                wa_id = int(path.split("/")[-1])
-                self._get_workspace_album(wa_id)
+            elif path == "/api/workspace/albums" or re.match(r"^/api/workspace/albums/\d+$", path):
+                self._send_error(410, "HISTORICAL_WORKSPACE_RETIRED", "The historical Workspace Album API is retired.")
+            elif path == "/api/admin/history/workspace-albums":
+                self._get_historical_workspace_albums(qs)
+            elif re.match(r"^/api/admin/history/workspace-albums/\d+$", path):
+                self._get_historical_workspace_album(int(path.split("/")[-1]))
             elif path == "/api/backups":
                 self._get_backups()
             elif path == "/api/operations":
@@ -870,6 +871,19 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_error(404, "NOT_FOUND", "Workspace album not found.")
             return
         self._send_success(200, {"album": result})
+
+    def _get_historical_workspace_albums(self, qs: dict):
+        if not self._require_admin_principal(): return
+        limit, offset = int(qs.get("limit", ["50"])[0]), int(qs.get("offset", ["0"])[0])
+        if not 1 <= limit <= 100 or offset < 0: raise ValueError("History pagination is invalid.")
+        rows, total = repo.WorkspaceAlbumRepository(open_db).search_historical(limit, offset)
+        self._send_collection(rows, limit=limit, offset=offset, total=total)
+
+    def _get_historical_workspace_album(self, wa_id: int):
+        if not self._require_admin_principal(): return
+        item = repo.WorkspaceAlbumRepository(open_db).get_historical(wa_id)
+        if item is None: raise svc.ServiceNotFound("Historical Workspace Album not found.")
+        self._send_success(200, {"item": item})
 
     def _get_backups(self):
         if not self._require_admin_principal(): return
@@ -1051,7 +1065,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 album_id = int(path.split("/")[3])
                 self._post_album_photo(album_id, body)
             elif path == "/api/workspace/albums/batch":
-                self._post_workspace_batch(body)
+                self._send_error(410, "HISTORICAL_WORKSPACE_RETIRED", "The historical Workspace Album API is retired.")
             elif path == "/api/import/preview":
                 self._post_import_preview(body)
             elif path == "/api/import/execute":
@@ -1470,8 +1484,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 photo_id = int(path.split("/")[-1])
                 self._put_photo(photo_id, body)
             elif re.match(r"^/api/workspace/albums/\d+$", path):
-                wa_id = int(path.split("/")[-1])
-                self._put_workspace_album(wa_id, body)
+                self._send_error(410, "HISTORICAL_WORKSPACE_RETIRED", "The historical Workspace Album API is retired.")
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
         except ValueError as exc:

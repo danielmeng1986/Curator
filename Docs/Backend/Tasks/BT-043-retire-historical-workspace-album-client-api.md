@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-043` — Status: `Proposed`
+`BT-043` — Status: `Complete`
 
 ## Title
 
@@ -58,3 +58,11 @@ active Workspace input while preserving explicitly authorized historical audit a
 
 - Status and entity reference-count behavior may still depend on the archived
   table internally; retiring the client API must not break referential checks.
+
+## Completion Record
+
+- Legacy Workspace Album reads and mutations now return `410
+  HISTORICAL_WORKSPACE_RETIRED` and cannot reactivate archived records.
+- Added an Admin-only, read-only history namespace with paths and raw AI data redacted.
+- Reader/Writer denial, terminal-only history, and redaction API tests passed.
+- Complete Backend regression: 684 tests passed.

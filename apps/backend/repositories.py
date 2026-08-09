@@ -1792,6 +1792,42 @@ class WorkspaceAlbumRepository:
                 normalized["linked_album"] = None
         return normalized
 
+    @staticmethod
+    def _historical_item(row: dict) -> dict:
+        """Return an Admin audit model without filesystem or raw AI fields."""
+        allowed = (
+            "id", "uuid", "status_id", "status_name", "studio_name", "album_name",
+            "primary_model", "additional_models", "remark", "belongs_to_album_id",
+            "album_id", "lifecycle_state", "archive_classification", "archive_reason",
+            "archived_at", "archive_operation_uuid",
+        )
+        return {key: row.get(key) for key in allowed}
+
+    def search_historical(self, limit: int = 50, offset: int = 0) -> tuple[list[dict], int]:
+        """List only closed/archived historical rows for Admin audit."""
+        with self._db() as conn:
+            rows = conn.execute(
+                """SELECT wa.*, s.name AS status_name FROM workspace_album wa
+                   LEFT JOIN status s ON s.id = wa.status_id
+                   WHERE wa.lifecycle_state IN ('closed', 'archived_retired')
+                   ORDER BY wa.id DESC LIMIT ? OFFSET ?""", (limit, offset),
+            ).fetchall()
+            total = conn.execute(
+                "SELECT COUNT(*) FROM workspace_album WHERE lifecycle_state IN ('closed','archived_retired')"
+            ).fetchone()[0]
+        return [self._historical_item(dict(row)) for row in rows], total
+
+    def get_historical(self, wa_id: int) -> dict | None:
+        """Return one terminal historical row, never an active/review row."""
+        with self._db() as conn:
+            row = conn.execute(
+                """SELECT wa.*, s.name AS status_name FROM workspace_album wa
+                   LEFT JOIN status s ON s.id = wa.status_id
+                   WHERE wa.id=? AND wa.lifecycle_state IN ('closed','archived_retired')""",
+                (wa_id,),
+            ).fetchone()
+        return self._historical_item(dict(row)) if row else None
+
     def update(self, wa_id: int, allowed_fields: frozenset, changes: dict) -> None:
         """Apply an allow-listed subset of changes to a single workspace album."""
         filtered = {k: v for k, v in changes.items() if k in allowed_fields}

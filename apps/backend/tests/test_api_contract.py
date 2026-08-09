@@ -380,7 +380,12 @@ CREATE TABLE IF NOT EXISTS workspace_album (
     expected_path TEXT,
     ai_result TEXT,
     belongs_to_album_id INTEGER,
-    album_id INTEGER
+    album_id INTEGER,
+    lifecycle_state TEXT NOT NULL DEFAULT 'active',
+    archive_classification TEXT,
+    archive_reason TEXT,
+    archived_at TEXT,
+    archive_operation_uuid TEXT
 );
 """
 
@@ -452,6 +457,14 @@ class _TestServerBase(unittest.TestCase):
         resp = conn.getresponse()
         body = json.loads(resp.read().decode())
         conn.close()
+        return resp.status, body
+
+    def _put(self, path: str, payload: dict, headers: dict | None = None) -> tuple[int, dict]:
+        data = json.dumps(payload).encode()
+        conn = HTTPConnection("127.0.0.1", self._port, timeout=5)
+        request_headers = {"Content-Type": "application/json"}; request_headers.update(headers or {})
+        conn.request("PUT", path, body=data, headers=request_headers)
+        resp = conn.getresponse(); body = json.loads(resp.read().decode()); conn.close()
         return resp.status, body
 
     def _delete(self, path: str) -> tuple[int, dict]:
@@ -737,6 +750,33 @@ class TestVersionedApiAuthorization(_TestServerBase):
         status, body = self._post("/api/v1/statuses", {"name": "Blocked"}, self._bearer(issued))
         self.assertEqual(status, 403)
         self.assertEqual(body["error"]["code"], "AUTHORIZATION_INSUFFICIENT_SCOPE")
+
+    def test_historical_workspace_active_client_api_is_retired(self):
+        reader, writer = self._bearer(self._issue(role="reader")), self._bearer(self._issue(role="writer"))
+        status, body = self._get("/api/v1/workspace/albums", reader)
+        self.assertEqual(410, status); self.assertEqual("HISTORICAL_WORKSPACE_RETIRED", body["error"]["code"])
+        status, body = self._put("/api/v1/workspace/albums/1", {"remark": "revive"}, writer)
+        self.assertEqual(410, status); self.assertEqual("HISTORICAL_WORKSPACE_RETIRED", body["error"]["code"])
+        status, body = self._post("/api/v1/workspace/albums/batch", {"ids": [1], "changes": {"remark": "revive"}}, writer)
+        self.assertEqual(410, status); self.assertEqual("HISTORICAL_WORKSPACE_RETIRED", body["error"]["code"])
+
+    def test_historical_workspace_audit_is_admin_only_redacted_and_terminal(self):
+        marker = self._db.execute("SELECT COUNT(*) FROM workspace_album").fetchone()[0]
+        self._db.execute("""INSERT INTO workspace_album
+            (uuid, album_name, current_path, expected_path, ai_result, lifecycle_state,
+             archive_classification, archive_operation_uuid)
+            VALUES (?, 'Historical', '/secret/source', '/secret/target', '{"raw":true}',
+                    'archived_retired', 'already_materialized', 'op-history')""", (f"history-{marker}",))
+        history_id = self._db.execute("SELECT last_insert_rowid()").fetchone()[0]; self._db.commit()
+        status, denied = self._get("/api/v1/admin/history/workspace-albums", self._bearer(self._issue(role="reader")))
+        self.assertEqual(403, status); self.assertEqual("AUTHORIZATION_INSUFFICIENT_SCOPE", denied["error"]["code"])
+        admin = self._bearer(self._issue(role="admin"))
+        status, listing = self._get("/api/v1/admin/history/workspace-albums", admin)
+        self.assertEqual(200, status); item = next(x for x in listing["data"] if x["id"] == history_id)
+        self.assertEqual("archived_retired", item["lifecycle_state"])
+        self.assertNotIn("current_path", item); self.assertNotIn("expected_path", item); self.assertNotIn("ai_result", item)
+        status, detail = self._get(f"/api/v1/admin/history/workspace-albums/{history_id}", admin)
+        self.assertEqual(200, status); self.assertEqual("op-history", detail["data"]["item"]["archive_operation_uuid"])
 
     def test_current_principal_and_renewal_request_are_token_safe(self):
         issued = self._issue(role="writer")
