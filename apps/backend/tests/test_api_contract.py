@@ -793,6 +793,25 @@ class TestVersionedApiAuthorization(_TestServerBase):
         self.assertEqual(200, status); self.assertEqual("Archived", archived["data"]["workspace"]["lifecycle_state"])
         self.assertEqual(0, self._db.execute("SELECT COUNT(*) FROM workspace_album WHERE uuid=?", (workspace["uuid"],)).fetchone()[0])
 
+    def test_ai_model_configuration_admin_mutation_writer_discovery_and_disable(self):
+        payload = {"name":"API Qwen Fast", "model_identifier":"qwen-vl", "model_repository":"ggml-org/qwen",
+            "model_file":"qwen-q4.gguf", "vision_prompt_version":"vision-v1", "writer_prompt_version":"writer-v1",
+            "sample_count":8, "context_size":4096, "threads":8, "gpu_layers":40, "max_tokens":800,
+            "temperature":0.2, "image_max_tokens":384, "additional_parameters":{"batch_size":128}}
+        writer = self._bearer(self._issue(role="writer")); admin = self._bearer(self._issue(role="admin"))
+        status, denied = self._post("/api/v1/ai-model-configurations", payload, writer)
+        self.assertEqual(403, status); self.assertEqual("AUTHORIZATION_ADMIN_REQUIRED", denied["error"]["code"])
+        status, created = self._post("/api/v1/ai-model-configurations", payload, admin)
+        self.assertEqual(201, status); item = created["data"]["configuration"]
+        status, visible = self._get("/api/v1/ai-model-configurations", writer)
+        self.assertEqual(200, status); self.assertTrue(any(x["uuid"] == item["uuid"] for x in visible["data"]["items"]))
+        status, updated = self._put(f"/api/v1/ai-model-configurations/{item['uuid']}", {"expected_version":1,"temperature":0.4}, admin)
+        self.assertEqual(200, status); self.assertEqual(0.4, updated["data"]["configuration"]["temperature"])
+        status, disabled = self._post(f"/api/v1/ai-model-configurations/{item['uuid']}/disable", {"expected_version":2}, admin)
+        self.assertEqual(200, status); self.assertFalse(disabled["data"]["configuration"]["enabled"])
+        status, hidden = self._get(f"/api/v1/ai-model-configurations/{item['uuid']}", writer)
+        self.assertEqual(404, status); self.assertEqual("NOT_FOUND", hidden["error"]["code"])
+
     def test_current_principal_and_renewal_request_are_token_safe(self):
         issued = self._issue(role="writer")
         headers = self._bearer(issued)

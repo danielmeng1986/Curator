@@ -83,3 +83,11 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
                 row = conn.execute("SELECT dataset_type,schema_version,lifecycle_state,version FROM ai_workspace").fetchone()
                 self.assertEqual([], conn.execute("PRAGMA foreign_key_check").fetchall())
             self.assertEqual(("album_analysis", 1, "Open", 1), row)
+
+    def test_0004_model_configuration_is_repeatable_and_has_no_host_path_column(self):
+        sql = (Path(__file__).parents[1] / "migrations" / "0004_ai_model_configuration.sql").read_text()
+        with sqlite3.connect(":memory:") as conn:
+            conn.executescript(sql); conn.executescript(sql)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(ai_model_configuration)")}
+        self.assertIn("context_size", columns); self.assertIn("model_file", columns)
+        self.assertNotIn("cli_path", columns); self.assertNotIn("model_path", columns)

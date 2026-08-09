@@ -1346,6 +1346,36 @@ class TestBackupServiceCreate(unittest.TestCase):
         self.assertEqual(self.log_calls[0]["tag"], "my-tag")
 
 
+class TestAIModelConfigurationContract(unittest.TestCase):
+    def setUp(self):
+        self.conn = _make_db(); self.repo = repo.AIModelConfigurationRepository(_db_factory(self.conn))
+        self.service = svc.AIModelConfigurationService(self.repo)
+        self.fields = {"name":"Qwen Vision Fast", "model_identifier":"qwen-vl-3b",
+            "model_repository":"ggml-org/Qwen2.5-VL-3B-Instruct-GGUF", "model_file":"Qwen-Q4.gguf",
+            "vision_prompt_version":"vision-v1", "writer_prompt_version":"writer-v1",
+            "sample_count":8, "context_size":4096, "threads":8, "gpu_layers":99,
+            "max_tokens":800, "temperature":0.2, "image_max_tokens":384,
+            "additional_parameters":{"batch_size":256}}
+    def tearDown(self): self.conn.close()
+
+    def test_configuration_is_portable_versioned_and_snapshotted(self):
+        item = self.service.create(self.fields); snapshot = self.service.snapshot(item["uuid"])
+        updated = self.service.update(item["uuid"], 1, {"temperature":0.4})
+        self.assertEqual(2, updated["version"]); self.assertEqual(0.2, snapshot["temperature"])
+        self.assertNotIn("created_at", snapshot); self.assertEqual("llama_cpp", snapshot["provider_type"])
+
+    def test_disabled_configuration_is_hidden_from_writer(self):
+        item = self.service.create(self.fields); disabled = self.service.set_enabled(item["uuid"], 1, False)
+        self.assertFalse(disabled["enabled"]); self.assertEqual([], self.service.list(admin=False))
+        self.assertEqual(1, len(self.service.list(admin=True)))
+        with self.assertRaises(svc.ServiceNotFound): self.service.snapshot(item["uuid"])
+
+    def test_paths_secrets_and_unbounded_parameters_are_rejected(self):
+        for changes in ({"model_file":"C:\\models\\qwen.gguf"},
+                        {"additional_parameters":{"api_token":"secret"}}, {"sample_count":33}):
+            with self.assertRaises(ValueError): self.service.create({**self.fields, **changes})
+
+
 class TestAIWorkspaceContainerContract(unittest.TestCase):
     def setUp(self):
         self.conn = _make_db()

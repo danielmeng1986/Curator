@@ -2014,6 +2014,74 @@ class AIWorkspaceRepository:
         return self._norm(row) if cur.rowcount == 1 else (self._norm(row) if row else None)
 
 
+class AIModelConfigurationRepository:
+    """Portable llama.cpp configuration persistence with versioned updates."""
+
+    FIELDS = ("name", "provider_type", "model_identifier", "model_repository", "model_file",
+              "vision_prompt_version", "writer_prompt_version", "sample_count", "context_size",
+              "threads", "gpu_layers", "max_tokens", "temperature", "image_max_tokens",
+              "additional_parameters_json")
+
+    def __init__(self, db_factory): self._db = db_factory
+
+    @staticmethod
+    def _ensure_schema(conn):
+        conn.execute("""CREATE TABLE IF NOT EXISTS ai_model_configuration (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL UNIQUE, provider_type TEXT NOT NULL CHECK(provider_type='llama_cpp'),
+            model_identifier TEXT NOT NULL, model_repository TEXT, model_file TEXT NOT NULL,
+            vision_prompt_version TEXT NOT NULL, writer_prompt_version TEXT NOT NULL,
+            sample_count INTEGER NOT NULL, context_size INTEGER NOT NULL, threads INTEGER NOT NULL,
+            gpu_layers INTEGER NOT NULL, max_tokens INTEGER NOT NULL, temperature REAL NOT NULL,
+            image_max_tokens INTEGER NOT NULL, additional_parameters_json TEXT NOT NULL DEFAULT '{}',
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)), version INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"""); conn.commit()
+
+    @staticmethod
+    def _norm(row):
+        item = dict(row); item["enabled"] = bool(item["enabled"])
+        item["additional_parameters"] = json.loads(item.pop("additional_parameters_json") or "{}")
+        return item
+
+    def create(self, fields):
+        now, config_uuid = fields["updated_at"], str(uuid.uuid4())
+        columns = ",".join(self.FIELDS); placeholders = ",".join("?" for _ in self.FIELDS)
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            cur = conn.execute(f"INSERT INTO ai_model_configuration (uuid,{columns},enabled,version,created_at,updated_at) VALUES (?,{placeholders},1,1,?,?)",
+                [config_uuid] + [fields[key] for key in self.FIELDS] + [now, now]); conn.commit()
+            row = conn.execute("SELECT * FROM ai_model_configuration WHERE id=?", (cur.lastrowid,)).fetchone()
+        return self._norm(row)
+
+    def get(self, config_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn); row = conn.execute("SELECT * FROM ai_model_configuration WHERE uuid=?", (config_uuid,)).fetchone()
+        return self._norm(row) if row else None
+
+    def list(self, enabled_only=False):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute("SELECT * FROM ai_model_configuration WHERE enabled=1 ORDER BY name" if enabled_only else "SELECT * FROM ai_model_configuration ORDER BY name").fetchall()
+        return [self._norm(row) for row in rows]
+
+    def update(self, config_uuid, expected_version, fields):
+        assignments = ",".join(f"{key}=?" for key in self.FIELDS)
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            cur = conn.execute(f"UPDATE ai_model_configuration SET {assignments},version=version+1,updated_at=? WHERE uuid=? AND version=?",
+                [fields[key] for key in self.FIELDS] + [fields["updated_at"], config_uuid, expected_version]); conn.commit()
+            row = conn.execute("SELECT * FROM ai_model_configuration WHERE uuid=?", (config_uuid,)).fetchone()
+        return self._norm(row) if cur.rowcount == 1 else None
+
+    def set_enabled(self, config_uuid, expected_version, enabled, updated_at):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            cur = conn.execute("UPDATE ai_model_configuration SET enabled=?,version=version+1,updated_at=? WHERE uuid=? AND version=?",
+                (int(enabled), updated_at, config_uuid, expected_version)); conn.commit()
+            row = conn.execute("SELECT * FROM ai_model_configuration WHERE uuid=?", (config_uuid,)).fetchone()
+        return self._norm(row) if cur.rowcount == 1 else None
+
+
 class ImportRepository:
     """Persistence operations for the album import workflow."""
 

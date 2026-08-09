@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-045` — Status: `Proposed`
+`BT-045` — Status: `Complete`
 
 ## Title
 
@@ -59,3 +59,10 @@ keeping host-local executable/model paths outside portable Backend data.
 
 - Prompt text versus prompt-version storage must be resolved by UI-011A; every
   result must remain reproducible enough to compare quality and runtime.
+
+## Completion Record
+
+- Added the explicit `0004` migration and portable llama.cpp configuration repository/service.
+- Added Admin create/update/enable-disable and Writer enabled-only discovery APIs.
+- Enforced benchmark-derived parameter bounds and rejected absolute paths or secret-like extras.
+- Verified immutable snapshots across later updates; 694 complete regression tests passed.

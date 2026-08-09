@@ -722,6 +722,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_ai_workspaces(qs)
             elif re.match(r"^/api/ai-workspaces/[^/]+$", path):
                 self._get_ai_workspace(path.split("/")[-1])
+            elif path == "/api/ai-model-configurations":
+                self._get_ai_model_configurations()
+            elif re.match(r"^/api/ai-model-configurations/[^/]+$", path):
+                self._get_ai_model_configuration(path.split("/")[-1])
             elif path == "/api/backups":
                 self._get_backups()
             elif path == "/api/operations":
@@ -750,6 +754,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
         except ValueError as exc:
             self._send_error(400, "REQUEST_INVALID", str(exc))
+        except svc.ServiceNotFound as exc:
+            self._send_error(404, "NOT_FOUND", str(exc))
         except Exception:
             self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 
@@ -902,6 +908,20 @@ class AppHandler(SimpleHTTPRequestHandler):
     def _get_ai_workspace(self, workspace_uuid: str):
         if not self._require_admin_principal(): return
         self._send_success(200, {"workspace": self._ai_workspace_service().get(workspace_uuid)})
+
+    def _ai_model_configuration_service(self):
+        return svc.AIModelConfigurationService(
+            repo.AIModelConfigurationRepository(open_db),
+            svc.OperationService(repo.OperationRepository(open_db)),
+        )
+
+    def _get_ai_model_configurations(self):
+        is_admin = self._principal["role"] == "admin"
+        self._send_success(200, {"items": self._ai_model_configuration_service().list(admin=is_admin)})
+
+    def _get_ai_model_configuration(self, config_uuid):
+        is_admin = self._principal["role"] == "admin"
+        self._send_success(200, {"configuration": self._ai_model_configuration_service().get(config_uuid, admin=is_admin)})
 
     def _get_backups(self):
         if not self._require_admin_principal(): return
@@ -1092,6 +1112,15 @@ class AppHandler(SimpleHTTPRequestHandler):
                 if not self._require_admin_principal(): return
                 created = self._ai_workspace_service().create(body.get("title", ""), self._principal.get("token_uuid"))
                 self._send_success(201, {"workspace": created})
+            elif path == "/api/ai-model-configurations":
+                if not self._require_admin_principal(): return
+                self._send_success(201, {"configuration": self._ai_model_configuration_service().create(body)})
+            elif re.match(r"^/api/ai-model-configurations/[^/]+/(enable|disable)$", path):
+                if not self._require_admin_principal(): return
+                parts = path.split("/"); expected = body.get("expected_version")
+                if not isinstance(expected, int): raise ValueError("expected_version is required and must be an integer.")
+                updated = self._ai_model_configuration_service().set_enabled(parts[3], expected, parts[4] == "enable")
+                self._send_success(200, {"configuration": updated})
             elif re.match(r"^/api/ai-workspaces/[^/]+/(close|archive)$", path):
                 if not self._require_admin_principal(): return
                 parts = path.split("/"); workspace_uuid, action = parts[3], parts[4]
@@ -1515,6 +1544,12 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._put_photo(photo_id, body)
             elif re.match(r"^/api/workspace/albums/\d+$", path):
                 self._send_error(410, "HISTORICAL_WORKSPACE_RETIRED", "The historical Workspace Album API is retired.")
+            elif re.match(r"^/api/ai-model-configurations/[^/]+$", path):
+                if not self._require_admin_principal(): return
+                expected = body.get("expected_version")
+                if not isinstance(expected, int): raise ValueError("expected_version is required and must be an integer.")
+                changes = {key: value for key, value in body.items() if key != "expected_version"}
+                self._send_success(200, {"configuration": self._ai_model_configuration_service().update(path.split("/")[-1], expected, changes)})
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
         except ValueError as exc:

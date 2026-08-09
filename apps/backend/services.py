@@ -1744,6 +1744,81 @@ def is_retention_eligible(
     return age_days >= retain_days
 
 
+class AIModelConfigurationService:
+    """Validate and manage portable llama.cpp execution configurations."""
+
+    REQUIRED = ("name", "model_identifier", "model_file", "vision_prompt_version", "writer_prompt_version",
+                "sample_count", "context_size", "threads", "gpu_layers", "max_tokens", "temperature", "image_max_tokens")
+
+    def __init__(self, config_repo, operation_service=None):
+        self._repo, self._operations = config_repo, operation_service
+
+    def _validated(self, fields):
+        for key in self.REQUIRED:
+            if fields.get(key) in (None, ""): raise ValueError(f"{key} is required.")
+        text_limits = {"name": 120, "model_identifier": 200, "model_repository": 300, "model_file": 300,
+                       "vision_prompt_version": 100, "writer_prompt_version": 100}
+        for key, limit in text_limits.items():
+            value = str(fields.get(key) or "").strip()
+            if len(value) > limit: raise ValueError(f"{key} is too long.")
+            if key in {"model_file", "model_repository"} and (value.startswith(("/", "\\")) or ":\\" in value):
+                raise ValueError(f"{key} must be portable and cannot be an absolute path.")
+            fields[key] = value or None
+        bounds = {"sample_count": (1,32), "context_size": (512,262144), "threads": (1,256),
+                  "gpu_layers": (0,999), "max_tokens": (1,32768), "temperature": (0,2),
+                  "image_max_tokens": (1,8192)}
+        for key, (low, high) in bounds.items():
+            value = fields[key]
+            if isinstance(value, bool) or not isinstance(value, (int,float)) or not low <= value <= high:
+                raise ValueError(f"{key} must be between {low} and {high}.")
+        extra = fields.get("additional_parameters", {})
+        if not isinstance(extra, dict) or len(json.dumps(extra)) > 4000: raise ValueError("additional_parameters must be a bounded object.")
+        forbidden = ("path", "token", "secret", "password", "cli", "executable")
+        if any(any(word in str(key).lower() for word in forbidden) for key in extra):
+            raise ValueError("additional_parameters contains a host path or secret field.")
+        fields["provider_type"] = "llama_cpp"; fields["additional_parameters_json"] = json.dumps(extra, sort_keys=True)
+        fields["updated_at"] = _utc_now_iso()
+        return fields
+
+    def create(self, fields):
+        item = self._repo.create(self._validated(dict(fields)))
+        self._record("ai_model_configuration_create", item, "AI model configuration created")
+        return item
+
+    def list(self, admin=False): return self._repo.list(enabled_only=not admin)
+
+    def get(self, config_uuid, admin=False):
+        item = self._repo.get(config_uuid)
+        if not item or (not admin and not item["enabled"]): raise ServiceNotFound("AI model configuration not found.")
+        return item
+
+    def update(self, config_uuid, expected_version, fields):
+        current = self.get(config_uuid, admin=True)
+        if current["version"] != expected_version: raise ServiceConflict("AI_MODEL_CONFIGURATION_STALE", "The configuration changed after it was read.")
+        merged = {key: current.get(key) for key in self.REQUIRED + ("model_repository",)}
+        merged["additional_parameters"] = current["additional_parameters"]; merged.update(fields)
+        updated = self._repo.update(config_uuid, expected_version, self._validated(merged))
+        if not updated: raise ServiceConflict("AI_MODEL_CONFIGURATION_STALE", "The configuration changed during update.")
+        self._record("ai_model_configuration_update", updated, "AI model configuration updated"); return updated
+
+    def set_enabled(self, config_uuid, expected_version, enabled):
+        current = self.get(config_uuid, admin=True)
+        if current["version"] != expected_version: raise ServiceConflict("AI_MODEL_CONFIGURATION_STALE", "The configuration changed after it was read.")
+        updated = self._repo.set_enabled(config_uuid, expected_version, enabled, _utc_now_iso())
+        if not updated: raise ServiceConflict("AI_MODEL_CONFIGURATION_STALE", "The configuration changed during update.")
+        self._record("ai_model_configuration_enable" if enabled else "ai_model_configuration_disable", updated, "AI model configuration availability changed")
+        return updated
+
+    def snapshot(self, config_uuid):
+        item = self.get(config_uuid)
+        return {key: value for key, value in item.items() if key not in {"id", "created_at", "updated_at"}}
+
+    def _record(self, operation_type, item, summary):
+        if self._operations:
+            op = self._operations.begin(operation_type, OP_INITIATOR_WEB_UI, entity_uuid=item["uuid"], summary=summary)
+            self._operations.succeed(op["uuid"], summary=summary)
+
+
 class AIWorkspaceService:
     """Own the Dataset-independent AI Workspace container lifecycle."""
 
