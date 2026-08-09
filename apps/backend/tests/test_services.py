@@ -1346,6 +1346,48 @@ class TestBackupServiceCreate(unittest.TestCase):
         self.assertEqual(self.log_calls[0]["tag"], "my-tag")
 
 
+class TestAIWorkItemClaimContract(unittest.TestCase):
+    def setUp(self):
+        self.conn = _make_db(); self.now = datetime(2026,8,9,tzinfo=timezone.utc)
+        self.workspace_repo = repo.AIWorkspaceRepository(_db_factory(self.conn))
+        self.workspace = svc.AIWorkspaceService(self.workspace_repo).create("Worker Queue")
+        self.conn.execute("INSERT INTO album (uuid,title,path) VALUES ('ai-album','AI Album','Studio/AI Album')"); self.conn.commit()
+        self.album_id = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        config_repo = repo.AIModelConfigurationRepository(_db_factory(self.conn)); config_service = svc.AIModelConfigurationService(config_repo)
+        self.config = config_service.create({"name":"Work Config","model_identifier":"qwen","model_file":"qwen.gguf",
+            "vision_prompt_version":"v1","writer_prompt_version":"w1","sample_count":8,"context_size":4096,
+            "threads":8,"gpu_layers":40,"max_tokens":800,"temperature":0.2,"image_max_tokens":384})
+        self.service = svc.AIWorkItemService(repo.AIWorkItemRepository(_db_factory(self.conn)), self.workspace_repo,
+            repo.AlbumRepository(_db_factory(self.conn)), config_service, now_fn=lambda:self.now)
+    def tearDown(self): self.conn.close()
+
+    def test_claim_failure_retry_and_second_attempt_preserve_history(self):
+        item = self.service.create(self.workspace["uuid"], self.album_id, self.config["uuid"])
+        claimed = self.service.claim_next("worker-one", 60); self.assertEqual(item["uuid"], claimed["uuid"])
+        with self.assertRaises(svc.ServiceConflict): self.service.heartbeat(item["uuid"], "worker-two", 60)
+        failed = self.service.fail(item["uuid"], "worker-one", "MODEL_TIMEOUT", "Model timed out")
+        retried = self.service.retry(item["uuid"], failed["version"]); self.assertEqual("Pending", retried["run_state"])
+        second = self.service.claim_next("worker-two", 60); self.assertEqual(2, second["attempt_count"])
+        attempts = self.service.get(item["uuid"], include_attempts=True)["attempts"]
+        self.assertEqual(["Failed", None], [x["outcome"] for x in attempts])
+
+    def test_expired_lease_is_atomically_reclaimed_and_recorded(self):
+        item = self.service.create(self.workspace["uuid"], self.album_id, self.config["uuid"])
+        self.service.claim_next("worker-one", 60); self.now += timedelta(seconds=61)
+        reclaimed = self.service.claim_next("worker-two", 60); self.assertEqual(item["uuid"], reclaimed["uuid"])
+        self.assertEqual("LeaseExpired", self.service.get(item["uuid"], True)["attempts"][0]["outcome"])
+
+    def test_closed_workspace_and_disabled_config_cannot_queue(self):
+        closed = svc.AIWorkspaceService(self.workspace_repo).close(self.workspace["uuid"], 1)
+        with self.assertRaises(svc.ServiceConflict): self.service.create(closed["uuid"], self.album_id, self.config["uuid"])
+
+    def test_disabled_configuration_cannot_queue_in_open_workspace(self):
+        config_service = self.service._configs
+        config_service.set_enabled(self.config["uuid"], 1, False)
+        with self.assertRaises(svc.ServiceNotFound):
+            self.service.create(self.workspace["uuid"], self.album_id, self.config["uuid"])
+
+
 class TestAIModelConfigurationContract(unittest.TestCase):
     def setUp(self):
         self.conn = _make_db(); self.repo = repo.AIModelConfigurationRepository(_db_factory(self.conn))

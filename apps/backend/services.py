@@ -1819,6 +1819,78 @@ class AIModelConfigurationService:
             self._operations.succeed(op["uuid"], summary=summary)
 
 
+class AIWorkItemService:
+    """Own Album AI queue creation, Worker leases, failures, cancellation and retry."""
+
+    def __init__(self, item_repo, workspace_repo, album_repo, configuration_service, operation_service=None, now_fn=None):
+        self._repo, self._workspaces, self._albums = item_repo, workspace_repo, album_repo
+        self._configs, self._operations = configuration_service, operation_service
+        self._now = now_fn or (lambda: datetime.now(timezone.utc))
+
+    def create(self, workspace_uuid, album_id, configuration_uuid):
+        workspace = self._workspaces.get(workspace_uuid)
+        if not workspace: raise ServiceNotFound("AI Workspace not found.")
+        if workspace["lifecycle_state"] != "Open": raise ServiceConflict("AI_WORKSPACE_NOT_OPEN", "New Work Items require an Open AI Workspace.")
+        if not isinstance(album_id, int) or not self._albums.get_by_id(album_id): raise ServiceNotFound("Album not found.")
+        snapshot = self._configs.snapshot(configuration_uuid)
+        item = self._repo.create({"workspace_uuid":workspace_uuid, "album_id":album_id,
+            "ai_model_configuration_uuid":configuration_uuid,
+            "configuration_snapshot_json":json.dumps(snapshot, sort_keys=True), "created_at":self._now().isoformat()})
+        self._record("ai_work_item_create", item, "Album AI Work Item queued"); return item
+
+    def list(self, workspace_uuid):
+        if not self._workspaces.get(workspace_uuid): raise ServiceNotFound("AI Workspace not found.")
+        return self._repo.list(workspace_uuid)
+
+    def get(self, item_uuid, include_attempts=False):
+        item = self._repo.get(item_uuid)
+        if not item: raise ServiceNotFound("AI Work Item not found.")
+        if include_attempts: item["attempts"] = self._repo.attempts(item_uuid)
+        return item
+
+    def claim_next(self, worker_token_uuid, lease_seconds=300):
+        if not isinstance(lease_seconds, int) or not 60 <= lease_seconds <= 3600:
+            raise ValueError("lease_seconds must be an integer from 60 to 3600.")
+        now = self._now(); item = self._repo.claim_next(worker_token_uuid, now.isoformat(),
+            (now + timedelta(seconds=lease_seconds)).isoformat())
+        if item: self._record("ai_work_item_claim", item, f"AI Worker claimed attempt {item['attempt_count']}", OP_INITIATOR_AI_WORKER)
+        return item
+
+    def heartbeat(self, item_uuid, worker_token_uuid, lease_seconds=300):
+        if not isinstance(lease_seconds, int) or not 60 <= lease_seconds <= 3600: raise ValueError("lease_seconds must be an integer from 60 to 3600.")
+        now = self._now(); item = self._repo.heartbeat(item_uuid, worker_token_uuid, now.isoformat(),
+            (now + timedelta(seconds=lease_seconds)).isoformat())
+        if not item: raise ServiceConflict("AI_WORK_ITEM_CLAIM_INVALID", "The Worker does not own an active lease.")
+        return item
+
+    def fail(self, item_uuid, worker_token_uuid, error_code, message):
+        if not re.fullmatch(r"[A-Z0-9_]{2,80}", str(error_code or "")): raise ValueError("error_code is invalid.")
+        message = str(message or "").strip()
+        if not message or len(message) > 1000: raise ValueError("error message must contain 1 to 1000 characters.")
+        item = self._repo.fail(item_uuid, worker_token_uuid, self._now().isoformat(), error_code, message)
+        if not item: raise ServiceConflict("AI_WORK_ITEM_CLAIM_INVALID", "The Worker does not own the claimed Item.")
+        self._record("ai_work_item_fail", item, f"AI Work Item failed: {error_code}", OP_INITIATOR_AI_WORKER); return item
+
+    def retry(self, item_uuid, expected_version):
+        return self._admin_transition(item_uuid, expected_version, ("Failed",), "Pending", "ai_work_item_retry")
+
+    def cancel(self, item_uuid, expected_version):
+        return self._admin_transition(item_uuid, expected_version, ("Pending","Failed"), "Cancelled", "ai_work_item_cancel")
+
+    def _admin_transition(self, item_uuid, expected_version, from_states, to_state, op_type):
+        current = self.get(item_uuid)
+        if current["version"] != expected_version or current["run_state"] not in from_states:
+            raise ServiceConflict("AI_WORK_ITEM_STALE", "The Work Item state or version changed.", {"current":current})
+        updated = self._repo.admin_transition(item_uuid, expected_version, from_states, to_state, self._now().isoformat())
+        if not updated: raise ServiceConflict("AI_WORK_ITEM_STALE", "The Work Item changed during transition.")
+        self._record(op_type, updated, f"AI Work Item transitioned to {to_state}"); return updated
+
+    def _record(self, operation_type, item, summary, initiator=None):
+        if self._operations:
+            op = self._operations.begin(operation_type, initiator or "WebUI", entity_uuid=item["uuid"], summary=summary)
+            self._operations.succeed(op["uuid"], summary=summary)
+
+
 class AIWorkspaceService:
     """Own the Dataset-independent AI Workspace container lifecycle."""
 

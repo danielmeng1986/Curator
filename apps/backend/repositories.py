@@ -2082,6 +2082,113 @@ class AIModelConfigurationRepository:
         return self._norm(row) if cur.rowcount == 1 else None
 
 
+class AIWorkItemRepository:
+    """Durable Album AI queue with atomic Worker leases and attempt history."""
+
+    def __init__(self, db_factory): self._db = db_factory
+
+    @staticmethod
+    def _ensure_schema(conn):
+        AIWorkspaceRepository._ensure_schema(conn); AIModelConfigurationRepository._ensure_schema(conn)
+        conn.execute("""CREATE TABLE IF NOT EXISTS workspace_album_ai_worker (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
+            workspace_uuid TEXT NOT NULL, album_id INTEGER NOT NULL,
+            ai_model_configuration_uuid TEXT NOT NULL, configuration_snapshot_json TEXT NOT NULL,
+            run_state TEXT NOT NULL DEFAULT 'Pending' CHECK(run_state IN ('Pending','Claimed','Failed','Cancelled','Completed')),
+            attempt_count INTEGER NOT NULL DEFAULT 0, claimed_by_token_uuid TEXT,
+            lease_expires_at TEXT, last_error TEXT, version INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            FOREIGN KEY(workspace_uuid) REFERENCES ai_workspace(uuid), FOREIGN KEY(album_id) REFERENCES album(id),
+            FOREIGN KEY(ai_model_configuration_uuid) REFERENCES ai_model_configuration(uuid))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS ai_work_item_attempt (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, work_item_uuid TEXT NOT NULL,
+            attempt_number INTEGER NOT NULL, worker_token_uuid TEXT NOT NULL,
+            claimed_at TEXT NOT NULL, lease_expires_at TEXT NOT NULL, ended_at TEXT,
+            outcome TEXT, error_code TEXT, error_message TEXT,
+            UNIQUE(work_item_uuid,attempt_number), FOREIGN KEY(work_item_uuid) REFERENCES workspace_album_ai_worker(uuid))"""); conn.commit()
+
+    @staticmethod
+    def _norm(row):
+        item = dict(row); item["configuration_snapshot"] = json.loads(item.pop("configuration_snapshot_json")); return item
+
+    def create(self, fields):
+        item_uuid = str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            cur = conn.execute("""INSERT INTO workspace_album_ai_worker
+                (uuid,workspace_uuid,album_id,ai_model_configuration_uuid,configuration_snapshot_json,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?)""", (item_uuid, fields["workspace_uuid"], fields["album_id"],
+                fields["ai_model_configuration_uuid"], fields["configuration_snapshot_json"], fields["created_at"], fields["created_at"]))
+            conn.commit(); row = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE id=?", (cur.lastrowid,)).fetchone()
+        return self._norm(row)
+
+    def get(self, item_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn); row = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?", (item_uuid,)).fetchone()
+        return self._norm(row) if row else None
+
+    def list(self, workspace_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn); rows = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE workspace_uuid=? ORDER BY created_at DESC,id DESC", (workspace_uuid,)).fetchall()
+        return [self._norm(row) for row in rows]
+
+    def claim_next(self, worker_token_uuid, now, lease_expires_at):
+        with self._db() as conn:
+            self._ensure_schema(conn); conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("""SELECT i.* FROM workspace_album_ai_worker i JOIN ai_workspace w ON w.uuid=i.workspace_uuid
+                WHERE w.lifecycle_state='Open' AND (i.run_state='Pending' OR (i.run_state='Claimed' AND i.lease_expires_at<=?))
+                ORDER BY i.created_at,i.id LIMIT 1""", (now,)).fetchone()
+            if not row: conn.commit(); return None
+            item_uuid, attempt = row["uuid"], row["attempt_count"] + 1
+            conn.execute("""UPDATE ai_work_item_attempt SET ended_at=?,outcome='LeaseExpired',error_code='LEASE_EXPIRED'
+                WHERE work_item_uuid=? AND ended_at IS NULL""", (now, item_uuid))
+            conn.execute("""UPDATE workspace_album_ai_worker SET run_state='Claimed',attempt_count=?,claimed_by_token_uuid=?,
+                lease_expires_at=?,last_error=NULL,version=version+1,updated_at=? WHERE uuid=?""",
+                (attempt, worker_token_uuid, lease_expires_at, now, item_uuid))
+            conn.execute("INSERT INTO ai_work_item_attempt (work_item_uuid,attempt_number,worker_token_uuid,claimed_at,lease_expires_at) VALUES (?,?,?,?,?)",
+                (item_uuid, attempt, worker_token_uuid, now, lease_expires_at)); conn.commit()
+            claimed = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?", (item_uuid,)).fetchone()
+        return self._norm(claimed)
+
+    def heartbeat(self, item_uuid, worker_token_uuid, now, lease_expires_at):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            cur = conn.execute("""UPDATE workspace_album_ai_worker SET lease_expires_at=?,updated_at=?,version=version+1
+                WHERE uuid=? AND run_state='Claimed' AND claimed_by_token_uuid=? AND lease_expires_at>?""",
+                (lease_expires_at, now, item_uuid, worker_token_uuid, now))
+            if cur.rowcount:
+                conn.execute("UPDATE ai_work_item_attempt SET lease_expires_at=? WHERE work_item_uuid=? AND ended_at IS NULL",
+                             (lease_expires_at, item_uuid))
+            conn.commit(); row = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?", (item_uuid,)).fetchone()
+        return self._norm(row) if cur.rowcount else None
+
+    def fail(self, item_uuid, worker_token_uuid, now, error_code, message):
+        with self._db() as conn:
+            self._ensure_schema(conn); conn.execute("BEGIN IMMEDIATE")
+            cur = conn.execute("""UPDATE workspace_album_ai_worker SET run_state='Failed',lease_expires_at=NULL,
+                last_error=?,version=version+1,updated_at=? WHERE uuid=? AND run_state='Claimed' AND claimed_by_token_uuid=?""",
+                (message, now, item_uuid, worker_token_uuid))
+            if cur.rowcount: conn.execute("""UPDATE ai_work_item_attempt SET ended_at=?,outcome='Failed',error_code=?,error_message=?
+                WHERE work_item_uuid=? AND ended_at IS NULL""", (now,error_code,message,item_uuid))
+            conn.commit(); row = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?", (item_uuid,)).fetchone()
+        return self._norm(row) if cur.rowcount else None
+
+    def admin_transition(self, item_uuid, expected_version, from_states, to_state, now):
+        placeholders = ",".join("?" for _ in from_states)
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            cur = conn.execute(f"""UPDATE workspace_album_ai_worker SET run_state=?,claimed_by_token_uuid=NULL,
+                lease_expires_at=NULL,version=version+1,updated_at=? WHERE uuid=? AND version=? AND run_state IN ({placeholders})""",
+                [to_state,now,item_uuid,expected_version,*from_states]); conn.commit()
+            row = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?", (item_uuid,)).fetchone()
+        return self._norm(row) if cur.rowcount else None
+
+    def attempts(self, item_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn); rows = conn.execute("SELECT * FROM ai_work_item_attempt WHERE work_item_uuid=? ORDER BY attempt_number", (item_uuid,)).fetchall()
+        return [dict(row) for row in rows]
+
+
 class ImportRepository:
     """Persistence operations for the album import workflow."""
 

@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-046` — Status: `Proposed`
+`BT-046` — Status: `Complete`
 
 ## Title
 
@@ -24,7 +24,9 @@ run and provide safe queue, claim, lease, retry, and failure semantics.
 - Item identity, Workspace/Album/configuration links, configuration snapshot,
   run state, attempt, Worker Token identity, lease, timestamps, version, and evidence links.
 - Multiple configurations and runs for the same Album.
-- Writer claim/heartbeat/complete-or-fail commands with atomic ownership.
+- Writer claim/heartbeat/fail commands with atomic ownership. Successful
+  completion is reserved for BT-049 so validated result submission and the
+  terminal state change occur atomically.
 - Admin creation/cancellation/retry and truthful Operation/Issue evidence.
 
 ## Out of Scope
@@ -58,3 +60,20 @@ run and provide safe queue, claim, lease, retry, and failure semantics.
 
 - Human review concurrency is deferred, but Worker duplicate execution must be
   prevented in the first implementation.
+
+## Completion Record
+
+- Added migration `0005_album_ai_work_item.sql` with durable Work Items,
+  bounded leases, optimistic versions, and separate per-attempt history.
+- Added Admin queue/retry/cancel APIs and Writer-only claim/heartbeat/fail APIs.
+  Claim and lease-expiry recovery are atomic, and ownership is enforced for
+  every Worker mutation.
+- Captured the selected model configuration snapshot on every Item so later
+  configuration edits cannot change the meaning of an existing run.
+- Extended the remote AI Worker client to use the authenticated REST contract;
+  it does not receive database access.
+- Kept successful completion out of this task intentionally: BT-049 will bind
+  schema-validated two-stage results and the `Completed` transition in one
+  transaction.
+- Verification: focused repository/service/API/Worker tests passed; the full
+  backend regression passed all 700 tests.

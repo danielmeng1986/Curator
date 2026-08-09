@@ -91,3 +91,13 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
             columns = {row[1] for row in conn.execute("PRAGMA table_info(ai_model_configuration)")}
         self.assertIn("context_size", columns); self.assertIn("model_file", columns)
         self.assertNotIn("cli_path", columns); self.assertNotIn("model_path", columns)
+
+    def test_0005_work_item_attempt_history_is_separate_from_current_state(self):
+        root = Path(__file__).parents[1] / "migrations"
+        with sqlite3.connect(":memory:") as conn:
+            conn.execute("PRAGMA foreign_keys=ON"); conn.execute("CREATE TABLE album(id INTEGER PRIMARY KEY)")
+            conn.executescript((root / "0003_ai_workspace_container.sql").read_text())
+            conn.executescript((root / "0004_ai_model_configuration.sql").read_text())
+            conn.executescript((root / "0005_album_ai_work_item.sql").read_text()); conn.executescript((root / "0005_album_ai_work_item.sql").read_text())
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        self.assertIn("workspace_album_ai_worker", tables); self.assertIn("ai_work_item_attempt", tables)

@@ -722,6 +722,13 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_ai_workspaces(qs)
             elif re.match(r"^/api/ai-workspaces/[^/]+$", path):
                 self._get_ai_workspace(path.split("/")[-1])
+            elif re.match(r"^/api/ai-workspaces/[^/]+/items$", path):
+                if not self._require_admin_principal(): return
+                workspace_uuid = path.split("/")[3]
+                self._send_success(200, {"items": self._ai_work_item_service().list(workspace_uuid)})
+            elif re.match(r"^/api/ai-work-items/[^/]+$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200, {"item": self._ai_work_item_service().get(path.split("/")[-1], include_attempts=True)})
             elif path == "/api/ai-model-configurations":
                 self._get_ai_model_configurations()
             elif re.match(r"^/api/ai-model-configurations/[^/]+$", path):
@@ -914,6 +921,19 @@ class AppHandler(SimpleHTTPRequestHandler):
             repo.AIModelConfigurationRepository(open_db),
             svc.OperationService(repo.OperationRepository(open_db)),
         )
+
+    def _ai_work_item_service(self):
+        return svc.AIWorkItemService(
+            repo.AIWorkItemRepository(open_db), repo.AIWorkspaceRepository(open_db),
+            repo.AlbumRepository(open_db), self._ai_model_configuration_service(),
+            svc.OperationService(repo.OperationRepository(open_db)),
+        )
+
+    def _require_worker_principal(self):
+        if self._principal["role"] != "writer":
+            self._send_error(403, "AUTHORIZATION_WRITER_WORKER_REQUIRED", "A Writer AI Worker Token is required.")
+            return False
+        return True
 
     def _get_ai_model_configurations(self):
         is_admin = self._principal["role"] == "admin"
@@ -1112,6 +1132,30 @@ class AppHandler(SimpleHTTPRequestHandler):
                 if not self._require_admin_principal(): return
                 created = self._ai_workspace_service().create(body.get("title", ""), self._principal.get("token_uuid"))
                 self._send_success(201, {"workspace": created})
+            elif re.match(r"^/api/ai-workspaces/[^/]+/items$", path):
+                if not self._require_admin_principal(): return
+                workspace_uuid = path.split("/")[3]
+                item = self._ai_work_item_service().create(workspace_uuid, body.get("album_id"), body.get("configuration_uuid", ""))
+                self._send_success(201, {"item": item})
+            elif path == "/api/ai-work-items/claim":
+                if not self._require_worker_principal(): return
+                item = self._ai_work_item_service().claim_next(self._principal["token_uuid"], body.get("lease_seconds", 300))
+                self._send_success(200, {"item": item})
+            elif re.match(r"^/api/ai-work-items/[^/]+/(heartbeat|fail)$", path):
+                if not self._require_worker_principal(): return
+                parts = path.split("/"); service = self._ai_work_item_service()
+                if parts[4] == "heartbeat":
+                    item = service.heartbeat(parts[3], self._principal["token_uuid"], body.get("lease_seconds", 300))
+                else:
+                    item = service.fail(parts[3], self._principal["token_uuid"], body.get("error_code", ""), body.get("message", ""))
+                self._send_success(200, {"item": item})
+            elif re.match(r"^/api/ai-work-items/[^/]+/(retry|cancel)$", path):
+                if not self._require_admin_principal(): return
+                parts = path.split("/"); expected = body.get("expected_version")
+                if not isinstance(expected, int): raise ValueError("expected_version is required and must be an integer.")
+                service = self._ai_work_item_service()
+                item = service.retry(parts[3], expected) if parts[4] == "retry" else service.cancel(parts[3], expected)
+                self._send_success(200, {"item": item})
             elif path == "/api/ai-model-configurations":
                 if not self._require_admin_principal(): return
                 self._send_success(201, {"configuration": self._ai_model_configuration_service().create(body)})

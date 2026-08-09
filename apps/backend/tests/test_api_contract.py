@@ -812,6 +812,31 @@ class TestVersionedApiAuthorization(_TestServerBase):
         status, hidden = self._get(f"/api/v1/ai-model-configurations/{item['uuid']}", writer)
         self.assertEqual(404, status); self.assertEqual("NOT_FOUND", hidden["error"]["code"])
 
+    def test_ai_work_item_claim_ownership_failure_and_retry(self):
+        marker = self._db.execute("SELECT COUNT(*) FROM album").fetchone()[0]
+        self._db.execute("INSERT INTO album (uuid,title,path) VALUES (?,?,?)", (f"worker-album-{marker}","Worker Album",f"Studio/Worker-{marker}"))
+        album_id = self._db.execute("SELECT last_insert_rowid()").fetchone()[0]; self._db.commit()
+        admin = self._bearer(self._issue(role="admin")); first = self._bearer(self._issue(role="writer")); second = self._bearer(self._issue(role="writer"))
+        config = {"name":f"Worker Config {marker}","model_identifier":"qwen","model_file":"qwen.gguf",
+            "vision_prompt_version":"v1","writer_prompt_version":"w1","sample_count":8,"context_size":4096,
+            "threads":8,"gpu_layers":40,"max_tokens":800,"temperature":0.2,"image_max_tokens":384}
+        _, config_body = self._post("/api/v1/ai-model-configurations", config, admin); config_uuid = config_body["data"]["configuration"]["uuid"]
+        _, workspace_body = self._post("/api/v1/ai-workspaces", {"title":f"Worker Queue {marker}"}, admin); workspace_uuid = workspace_body["data"]["workspace"]["uuid"]
+        status, created = self._post(f"/api/v1/ai-workspaces/{workspace_uuid}/items", {"album_id":album_id,"configuration_uuid":config_uuid}, admin)
+        self.assertEqual(201,status); item = created["data"]["item"]
+        status, claimed = self._post("/api/v1/ai-work-items/claim", {"lease_seconds":60}, first)
+        self.assertEqual(200,status); self.assertEqual(item["uuid"], claimed["data"]["item"]["uuid"])
+        status, wrong = self._post(f"/api/v1/ai-work-items/{item['uuid']}/heartbeat", {"lease_seconds":60}, second)
+        self.assertEqual(409,status); self.assertEqual("AI_WORK_ITEM_CLAIM_INVALID", wrong["error"]["code"])
+        status, failed = self._post(f"/api/v1/ai-work-items/{item['uuid']}/fail", {"error_code":"MODEL_TIMEOUT","message":"timed out"}, first)
+        self.assertEqual(200,status); failed_item = failed["data"]["item"]
+        status, retried = self._post(f"/api/v1/ai-work-items/{item['uuid']}/retry", {"expected_version":failed_item["version"]}, admin)
+        self.assertEqual(200,status); self.assertEqual("Pending", retried["data"]["item"]["run_state"])
+        status, claimed_again = self._post("/api/v1/ai-work-items/claim", {"lease_seconds":60}, second)
+        self.assertEqual(200,status); self.assertEqual(2, claimed_again["data"]["item"]["attempt_count"])
+        status, detail = self._get(f"/api/v1/ai-work-items/{item['uuid']}", admin)
+        self.assertEqual(200,status); self.assertEqual(2, len(detail["data"]["item"]["attempts"]))
+
     def test_current_principal_and_renewal_request_are_token_safe(self):
         issued = self._issue(role="writer")
         headers = self._bearer(issued)
