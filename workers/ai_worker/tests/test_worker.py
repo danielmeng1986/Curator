@@ -26,3 +26,15 @@ class WorkerTests(unittest.TestCase):
                          [request.full_url.replace("http://curator", "") for request in requests])
         self.assertTrue(all(request.headers["Authorization"] == "Bearer writer-token" for request in requests))
         self.assertEqual("MODEL_TIMEOUT", json.loads(requests[2].data)["error_code"])
+
+    def test_worker_downloads_evidence_by_opaque_identity_only(self):
+        requests = []
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*_): pass
+            def read(self): return b"image-bytes"
+        def opener(request,timeout): requests.append(request); return Response()
+        content = CuratorClient("http://curator","writer-token",opener=opener).download_evidence("evidence-uuid")
+        self.assertEqual(b"image-bytes",content)
+        self.assertEqual("/api/v1/ai-evidence/evidence-uuid/content",requests[0].full_url.replace("http://curator",""))
+        self.assertNotIn("path",requests[0].full_url)

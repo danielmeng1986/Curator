@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-048` — Status: `Proposed`
+`BT-048` — Status: `Complete`
 
 ## Title
 
@@ -60,3 +60,20 @@ without exposing arbitrary filesystem access or absolute paths.
 
 - Eight bounded images per Album is acceptable for the initial LAN workflow;
   transport metrics should be retained before expanding sample sizes.
+
+## Completion Record
+
+- Added opaque evidence metadata and content endpoints. Neither accepts an
+  absolute or caller-selected relative path, and JSON responses omit both the
+  Album root and retained internal relative path.
+- Writer access requires the exact Token UUID holding a current unexpired Work
+  Item claim. Other Writers and expired/unclaimed access receive
+  `403 EVIDENCE_CLAIM_REQUIRED`; Admin remains authorized for review/audit.
+- Revalidates Manifest containment, regular-file/symlink state, size, mtime,
+  and SHA-256 before disclosure. Changed evidence returns a structured conflict
+  before response content begins.
+- Streams bounded bytes in chunks with fixed allow-listed MIME, exact length,
+  `private, no-store`, `nosniff`, safe generated filename, and disconnect-safe
+  handling. The AI Worker client downloads only by opaque evidence UUID.
+- Verification: 5 focused Service/API/Worker transfer tests passed and the
+  complete Backend regression passed all 724 tests.

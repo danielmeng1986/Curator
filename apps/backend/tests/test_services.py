@@ -1738,6 +1738,16 @@ class TestAIPhotoEvidenceManifestContract(unittest.TestCase):
         with self.assertRaises(svc.ServiceConflict) as ctx: self.service.create(self.item["uuid"])
         self.assertEqual("EVIDENCE_PATH_INVALID",ctx.exception.code)
 
+    def test_writer_evidence_access_requires_matching_live_claim(self):
+        self._images(); manifest = self.service.create(self.item["uuid"]); evidence_uuid = manifest["evidence"][0]["uuid"]
+        with self.assertRaises(svc.AuthorizationFailure): self.service.metadata(evidence_uuid,"writer","worker-one")
+        self.conn.execute("""UPDATE workspace_album_ai_worker SET run_state='Claimed',claimed_by_token_uuid='worker-one',
+            lease_expires_at='2099-01-01T00:00:00+00:00' WHERE uuid=?""",(self.item["uuid"],)); self.conn.commit()
+        self.assertEqual(evidence_uuid,self.service.metadata(evidence_uuid,"writer","worker-one")["uuid"])
+        with self.assertRaises(svc.AuthorizationFailure): self.service.metadata(evidence_uuid,"writer","worker-two")
+        self.conn.execute("UPDATE workspace_album_ai_worker SET lease_expires_at='2000-01-01T00:00:00+00:00'"); self.conn.commit()
+        with self.assertRaises(svc.AuthorizationFailure): self.service.metadata(evidence_uuid,"writer","worker-one")
+
 
 class TestAIModelConfigurationContract(unittest.TestCase):
     def setUp(self):

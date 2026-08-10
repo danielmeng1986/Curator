@@ -191,6 +191,12 @@ immutable relative metadata by Work Item identity. Clients cannot nominate a
 path. Responses contain opaque evidence UUIDs and relative evidence metadata,
 never the Album absolute path. Image content transfer is specified separately.
 
+`GET /api/v1/ai-evidence/{evidence_uuid}` returns redacted Manifest-bound
+metadata; `/content` streams the signature-validated image with its fixed MIME,
+bounded length, private no-store caching, and nosniff headers. Admin may read
+for review/audit. Writer access requires that the same Token currently owns an
+unexpired claim on the evidence Work Item. No route accepts a path parameter.
+
 ## Future extensions
 
 - Route/resource catalogs can be added without changing the shared contract.

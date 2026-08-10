@@ -123,9 +123,10 @@ class AuthenticationFailure(Exception):
 class AuthorizationFailure(Exception):
     """Scope failure that the API adapter maps to a 403 response."""
 
-    def __init__(self, required_scope: str):
-        super().__init__("The token does not have the required permission.")
-        self.code = "AUTHORIZATION_INSUFFICIENT_SCOPE"
+    def __init__(self, required_scope: str, code: str = "AUTHORIZATION_INSUFFICIENT_SCOPE",
+                 message: str = "The token does not have the required permission."):
+        super().__init__(message)
+        self.code = code
         self.required_scope = required_scope
 
 
@@ -2291,6 +2292,33 @@ class AIPhotoEvidenceManifestService:
             if stat.st_size != item["size_bytes"] or stat.st_mtime_ns != item["modified_time_ns"] or digest != item["sha256"]:
                 raise ServiceConflict("EVIDENCE_CONTENT_CHANGED","An evidence image changed after selection.",{"evidence_uuid":item["uuid"]})
         return manifest
+
+    def _authorize_evidence(self, evidence_uuid, role, token_uuid):
+        evidence = self._repo.get_evidence(evidence_uuid)
+        if not evidence: raise ServiceNotFound("Photo evidence not found.")
+        item = self._items.get(evidence["work_item_uuid"])
+        if role != "admin":
+            now = self._now().isoformat()
+            if role != "writer" or item["run_state"] != "Claimed" \
+                    or item["claimed_by_token_uuid"] != token_uuid or not item["lease_expires_at"] \
+                    or item["lease_expires_at"] <= now:
+                raise AuthorizationFailure("write", "EVIDENCE_CLAIM_REQUIRED",
+                    "Photo evidence requires the Work Item's active Writer claim.")
+        self.revalidate(evidence["work_item_uuid"])
+        return evidence, item
+
+    def metadata(self, evidence_uuid, role, token_uuid=None):
+        evidence, item = self._authorize_evidence(evidence_uuid,role,token_uuid)
+        return {key:evidence[key] for key in ("uuid","manifest_uuid","work_item_uuid","ordinal","filename",
+            "size_bytes","sha256","mime_type")} | {"album_id":item["album_id"]}
+
+    def content_descriptor(self, evidence_uuid, role, token_uuid=None):
+        evidence, item = self._authorize_evidence(evidence_uuid,role,token_uuid)
+        album = self._albums.get_by_id(item["album_id"]); root = self._album_root(album)
+        path = (root / evidence["relative_path"]).resolve()
+        extension = {"image/jpeg":".jpg","image/png":".png","image/webp":".webp"}[evidence["mime_type"]]
+        return {"path":path,"size_bytes":evidence["size_bytes"],"mime_type":evidence["mime_type"],
+            "sha256":evidence["sha256"],"filename":f"evidence-{evidence_uuid}{extension}"}
 
 
 class AIWorkspaceService:

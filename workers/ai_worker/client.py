@@ -27,4 +27,12 @@ class CuratorClient:
         return self.post(f"/ai-work-items/{item_uuid}/heartbeat", {"lease_seconds": lease_seconds})
     def fail_work(self, item_uuid: str, error_code: str, message: str) -> dict:
         return self.post(f"/ai-work-items/{item_uuid}/fail", {"error_code": error_code, "message": message})
+    def evidence_metadata(self, evidence_uuid: str) -> dict: return self.get(f"/ai-evidence/{evidence_uuid}")
+    def download_evidence(self, evidence_uuid: str) -> bytes:
+        request = Request(f"{self.base_url}/api/v1/ai-evidence/{evidence_uuid}/content",
+            headers={"Authorization":f"Bearer {self.token}","Accept":"image/jpeg,image/png,image/webp"})
+        try:
+            with self._opener(request,timeout=30) as response: return response.read()
+        except HTTPError as exc: raise CuratorApiError(f"Backend rejected evidence: HTTP {exc.code}") from exc
+        except URLError as exc: raise CuratorApiError("Backend unavailable during evidence transfer.") from exc
     def health(self) -> dict: return self.get("/health")

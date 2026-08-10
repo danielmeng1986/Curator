@@ -463,6 +463,20 @@ class AppHandler(SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, socket.error):
             return
 
+    def _send_evidence_content(self, descriptor) -> None:
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", descriptor["mime_type"])
+            self.send_header("Content-Length", str(descriptor["size_bytes"]))
+            self.send_header("Cache-Control", "private, no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("ETag", f'"sha256-{descriptor["sha256"]}"')
+            self.send_header("Content-Disposition", f'inline; filename="{descriptor["filename"].replace(chr(34), "")}"')
+            self.end_headers()
+            with descriptor["path"].open("rb") as stream:
+                for chunk in iter(lambda:stream.read(1024*1024),b""): self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError, socket.error): return
+
     def _send_success(self, status: int, data, *, meta_extras: dict | None = None) -> None:
         """Send a contract success envelope with the given data payload."""
         self._send_json(
@@ -733,6 +747,14 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif re.match(r"^/api/ai-work-items/[^/]+/evidence-manifest$", path):
                 if not self._require_admin_principal(): return
                 self._send_success(200, {"manifest":self._ai_photo_evidence_service().revalidate(path.split("/")[3])})
+            elif re.match(r"^/api/ai-evidence/[^/]+$", path):
+                evidence_uuid = path.split("/")[3]
+                self._send_success(200,{"evidence":self._ai_photo_evidence_service().metadata(
+                    evidence_uuid,self._principal["role"],self._principal.get("token_uuid"))})
+            elif re.match(r"^/api/ai-evidence/[^/]+/content$", path):
+                evidence_uuid = path.split("/")[3]
+                self._send_evidence_content(self._ai_photo_evidence_service().content_descriptor(
+                    evidence_uuid,self._principal["role"],self._principal.get("token_uuid")))
             elif path == "/api/ai-model-configurations":
                 self._get_ai_model_configurations()
             elif re.match(r"^/api/ai-model-configurations/[^/]+$", path):
@@ -774,6 +796,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_error(404, "NOT_FOUND", str(exc))
         except svc.ServiceConflict as exc:
             self._send_error(409, exc.code, str(exc), details=exc.details)
+        except svc.AuthorizationFailure as exc:
+            self._send_error(403, exc.code, str(exc))
         except Exception:
             self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 

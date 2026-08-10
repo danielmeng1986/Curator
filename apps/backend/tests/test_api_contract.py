@@ -449,6 +449,12 @@ class _TestServerBase(unittest.TestCase):
         conn.close()
         return resp.status, body
 
+    def _get_raw(self, path: str, headers: dict | None = None):
+        conn = HTTPConnection("127.0.0.1", self._port, timeout=5)
+        conn.request("GET",path,headers=headers or {}); resp = conn.getresponse()
+        status, content_type, cache, body = resp.status,resp.getheader("Content-Type"),resp.getheader("Cache-Control"),resp.read()
+        conn.close(); return status,content_type,cache,body
+
     def _post(self, path: str, payload: dict, headers: dict | None = None) -> tuple[int, dict]:
         data = json.dumps(payload).encode()
         conn = HTTPConnection("127.0.0.1", self._port, timeout=5)
@@ -894,7 +900,8 @@ class TestVersionedApiAuthorization(_TestServerBase):
             self._db.execute("INSERT INTO album (uuid,title,path,updated_at) VALUES (?,?,?,?)",
                 (f"manifest-{marker}","Manifest Album","manifest-album","v1"))
             album_id = self._db.execute("SELECT last_insert_rowid()").fetchone()[0]; self._db.commit()
-            admin = self._bearer(self._issue(role="admin")); writer = self._bearer(self._issue(role="writer"))
+            admin = self._bearer(self._issue(role="admin")); writer_issued = self._issue(role="writer")
+            writer = self._bearer(writer_issued); other_writer = self._bearer(self._issue(role="writer"))
             config = {"name":f"Manifest Config {marker}","model_identifier":"qwen","model_file":"qwen.gguf",
                 "vision_prompt_version":"v1","writer_prompt_version":"w1","sample_count":8,"context_size":4096,
                 "threads":8,"gpu_layers":40,"max_tokens":800,"temperature":0.2,"image_max_tokens":384}
@@ -913,6 +920,17 @@ class TestVersionedApiAuthorization(_TestServerBase):
                 self.assertEqual(8,len(manifest["evidence"])); self.assertNotIn(root,str(manifest))
                 status, fetched = self._get(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",admin)
                 self.assertEqual(200,status); self.assertEqual(manifest["uuid"],fetched["data"]["manifest"]["uuid"])
+                evidence_uuid = manifest["evidence"][0]["uuid"]
+                self._db.execute("""UPDATE workspace_album_ai_worker SET run_state='Claimed',claimed_by_token_uuid=?,
+                    lease_expires_at='2099-01-01T00:00:00+00:00' WHERE uuid=?""",
+                    (writer_issued["token_record"]["uuid"],item_uuid)); self._db.commit()
+                status, forbidden = self._get(f"/api/v1/ai-evidence/{evidence_uuid}",other_writer)
+                self.assertEqual(403,status); self.assertEqual("EVIDENCE_CLAIM_REQUIRED",forbidden["error"]["code"])
+                status, metadata = self._get(f"/api/v1/ai-evidence/{evidence_uuid}",writer)
+                self.assertEqual(200,status); self.assertNotIn("relative_path",metadata["data"]["evidence"])
+                status,mime,cache,content = self._get_raw(f"/api/v1/ai-evidence/{evidence_uuid}/content",writer)
+                self.assertEqual(200,status); self.assertEqual("image/jpeg",mime); self.assertEqual("private, no-store",cache)
+                self.assertEqual((album_dir / manifest["evidence"][0]["relative_path"]).read_bytes(),content)
 
     def test_current_principal_and_renewal_request_are_token_safe(self):
         issued = self._issue(role="writer")
