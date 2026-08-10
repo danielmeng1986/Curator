@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DBDOC-002` — Status: `Proposed`
+`DBDOC-002` — Status: `Complete`
 
 ## Goal
 
@@ -58,3 +58,10 @@ lifecycle semantics without searching Repository implementation code.
 - Catalog brevity matters: details should support navigation, while exact SQL
   remains in the authoritative schema source.
 
+## Completion Record
+
+- Added `Docs/Database/Schema-Catalog.md` covering all active, historical,
+  configuration, reservation, claim, history, audit, and bookkeeping tables.
+- Recorded identity, lifecycle role, important relationships/constraints,
+  authoritative source, and controlling contract for each table.
+- Explicitly separated database constraints from Service-enforced safety rules.
