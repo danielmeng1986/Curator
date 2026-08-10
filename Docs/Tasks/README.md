@@ -23,7 +23,7 @@ series rather than silently changing behavior from a documentation task.
 
 | Task | Outcome | Status |
 | --- | --- | --- |
-| [DOC-001](DOC-001-establish-documentation-authority-and-lifecycle.md) | Documentation authority, lifecycle, and conflict rules | Proposed |
+| [DOC-001](DOC-001-establish-documentation-authority-and-lifecycle.md) | Documentation authority, lifecycle, and conflict rules | Complete |
 | [DBDOC-001](DBDOC-001-establish-database-schema-source-of-truth.md) | Authoritative database-schema source and ownership rules | Proposed |
 | [DBDOC-002](DBDOC-002-build-current-database-schema-catalog.md) | Complete machine-scannable current table catalog | Proposed |
 | [DBDOC-003](DBDOC-003-split-database-mermaid-model-by-domain.md) | Database overview and domain-specific Mermaid diagrams | Proposed |
@@ -42,4 +42,3 @@ Authority and schema ownership come first. The catalog then supplies the facts
 used by diagrams and workflow maps. Navigation and higher-level architecture
 are refreshed after those facts are stable. The drift gate is last because it
 must validate the finalized documentation contract rather than invent it.
-

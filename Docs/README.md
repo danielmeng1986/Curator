@@ -100,6 +100,7 @@ The documentation is organized into several independent chapters.
 | File | Purpose |
 |-------|----------|
 | AI-CONTEXT.md | Entry point for AI assistants |
+| Documentation-Governance.md | Document authority, lifecycle, ownership, and conflict rules |
 | 01-Vision.md | Project vision and philosophy |
 | 02-Architecture.md | Overall system architecture |
 | 03-Workflow.md | Data processing workflow |
@@ -164,6 +165,13 @@ General guidelines:
 - Record important decisions before they are forgotten.
 - Prefer adding new ADRs instead of modifying historical decisions.
 - Avoid documenting temporary implementation details.
+
+The controlling authority, lifecycle labels, review triggers, archival policy,
+and task-routing rules are defined in
+[Documentation Governance](Documentation-Governance.md). In brief: code and
+tests evidence current behavior, Specifications control required behavior,
+declared schema sources control physical persistence, Architecture controls
+system boundaries, and Historical documents or Memos never authorize new work.
 
 ---
 

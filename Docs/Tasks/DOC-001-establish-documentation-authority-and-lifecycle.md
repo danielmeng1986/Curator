@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DOC-001` — Status: `Proposed`
+`DOC-001` — Status: `Complete`
 
 ## Goal
 
@@ -59,3 +59,9 @@ resolve apparent conflicts without guessing.
 - Governance should remain lightweight; metadata must improve decisions without
   turning ordinary documentation edits into a bureaucratic workflow.
 
+## Completion Record
+
+- Added `Docs/Documentation-Governance.md` with lifecycle classes, question-based
+  authority, conflict handling, task routing, review triggers, and archival rules.
+- Defined the reusable status header and classified representative documents.
+- Linked the policy from the documentation index; link and Markdown checks passed.
