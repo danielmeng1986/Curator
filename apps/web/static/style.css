@@ -386,3 +386,8 @@ code {
 
 .inline-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
 .inline-form .form-field { min-width: 160px; }
+.page-subtitle { margin:.35rem 0 0; color:var(--ink-soft); }
+.dispatch-tabs { display:flex; gap:8px; margin-bottom:12px; }
+.dispatch-controls { padding:16px; margin-bottom:16px; }
+.dispatch-configs { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:8px; }
+.dispatch-configs label { padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; }

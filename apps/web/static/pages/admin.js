@@ -13,6 +13,7 @@ const AdminCenterPage = {
         ['Database Restore', 'Protected restore from a verified recovery point.', '#/admin/restore', 'Available'],
         ['Repair Quarantine', `${(quarantine.items || []).filter(item => !item.restored_at).length} item(s) currently isolated.`, '#/quarantine', 'Available'],
         ['Operation History', 'Read durable administrative and workflow outcomes.', '#/operations?operation_type=backup', 'Available'],
+        ['AI Work Dispatch', 'Select available Albums and assign exclusive Worker Groups.', '#/work-dispatch', 'Available'],
       ];
       el.innerHTML = `<div class="page-header"><h1 class="page-title">Administrator Center</h1></div>
         <div class="alert alert-warning">Administrative actions can affect authentication and recovery. This center never displays stored Token secrets or arbitrary filesystem paths.</div>

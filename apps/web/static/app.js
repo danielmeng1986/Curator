@@ -25,6 +25,7 @@ const ROUTES = [
   { pattern: /^#\/admin\/devices$/, page: 'admin-devices', params: [], scope: 'admin' },
   { pattern: /^#\/admin\/backups$/, page: 'admin-backups', params: [], scope: 'admin' },
   { pattern: /^#\/admin\/restore$/, page: 'admin-restore', params: [], scope: 'admin' },
+  { pattern: /^#\/work-dispatch(?:\?view=(available|active|history))?$/, page: 'work-dispatch', params: ['view'], scope: 'admin' },
 ];
 
 function navigate(hash) {
@@ -82,6 +83,7 @@ function route() {
         case 'admin-devices':   renderPage(AdminAuthPage.render(paramValues)); break;
         case 'admin-backups':   renderPage(AdminBackupsPage.render(paramValues)); break;
         case 'admin-restore':   renderPage(AdminRestorePage.render(paramValues)); break;
+        case 'work-dispatch':   renderPage(WorkDispatchPage.render(paramValues)); break;
         default:                renderNotFound();
       }
       return;
