@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-011F` — Status: `Proposed`
+`UI-011F` — Status: `Complete`
 
 ## Title
 
@@ -57,3 +57,18 @@ work history while concurrent or cross-Worker duplicate dispatch is rejected.
 
 - Concurrency must be proved against the Backend invariant, not only by disabled UI controls.
 
+## Completion Record
+
+- Activated the disposable `future-ai-workspace` scenario with three Albums,
+  two model configurations, and a fixture-only second Worker adapter.
+- Browser acceptance proves Admin-only access, multi-Album/multi-configuration
+  dispatch, one Group per Album, one reservation per Group, unchanged Album
+  Status, and Available-to-Active movement.
+- A competing Preview/execute race proves the stale browser action is rejected
+  without partial work. The active reservation also removes the same Album from
+  the second Worker kind's Available view.
+- Terminal Group cancellation releases each reservation, restores all Albums to
+  Available, and retains four historical Groups including the race scenario.
+- The browser suite passed twice from distinct clean temporary roots; fixture
+  self-tests, the four-scenario Backend AI Workspace suite, and redaction/cleanup
+  assertions also passed.

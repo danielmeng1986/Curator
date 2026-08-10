@@ -53,7 +53,7 @@ snapshot, archive, and output resources.
 | [UI-011C](UI-011C-build-workspace-review-ui.md) | Dataset-adaptable Workspace review UI | Complete |
 | [UI-011D](UI-011D-workspace-browser-acceptance.md) | Workspace browser acceptance | Proposed |
 | [UI-011E](UI-011E-build-filtered-album-work-dispatch-ui.md) | Filtered Admin Album work dispatch console | Complete |
-| [UI-011F](UI-011F-work-dispatch-browser-acceptance.md) | Album-exclusive dispatch browser acceptance | Proposed |
+| [UI-011F](UI-011F-work-dispatch-browser-acceptance.md) | Album-exclusive dispatch browser acceptance | Complete |
 | [UI-012](UI-012-entity-management-browser-acceptance.md) | Entity-management browser acceptance | Proposed |
 | [UI-013](UI-013-import-browser-acceptance.md) | Import browser acceptance | Proposed |
 | [UI-014](UI-014-repair-and-quarantine-browser-acceptance.md) | Repair, Issue, and Quarantine browser acceptance | Proposed |

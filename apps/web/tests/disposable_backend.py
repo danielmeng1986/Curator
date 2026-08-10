@@ -27,6 +27,7 @@ SCENARIOS = {
     "entities": "Permanent Studio, Model, Album, relationship, and Photo.",
     "workflow-evidence": "Issue, Repair, and Operation records for read-model work.",
     "filesystem": "Disposable Import source, Archive, Snapshot, and Quarantine roots.",
+    "future-ai-workspace": "Albums ready for AI Workspace dispatch and review.",
 }
 
 
@@ -45,7 +46,7 @@ def _initialize_database(database_path: Path, scenario: str) -> None:
             "INSERT INTO status (name, description) VALUES (?, ?)",
             ("Active", "Active albums"),
         )
-        if scenario == "entities":
+        if scenario in {"entities", "future-ai-workspace"}:
             connection.execute(
                 "INSERT INTO studio (uuid, name, website) VALUES (?, ?, ?)",
                 ("studio-ui-fixture", "Fixture Studio", "https://example.invalid"),
@@ -70,6 +71,19 @@ def _initialize_database(database_path: Path, scenario: str) -> None:
                    VALUES (?, 1, ?, ?)""",
                 ("photo-ui-fixture", "cover.jpg", "cover.jpg"),
             )
+            if scenario == "future-ai-workspace":
+                for index in range(2, 4):
+                    connection.execute(
+                        """INSERT INTO album
+                           (uuid, studio_id, status_id, title, path, updated_at)
+                           VALUES (?, 1, 1, ?, ?, ?)""",
+                        (f"album-ai-fixture-{index}", f"AI Fixture Album {index}",
+                         f"Fixture Studio/AI Fixture Album {index}", f"fixture-v{index}"),
+                    )
+                    connection.execute(
+                        "INSERT INTO album_model (album_id, model_id, role) VALUES (?, 1, 'primary')",
+                        (index,),
+                    )
         elif scenario == "workflow-evidence":
             operation_uuid = "operation-ui-fixture"
             issue_uuid = "issue-ui-fixture"
@@ -156,6 +170,20 @@ def main() -> None:
     server.AUTH_REGISTRATION_SECRET = args.secret
     server.APP_CONFIG = server.load_app_config()
     server.open_db = lambda: _connect(resources["database"])
+    if args.scenario == "future-ai-workspace":
+        class FixtureMetadataWorkerAdapter(server.svc.AlbumNameAnalysisDispatchAdapter):
+            worker_kind = "fixture_metadata_worker"
+
+        original_registry = server.svc.WorkDispatchAdapterRegistry
+
+        class FixtureWorkerRegistry(original_registry):
+            def __init__(self, adapters=None):
+                super().__init__(adapters or (
+                    server.svc.AlbumNameAnalysisDispatchAdapter(),
+                    FixtureMetadataWorkerAdapter(),
+                ))
+
+        server.svc.WorkDispatchAdapterRegistry = FixtureWorkerRegistry
 
     httpd = HTTPServer(("127.0.0.1", args.port), server.AppHandler)
     manifest = {

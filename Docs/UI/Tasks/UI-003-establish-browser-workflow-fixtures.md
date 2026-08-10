@@ -57,8 +57,8 @@ fixtures for all UI workflows without accessing live Curator resources.
 ## Risks or Notes
 
 - Filesystem workflow fixtures must use explicit temporary roots, never paths derived from the live configuration.
-- The future AI Workspace scenario is registered as `Blocked by Specification`
-  and deliberately has no invented fixture schema until UI-011A/B are approved.
+- The AI Workspace scenario is now `Ready`; it uses the approved UI-011A/B and
+  BT-043 through BT-058 contracts and remains wholly disposable.
 
 ## Completion Record
 
@@ -68,8 +68,8 @@ fixtures for all UI workflows without accessing live Curator resources.
 - Added reusable scenario and Reader/Writer/Admin device builders, authenticated
   request helpers, explicit failure-artifact directories, secret redaction, and
   shutdown cleanup assertions.
-- Added empty, permanent-entity, workflow-evidence, and filesystem scenarios;
-  retained a specification-blocked registration point for the future AI
-  Workspace rather than fabricating its contract.
+- Added empty, permanent-entity, workflow-evidence, filesystem, and AI Workspace
+  scenarios. The latter was activated only after its approved Backend schema,
+  dispatch, review, and read-model contracts existed.
 - Migrated the existing browser smoke gate to the shared fixture and proved two
   clean entity-fixture runs with unique roots and rejected-write side effects.

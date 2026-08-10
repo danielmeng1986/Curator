@@ -4,11 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SCENARIOS, startBrowserFixture } from './browser_fixture.mjs';
 
-assert.equal(SCENARIOS['future-ai-workspace'].readiness, 'Blocked by Specification');
-await assert.rejects(
-  startBrowserFixture({ scenario: 'future-ai-workspace' }),
-  /UI-011A\/B/,
-);
+assert.equal(SCENARIOS['future-ai-workspace'].readiness, 'Ready');
 
 const artifactDir = await mkdtemp(join(tmpdir(), 'curator-browser-artifact-test-'));
 const roots = [];
@@ -60,6 +56,13 @@ try {
     }
   } finally {
     await filesystem.stop();
+  }
+  const aiWorkspace = await startBrowserFixture({ scenario: 'future-ai-workspace', roles: ['admin'] });
+  try {
+    const albums = await aiWorkspace.request('/albums', { role: 'admin' });
+    assert.equal(albums.payload.data.length, 3);
+  } finally {
+    await aiWorkspace.stop();
   }
   console.log('UI-003 browser fixture contract: OK');
 } finally {

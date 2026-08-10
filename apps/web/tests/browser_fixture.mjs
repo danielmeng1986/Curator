@@ -16,8 +16,8 @@ export const SCENARIOS = Object.freeze({
   'workflow-evidence': Object.freeze({ readiness: 'Ready' }),
   filesystem: Object.freeze({ readiness: 'Ready' }),
   'future-ai-workspace': Object.freeze({
-    readiness: 'Blocked by Specification',
-    dependency: 'UI-011A/B',
+    readiness: 'Ready',
+    dependency: 'BT-053/BT-058 and UI-011E',
   }),
 });
 
