@@ -148,3 +148,22 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             indexes = {row[1] for row in conn.execute("PRAGMA index_list(ai_photo_evidence_manifest)")}
         self.assertIn("workspace_album_ai_worker_photo",tables); self.assertTrue(indexes)
+
+    def test_0009_two_stage_results_are_repeatable_and_stage_unique(self):
+        root = Path(__file__).parents[1] / "migrations"
+        with sqlite3.connect(":memory:") as conn:
+            conn.execute("PRAGMA foreign_keys=ON"); conn.execute("CREATE TABLE album(id INTEGER PRIMARY KEY)")
+            for name in ("0003_ai_workspace_container.sql","0004_ai_model_configuration.sql",
+                         "0005_album_ai_work_item.sql","0008_ai_photo_evidence_manifest.sql"):
+                conn.executescript((root / name).read_text())
+            sql = (root / "0009_two_stage_ai_results.sql").read_text(); conn.executescript(sql); conn.executescript(sql)
+            conn.execute("INSERT INTO album(id) VALUES (1)")
+            conn.execute("INSERT INTO ai_dataset_schema VALUES ('album_analysis',1,'Active','{}','n')")
+            conn.execute("INSERT INTO ai_workspace(uuid,dataset_type,schema_version,title,lifecycle_state,version,created_at) VALUES ('w','album_analysis',1,'w','Open',1,'n')")
+            conn.execute("INSERT INTO ai_model_configuration(uuid,name,provider_type,model_identifier,model_file,vision_prompt_version,writer_prompt_version,sample_count,context_size,threads,gpu_layers,max_tokens,temperature,image_max_tokens,additional_parameters_json,enabled,version,created_at,updated_at) VALUES ('c','c','llama_cpp','m','f','v','w',8,1,1,1,1,0.1,1,'{}',1,1,'n','n')")
+            conn.execute("INSERT INTO workspace_album_ai_worker(uuid,workspace_uuid,album_id,ai_model_configuration_uuid,configuration_snapshot_json,run_state,version,created_at,updated_at) VALUES ('i','w',1,'c','{}','Pending',1,'n','n')")
+            conn.execute("INSERT INTO ai_photo_evidence_manifest(uuid,work_item_uuid,album_id,manifest_version,sample_count,eligible_image_count,average_size_bytes,selection_method,discovery_summary_json,selected_at) VALUES ('m','i',1,1,8,8,1,'x','{}','n')")
+            values = ("r","i","Vision","v","m",1,"h","{}","p","{}","o","t","n")
+            conn.execute("INSERT INTO ai_work_item_result_stage(uuid,work_item_uuid,stage,schema_version,manifest_uuid,manifest_version,configuration_snapshot_sha256,payload_json,payload_sha256,runtime_metrics_json,operation_uuid,submitted_by_token_uuid,submitted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",values)
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute("INSERT INTO ai_work_item_result_stage(uuid,work_item_uuid,stage,schema_version,manifest_uuid,manifest_version,configuration_snapshot_sha256,payload_json,payload_sha256,runtime_metrics_json,operation_uuid,submitted_by_token_uuid,submitted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",("r2",)+values[1:])

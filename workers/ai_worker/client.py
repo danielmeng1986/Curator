@@ -27,6 +27,14 @@ class CuratorClient:
         return self.post(f"/ai-work-items/{item_uuid}/heartbeat", {"lease_seconds": lease_seconds})
     def fail_work(self, item_uuid: str, error_code: str, message: str) -> dict:
         return self.post(f"/ai-work-items/{item_uuid}/fail", {"error_code": error_code, "message": message})
+    def submit_vision(self, item_uuid: str, payload: dict, runtime_metrics: dict | None = None) -> dict:
+        return self.post(f"/ai-work-items/{item_uuid}/results/vision", {
+            "schema_version": "curator://album-analysis/vision/v1", "payload": payload,
+            "runtime_metrics": runtime_metrics or {}})
+    def submit_writer(self, item_uuid: str, payload: dict, runtime_metrics: dict | None = None) -> dict:
+        return self.post(f"/ai-work-items/{item_uuid}/results/writer", {
+            "schema_version": "curator://album-analysis/writer/v1", "payload": payload,
+            "runtime_metrics": runtime_metrics or {}})
     def evidence_metadata(self, evidence_uuid: str) -> dict: return self.get(f"/ai-evidence/{evidence_uuid}")
     def download_evidence(self, evidence_uuid: str) -> bytes:
         request = Request(f"{self.base_url}/api/v1/ai-evidence/{evidence_uuid}/content",

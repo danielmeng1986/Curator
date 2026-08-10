@@ -38,3 +38,17 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(b"image-bytes",content)
         self.assertEqual("/api/v1/ai-evidence/evidence-uuid/content",requests[0].full_url.replace("http://curator",""))
         self.assertNotIn("path",requests[0].full_url)
+
+    def test_worker_submits_versioned_vision_and_writer_results(self):
+        requests=[]
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*_): pass
+            def read(self): return b'{"data":{"result":{}}}'
+        def opener(request,timeout): requests.append(request); return Response()
+        client=CuratorClient("http://curator","writer-token",opener=opener)
+        client.submit_vision("item-1",{"scene":"lake"},{"duration_ms":2})
+        client.submit_writer("item-1",{"suggested_names":[]})
+        self.assertEqual(["/api/v1/ai-work-items/item-1/results/vision","/api/v1/ai-work-items/item-1/results/writer"],
+            [request.full_url.replace("http://curator","") for request in requests])
+        self.assertEqual("curator://album-analysis/vision/v1",json.loads(requests[0].data)["schema_version"])

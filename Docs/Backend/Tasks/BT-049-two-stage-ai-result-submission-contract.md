@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-049` — Status: `Proposed`
+`BT-049` — Status: `Complete`
 
 ## Title
 
@@ -57,4 +57,20 @@ truthful analysis and name recommendations on `workspace_album_ai_worker`.
 ## Risks or Notes
 
 - The existing prompt requests exactly six names while earlier discussion used
-  five as an example; UI-011A must make the count configurable or freeze it.
+  five as an example; schema v1 freezes the accepted count at six. A future
+  schema version may make this configurable without weakening v1 validation.
+
+## Completion Record
+
+- Added migration `0009_two_stage_ai_results.sql` with immutable per-stage
+  payloads and a separate `AwaitingVision → AwaitingWriter → ReadyForReview`
+  state.
+- Published strict Vision and Writer JSON Schemas and implemented bounded
+  normalization, ordered submission, Manifest revalidation, configuration
+  snapshot hashing, claim ownership, and replay protection.
+- Added Writer submission and Admin review endpoints plus Worker client helpers.
+  Successful Writer submission completes the active attempt and Work Item but
+  deliberately leaves permanent Album data unchanged.
+- Verified migration repeatability/stage uniqueness, invalid ordering and
+  claims, idempotent/conflicting replay, two-stage persistence, Operations,
+  Worker request paths, and the authenticated HTTP workflow.

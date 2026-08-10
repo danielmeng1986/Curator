@@ -197,6 +197,20 @@ bounded length, private no-store caching, and nosniff headers. Admin may read
 for review/audit. Writer access requires that the same Token currently owns an
 unexpired claim on the evidence Work Item. No route accepts a path parameter.
 
+`POST /api/v1/ai-work-items/{work_item_uuid}/results/vision` and `/writer`
+accept Writer-owned, versioned JSON results in that strict order. Both stages
+are bound to the active claim, immutable evidence Manifest, and snapshotted AI
+configuration. Vision uses `curator://album-analysis/vision/v1`; Writer uses
+`curator://album-analysis/writer/v1` and contains exactly six unique, bounded
+English Album-name suggestions. Exact retries are idempotent; a changed replay,
+wrong stage, stale evidence, or expired/wrong claim returns structured `409`
+without advancing review state. Accepted Writer output completes Worker
+execution and makes the Work Item `ReadyForReview`—it does not change Album.
+
+`GET /api/v1/ai-work-items/{work_item_uuid}/results` is Admin-only and returns
+the immutable accepted payloads, runtime metrics, configuration and Manifest
+bindings, submitter identity, Operations, and current result-review state.
+
 ## Future extensions
 
 - Route/resource catalogs can be added without changing the shared contract.

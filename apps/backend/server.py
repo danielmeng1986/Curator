@@ -747,6 +747,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif re.match(r"^/api/ai-work-items/[^/]+/evidence-manifest$", path):
                 if not self._require_admin_principal(): return
                 self._send_success(200, {"manifest":self._ai_photo_evidence_service().revalidate(path.split("/")[3])})
+            elif re.match(r"^/api/ai-work-items/[^/]+/results$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200, {"results":self._ai_result_service().get(path.split("/")[3])})
             elif re.match(r"^/api/ai-evidence/[^/]+$", path):
                 evidence_uuid = path.split("/")[3]
                 self._send_success(200,{"evidence":self._ai_photo_evidence_service().metadata(
@@ -969,6 +972,11 @@ class AppHandler(SimpleHTTPRequestHandler):
             repo.AIPhotoEvidenceRepository(open_db), repo.AIWorkItemRepository(open_db),
             repo.AlbumRepository(open_db), APP_CONFIG.get("archive_root", ""),
             repo.IssueRepository(open_db),
+        )
+
+    def _ai_result_service(self):
+        return svc.AIResultSubmissionService(
+            repo.AIResultRepository(open_db), self._ai_photo_evidence_service()
         )
 
     def _work_dispatch_service(self):
@@ -1226,6 +1234,14 @@ class AppHandler(SimpleHTTPRequestHandler):
                 else:
                     item = service.fail(parts[3], self._principal["token_uuid"], body.get("error_code", ""), body.get("message", ""))
                 self._send_success(200, {"item": item})
+            elif re.match(r"^/api/ai-work-items/[^/]+/results/(vision|writer)$", path):
+                if not self._require_worker_principal(): return
+                parts = path.split("/"); stage = parts[5].title()
+                result = self._ai_result_service().submit(
+                    parts[3], self._principal["token_uuid"], stage,
+                    body.get("schema_version"), body.get("payload"), body.get("runtime_metrics")
+                )
+                self._send_success(200, {"result": result})
             elif re.match(r"^/api/ai-work-items/[^/]+/(retry|cancel)$", path):
                 if not self._require_admin_principal(): return
                 parts = path.split("/"); expected = body.get("expected_version")

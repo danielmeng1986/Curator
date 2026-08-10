@@ -1749,6 +1749,64 @@ class TestAIPhotoEvidenceManifestContract(unittest.TestCase):
         with self.assertRaises(svc.AuthorizationFailure): self.service.metadata(evidence_uuid,"writer","worker-one")
 
 
+class TestAIResultSubmissionContract(unittest.TestCase):
+    _images = TestAIPhotoEvidenceManifestContract._images
+
+    def setUp(self):
+        TestAIPhotoEvidenceManifestContract.setUp(self); self._images(); self.service.create(self.item["uuid"])
+        self.conn.execute("""UPDATE workspace_album_ai_worker SET run_state='Claimed',
+            claimed_by_token_uuid='worker-one',lease_expires_at='2099-01-01T00:00:00+00:00'
+            WHERE uuid=?""",(self.item["uuid"],)); self.conn.commit()
+        self.results = svc.AIResultSubmissionService(
+            repo.AIResultRepository(_db_factory(self.conn)),self.service,
+            now_fn=lambda:datetime(2026,8,10,1,tzinfo=timezone.utc))
+        self.vision = {"scene":"A family walking beside a lake","people":{"minimum":3,"maximum":4},
+            "location_environment":"Outdoor lakeside","subjects":["family"],"objects":["trees"],
+            "actions":["walking"],"confidence":0.9,"warnings":[]}
+        self.writer = {"album_summary":"A calm family outing","description":"A family explores a lakeside setting.",
+            "suggested_names":["Lakeside Family Walk","Quiet Summer Shore","Morning By The Lake",
+                "Family Waterside Adventure","Gentle Lakeside Memories","Together Near The Water"]}
+
+    def tearDown(self): TestAIPhotoEvidenceManifestContract.tearDown(self)
+
+    def test_ordered_success_completes_item_and_is_idempotent(self):
+        first = self.results.submit(self.item["uuid"],"worker-one","Vision",self.results.VISION_SCHEMA,self.vision,{"duration_ms":120})
+        replay = self.results.submit(self.item["uuid"],"worker-one","Vision",self.results.VISION_SCHEMA,self.vision,{"duration_ms":999})
+        self.assertTrue(replay["idempotent"]); self.assertEqual(first["uuid"],replay["uuid"]); self.assertEqual(first["operation_uuid"],replay["operation_uuid"])
+        self.results.submit(self.item["uuid"],"worker-one","Writer",self.results.WRITER_SCHEMA,self.writer)
+        result = self.results.get(self.item["uuid"])
+        self.assertEqual("ReadyForReview",result["state"]["state"]); self.assertEqual(2,len(result["stages"]))
+        item = self.conn.execute("SELECT run_state FROM workspace_album_ai_worker WHERE uuid=?",(self.item["uuid"],)).fetchone()
+        self.assertEqual("Completed",item[0]); self.assertEqual(2,self.conn.execute("SELECT COUNT(*) FROM operation WHERE entity_uuid=?",(self.item["uuid"],)).fetchone()[0])
+
+    def test_writer_before_vision_and_conflicting_replay_are_rejected(self):
+        with self.assertRaises(svc.ServiceConflict) as ctx:
+            self.results.submit(self.item["uuid"],"worker-one","Writer",self.results.WRITER_SCHEMA,self.writer)
+        self.assertEqual("AI_RESULT_STAGE_INVALID",ctx.exception.code)
+        self.results.submit(self.item["uuid"],"worker-one","Vision",self.results.VISION_SCHEMA,self.vision)
+        changed = dict(self.vision); changed["scene"] = "Different scene"
+        with self.assertRaises(svc.ServiceConflict) as ctx:
+            self.results.submit(self.item["uuid"],"worker-one","Vision",self.results.VISION_SCHEMA,changed)
+        self.assertEqual("AI_RESULT_CONFLICTING_REPLAY",ctx.exception.code)
+
+    def test_invalid_schema_name_and_claim_make_no_result(self):
+        bad = dict(self.writer); bad["suggested_names"] = ["Bad Photos"] * 6
+        with self.assertRaises(ValueError):
+            self.results.submit(self.item["uuid"],"worker-one","Vision","wrong",self.vision)
+        with self.assertRaises(ValueError):
+            self.results.submit(self.item["uuid"],"worker-one","Vision",self.results.VISION_SCHEMA,
+                {**self.vision,"scene":"x"*501})
+        self.results.submit(self.item["uuid"],"worker-one","Vision",self.results.VISION_SCHEMA,self.vision)
+        with self.assertRaises(ValueError):
+            self.results.submit(self.item["uuid"],"worker-one","Writer",self.results.WRITER_SCHEMA,bad)
+        self.assertEqual("AwaitingWriter",self.results.get(self.item["uuid"])["state"]["state"])
+        self.conn.execute("UPDATE workspace_album_ai_worker SET claimed_by_token_uuid='other'"); self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict) as ctx:
+            self.results.submit(self.item["uuid"],"worker-one","Writer",self.results.WRITER_SCHEMA,self.writer)
+        self.assertEqual("AI_RESULT_CLAIM_INVALID",ctx.exception.code)
+        self.assertEqual(1,self.conn.execute("SELECT COUNT(*) FROM ai_work_item_result_stage").fetchone()[0])
+
+
 class TestAIModelConfigurationContract(unittest.TestCase):
     def setUp(self):
         self.conn = _make_db(); self.repo = repo.AIModelConfigurationRepository(_db_factory(self.conn))

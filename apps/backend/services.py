@@ -2321,6 +2321,84 @@ class AIPhotoEvidenceManifestService:
             "sha256":evidence["sha256"],"filename":f"evidence-{evidence_uuid}{extension}"}
 
 
+class AIResultSubmissionService:
+    """Validate Manifest-bound Vision then Writer JSON and persist accepted stages."""
+
+    VISION_SCHEMA = "curator://album-analysis/vision/v1"
+    WRITER_SCHEMA = "curator://album-analysis/writer/v1"
+
+    def __init__(self,result_repo,evidence_service,now_fn=None):
+        self._repo,self._evidence = result_repo,evidence_service
+        self._now = now_fn or (lambda:datetime.now(timezone.utc))
+
+    @staticmethod
+    def _text(value,name,limit):
+        if not isinstance(value,str) or not value.strip() or len(value)>limit or any(ord(char)<32 and char not in "\n\t" for char in value):
+            raise ValueError(f"{name} must be a non-empty bounded string.")
+        return value.strip()
+
+    def _vision(self,payload):
+        required = {"scene","people","location_environment","subjects","objects","actions","confidence","warnings"}
+        if not isinstance(payload,dict) or set(payload) != required: raise ValueError("Vision result fields do not match schema v1.")
+        result = {"scene":self._text(payload["scene"],"scene",500),
+            "location_environment":self._text(payload["location_environment"],"location_environment",500)}
+        people = payload["people"]
+        if not isinstance(people,dict) or set(people) != {"minimum","maximum"} or any(isinstance(people[k],bool) or not isinstance(people[k],int) or not 0<=people[k]<=100 for k in people) or people["minimum"]>people["maximum"]:
+            raise ValueError("people must contain a valid minimum/maximum range.")
+        result["people"] = people
+        for key,maximum in (("subjects",50),("objects",50),("actions",50),("warnings",20)):
+            values = payload[key]
+            if not isinstance(values,list) or len(values)>maximum: raise ValueError(f"{key} must be a bounded array.")
+            result[key] = [self._text(value,key,300 if key=="warnings" else 120) for value in values]
+        confidence = payload["confidence"]
+        if isinstance(confidence,bool) or not isinstance(confidence,(int,float)) or not 0<=confidence<=1:
+            raise ValueError("confidence must be from 0 to 1.")
+        result["confidence"] = confidence; return result
+
+    def _writer(self,payload):
+        if not isinstance(payload,dict) or set(payload) != {"album_summary","description","suggested_names"}:
+            raise ValueError("Writer result fields do not match schema v1.")
+        names = payload["suggested_names"]
+        if not isinstance(names,list) or len(names)!=6 or len(set(names))!=6: raise ValueError("suggested_names must contain exactly six unique names.")
+        forbidden = {"photo","photos","collection","session","gallery"}; normalized=[]
+        for name in names:
+            name = self._text(name,"suggested_name",120); words=name.split()
+            if not 2<=len(words)<=5 or any(not re.fullmatch(r"[A-Z][A-Za-z'’-]*",word) for word in words) \
+                    or any(word.casefold() in forbidden for word in words):
+                raise ValueError("Each suggested name must contain 2-5 capitalized English words and no forbidden term.")
+            normalized.append(name)
+        return {"album_summary":self._text(payload["album_summary"],"album_summary",500),
+            "description":self._text(payload["description"],"description",2000),"suggested_names":normalized}
+
+    @staticmethod
+    def _metrics(metrics):
+        if metrics is None: return {}
+        if not isinstance(metrics,dict) or len(metrics)>20: raise ValueError("runtime_metrics must be a bounded object.")
+        clean={}
+        for key,value in metrics.items():
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,39}",str(key)) or isinstance(value,(dict,list)) or len(str(value))>200:
+                raise ValueError("runtime_metrics contains an invalid field.")
+            clean[str(key)]=value
+        return clean
+
+    def submit(self,item_uuid,worker_token_uuid,stage,schema_version,payload,runtime_metrics=None):
+        expected = self.VISION_SCHEMA if stage=="Vision" else self.WRITER_SCHEMA if stage=="Writer" else None
+        if schema_version != expected: raise ValueError("schema_version is not supported for this result stage.")
+        normalized = self._vision(payload) if stage=="Vision" else self._writer(payload)
+        raw = json.dumps(normalized,sort_keys=True,separators=(",",":"),ensure_ascii=True)
+        if len(raw.encode()) > (65536 if stage=="Vision" else 32768): raise ValueError("AI result payload is too large.")
+        self._evidence.revalidate(item_uuid)
+        try:
+            return self._repo.submit(item_uuid,worker_token_uuid,stage,schema_version,raw,
+                hashlib.sha256(raw.encode()).hexdigest(),json.dumps(self._metrics(runtime_metrics),sort_keys=True),self._now().isoformat())
+        except repo.PersistenceNotFound as exc: raise ServiceNotFound("AI Work Item not found.") from exc
+        except repo.PersistenceConflict as exc:
+            code=exc.details.get("code","AI_RESULT_CONFLICT")
+            raise ServiceConflict(code,"AI result submission conflicts with Work Item state.",exc.details) from exc
+
+    def get(self,item_uuid): return self._repo.get_results(item_uuid)
+
+
 class AIWorkspaceService:
     """Own the Dataset-independent AI Workspace container lifecycle."""
 

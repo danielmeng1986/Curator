@@ -931,6 +931,20 @@ class TestVersionedApiAuthorization(_TestServerBase):
                 status,mime,cache,content = self._get_raw(f"/api/v1/ai-evidence/{evidence_uuid}/content",writer)
                 self.assertEqual(200,status); self.assertEqual("image/jpeg",mime); self.assertEqual("private, no-store",cache)
                 self.assertEqual((album_dir / manifest["evidence"][0]["relative_path"]).read_bytes(),content)
+                vision = {"schema_version":"curator://album-analysis/vision/v1","payload":{
+                    "scene":"A family beside a lake","people":{"minimum":3,"maximum":4},
+                    "location_environment":"Outdoor lakeside","subjects":["family"],"objects":["trees"],
+                    "actions":["walking"],"confidence":0.9,"warnings":[]}}
+                status, accepted = self._post(f"/api/v1/ai-work-items/{item_uuid}/results/vision",vision,writer)
+                self.assertEqual(200,status); self.assertEqual("Vision",accepted["data"]["result"]["stage"])
+                writer_payload = {"schema_version":"curator://album-analysis/writer/v1","payload":{
+                    "album_summary":"A calm family outing","description":"A family explores a lakeside setting.",
+                    "suggested_names":["Lakeside Family Walk","Quiet Summer Shore","Morning By The Lake",
+                        "Family Waterside Adventure","Gentle Lakeside Memories","Together Near The Water"]}}
+                status, accepted = self._post(f"/api/v1/ai-work-items/{item_uuid}/results/writer",writer_payload,writer)
+                self.assertEqual(200,status); self.assertEqual("Writer",accepted["data"]["result"]["stage"])
+                status, results = self._get(f"/api/v1/ai-work-items/{item_uuid}/results",admin)
+                self.assertEqual(200,status); self.assertEqual("ReadyForReview",results["data"]["results"]["state"]["state"])
 
     def test_current_principal_and_renewal_request_are_token_safe(self):
         issued = self._issue(role="writer")

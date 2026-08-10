@@ -14,6 +14,7 @@ from __future__ import annotations
 import uuid
 import json
 import sqlite3
+import hashlib
 from datetime import datetime, timezone
 
 
@@ -2548,6 +2549,95 @@ class AIPhotoEvidenceRepository:
             self._ensure_schema(conn); row = conn.execute(
                 "SELECT * FROM workspace_album_ai_worker_photo WHERE uuid=?", (evidence_uuid,)).fetchone()
         return dict(row) if row else None
+
+
+class AIResultRepository:
+    """Atomic ordered result persistence and successful Work Item completion."""
+
+    def __init__(self, db_factory): self._db = db_factory
+
+    @staticmethod
+    def _ensure_schema(conn):
+        AIPhotoEvidenceRepository._ensure_schema(conn); OperationRepository._ensure_schema(conn)
+        conn.executescript("""CREATE TABLE IF NOT EXISTS ai_work_item_result_state (
+            work_item_uuid TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'AwaitingVision'
+                CHECK(state IN ('AwaitingVision','AwaitingWriter','ReadyForReview')),
+            vision_result_uuid TEXT, writer_result_uuid TEXT, version INTEGER NOT NULL DEFAULT 1,
+            updated_at TEXT NOT NULL, FOREIGN KEY(work_item_uuid) REFERENCES workspace_album_ai_worker(uuid));
+        CREATE TABLE IF NOT EXISTS ai_work_item_result_stage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
+            work_item_uuid TEXT NOT NULL, stage TEXT NOT NULL CHECK(stage IN ('Vision','Writer')),
+            schema_version TEXT NOT NULL, manifest_uuid TEXT NOT NULL, manifest_version INTEGER NOT NULL,
+            configuration_snapshot_sha256 TEXT NOT NULL, payload_json TEXT NOT NULL,
+            payload_sha256 TEXT NOT NULL, runtime_metrics_json TEXT NOT NULL,
+            operation_uuid TEXT NOT NULL,
+            submitted_by_token_uuid TEXT NOT NULL, submitted_at TEXT NOT NULL,
+            UNIQUE(work_item_uuid,stage), FOREIGN KEY(work_item_uuid) REFERENCES workspace_album_ai_worker(uuid),
+            FOREIGN KEY(manifest_uuid) REFERENCES ai_photo_evidence_manifest(uuid));""")
+
+    @staticmethod
+    def _stage(row):
+        item = dict(row); item["payload"] = json.loads(item.pop("payload_json")); item["runtime_metrics"] = json.loads(item.pop("runtime_metrics_json")); return item
+
+    def submit(self, item_uuid, worker_token_uuid, stage, schema_version, payload_json,
+               payload_sha256, metrics_json, now):
+        result_uuid, operation_uuid = str(uuid.uuid4()), str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn); conn.execute("BEGIN IMMEDIATE")
+            try:
+                existing = conn.execute("SELECT * FROM ai_work_item_result_stage WHERE work_item_uuid=? AND stage=?", (item_uuid,stage)).fetchone()
+                if existing:
+                    if existing["payload_sha256"] == payload_sha256 and existing["submitted_by_token_uuid"] == worker_token_uuid:
+                        conn.commit(); result = self._stage(existing); result["idempotent"] = True; return result
+                    raise PersistenceConflict({"code":"AI_RESULT_CONFLICTING_REPLAY","stage":stage})
+                item = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?", (item_uuid,)).fetchone()
+                if not item: raise PersistenceNotFound()
+                if item["run_state"] != "Claimed" or item["claimed_by_token_uuid"] != worker_token_uuid \
+                        or not item["lease_expires_at"] or item["lease_expires_at"] <= now:
+                    raise PersistenceConflict({"code":"AI_RESULT_CLAIM_INVALID"})
+                manifest = conn.execute("SELECT * FROM ai_photo_evidence_manifest WHERE work_item_uuid=?", (item_uuid,)).fetchone()
+                if not manifest: raise PersistenceConflict({"code":"AI_RESULT_MANIFEST_REQUIRED"})
+                state = conn.execute("SELECT * FROM ai_work_item_result_state WHERE work_item_uuid=?", (item_uuid,)).fetchone()
+                current = state["state"] if state else "AwaitingVision"
+                expected = "AwaitingVision" if stage == "Vision" else "AwaitingWriter"
+                if current != expected: raise PersistenceConflict({"code":"AI_RESULT_STAGE_INVALID","current":current,"stage":stage})
+                config_hash = hashlib.sha256(item["configuration_snapshot_json"].encode()).hexdigest()
+                conn.execute("""INSERT INTO ai_work_item_result_stage
+                    (uuid,work_item_uuid,stage,schema_version,manifest_uuid,manifest_version,
+                     configuration_snapshot_sha256,payload_json,payload_sha256,runtime_metrics_json,
+                     operation_uuid,submitted_by_token_uuid,submitted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (result_uuid,item_uuid,stage,schema_version,manifest["uuid"],manifest["manifest_version"],
+                     config_hash,payload_json,payload_sha256,metrics_json,operation_uuid,worker_token_uuid,now))
+                if not state:
+                    conn.execute("""INSERT INTO ai_work_item_result_state
+                        (work_item_uuid,state,vision_result_uuid,version,updated_at) VALUES (?,'AwaitingWriter',?,1,?)""",
+                        (item_uuid,result_uuid,now))
+                elif stage == "Writer":
+                    conn.execute("""UPDATE ai_work_item_result_state SET state='ReadyForReview',writer_result_uuid=?,
+                        version=version+1,updated_at=? WHERE work_item_uuid=?""",(result_uuid,now,item_uuid))
+                    conn.execute("""UPDATE workspace_album_ai_worker SET run_state='Completed',lease_expires_at=NULL,
+                        version=version+1,updated_at=? WHERE uuid=?""",(now,item_uuid))
+                    conn.execute("""UPDATE ai_work_item_attempt SET ended_at=?,outcome='Completed'
+                        WHERE work_item_uuid=? AND ended_at IS NULL""",(now,item_uuid))
+                conn.execute("""INSERT INTO operation
+                    (uuid,operation_type,initiator,status,summary,started_at,ended_at,entity_uuid)
+                    VALUES (?,?,?,'Succeeded',?,?,?,?)""",(operation_uuid,f"ai_result_{stage.lower()}","AIWorker",
+                    f"Accepted {stage} result",now,now,item_uuid))
+                conn.commit()
+            except Exception: conn.rollback(); raise
+        result = self.get_stage(item_uuid,stage); result["idempotent"] = False; return result
+
+    def get_stage(self,item_uuid,stage):
+        with self._db() as conn:
+            self._ensure_schema(conn); row = conn.execute("SELECT * FROM ai_work_item_result_stage WHERE work_item_uuid=? AND stage=?",(item_uuid,stage)).fetchone()
+        return self._stage(row) if row else None
+
+    def get_results(self,item_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn); state = conn.execute("SELECT * FROM ai_work_item_result_state WHERE work_item_uuid=?",(item_uuid,)).fetchone()
+            rows = conn.execute("SELECT * FROM ai_work_item_result_stage WHERE work_item_uuid=? ORDER BY id",(item_uuid,)).fetchall()
+        return {"state":dict(state) if state else {"work_item_uuid":item_uuid,"state":"AwaitingVision","version":0},
+            "stages":[self._stage(row) for row in rows]}
 
 
 class ImportRepository:
