@@ -1,0 +1,64 @@
+export const UI_READINESS_SUITES = Object.freeze([
+  {
+    id: 'foundation-contracts', task: 'UI-002/UI-003/UI-017',
+    specification: 'UI Safety and Acceptance; Backend API Contract',
+    backendEvidence: 'TestVersionedApiAuthorization',
+    command: process.execPath,
+    args: ['--test', 'apps/web/tests/api_contract_test.mjs', 'apps/web/tests/browser_fixture_test.mjs', 'apps/web/tests/ui_interaction_contract_test.mjs'],
+    timeoutMs: 90_000,
+  },
+  {
+    id: 'authenticated-smoke', task: 'UI-004C',
+    specification: 'Authentication; API Contract',
+    backendEvidence: 'TestAuthenticatedApiWorkflow',
+    command: process.execPath, args: ['apps/web/tests/browser_workflow_acceptance.mjs'], timeoutMs: 90_000,
+  },
+  {
+    id: 'admin-workflows', task: 'UI-004B/UI-010/UI-010A-D',
+    specification: 'Authentication; Snapshot; protected database Restore',
+    backendEvidence: 'BT-040/BT-041/BT-042 and Backend service/API regression',
+    command: process.execPath, args: ['apps/web/tests/admin_workflows_browser_acceptance.mjs'], timeoutMs: 180_000,
+  },
+  {
+    id: 'permanent-entities', task: 'UI-005/UI-012/UI-018',
+    specification: 'Permanent entity and Album relationship contracts',
+    backendEvidence: 'Entity repository/service/API regression',
+    command: process.execPath, args: ['apps/web/tests/entity_management_full_browser_acceptance.mjs'], timeoutMs: 120_000,
+  },
+  {
+    id: 'import', task: 'UI-006/UI-013',
+    specification: 'Import Workflow',
+    backendEvidence: 'BT-019/BT-036; test_import_workflow_acceptance',
+    command: process.execPath, args: ['apps/web/tests/import_full_browser_acceptance.mjs'], timeoutMs: 180_000,
+  },
+  {
+    id: 'operation-history', task: 'UI-007',
+    specification: 'Operation Logging',
+    backendEvidence: 'BT-030; TestOperationHistoryDisclosure',
+    command: process.execPath, args: ['apps/web/tests/operation_history_browser_acceptance.mjs'], timeoutMs: 90_000,
+  },
+  {
+    id: 'repair-quarantine', task: 'UI-008/UI-009/UI-014',
+    specification: 'Issue Management; Repair Workflow',
+    backendEvidence: 'BT-020/BT-022/BT-023/BT-038/BT-039 workflow acceptance',
+    command: process.execPath, args: ['apps/web/tests/repair_quarantine_full_browser_acceptance.mjs'], timeoutMs: 180_000,
+  },
+  {
+    id: 'permission-disclosure', task: 'UI-015',
+    specification: 'Authentication; role-sensitive Operation disclosure',
+    backendEvidence: 'TestVersionedApiAuthorization; TestOperationHistoryDisclosure',
+    command: process.execPath, args: ['apps/web/tests/permission_disclosure_full_browser_acceptance.mjs'], timeoutMs: 180_000,
+  },
+  {
+    id: 'work-dispatch', task: 'UI-011E/UI-011F',
+    specification: 'Work Dispatch Workflow',
+    backendEvidence: 'BT-054 through BT-058; test_ai_workspace_workflow_acceptance',
+    command: process.execPath, args: ['apps/web/tests/work_dispatch_browser_acceptance.mjs'], timeoutMs: 120_000,
+  },
+  {
+    id: 'workspace-review', task: 'UI-011A-D',
+    specification: 'AI Collection Workspace; Workspace Review state machine',
+    backendEvidence: 'BT-043 through BT-053/BT-057; test_ai_workspace_workflow_acceptance',
+    command: process.execPath, args: ['apps/web/tests/workspace_review_browser_acceptance.mjs'], timeoutMs: 180_000,
+  },
+]);

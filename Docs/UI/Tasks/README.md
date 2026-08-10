@@ -31,25 +31,25 @@ snapshot, archive, and output resources.
 
 | Task | Outcome | Status |
 | --- | --- | --- |
-| [UI-001](UI-001-establish-workflow-coverage-matrix.md) | Controlling UI workflow and readiness matrix | Proposed |
-| [UI-002](UI-002-standardize-permissions-errors-and-feedback.md) | Shared permissions, errors, and feedback | Proposed |
-| [UI-003](UI-003-establish-browser-workflow-fixtures.md) | Disposable browser workflow fixtures | Proposed |
-| [UI-004A](UI-004A-command-line-admin-bootstrap.md) | Supported initial administrator CLI bootstrap | Proposed |
-| [UI-004B](UI-004B-loopback-admin-ui-bootstrap.md) | One-time loopback administrator UI bootstrap | Proposed |
-| [UI-004C](UI-004C-token-connection-lifecycle-ui.md) | Connection and token lifecycle UI | Proposed |
-| [UI-005](UI-005-adapt-entity-management-ui.md) | Permanent entity management adaptation | Proposed |
-| [UI-006](UI-006-adapt-import-workflow-ui.md) | Import preview and execution UI | Proposed |
-| [UI-007](UI-007-add-operation-history-ui.md) | Operation history and traceability UI | Proposed |
-| [UI-008](UI-008-add-issue-and-repair-decision-ui.md) | Issue and Repair decision UI | Proposed |
-| [UI-009](UI-009-add-quarantine-and-restore-ui.md) | Quarantine and item restore UI | Proposed |
-| [UI-010](UI-010-establish-admin-center.md) | Administrator Center shell and policy | Proposed |
-| [UI-010A](UI-010A-administer-devices-and-tokens.md) | Device registration and token administration | Proposed |
-| [UI-010B](UI-010B-administer-backups-and-snapshots.md) | Backup and Snapshot administration | Completed |
-| [UI-010C](UI-010C-administer-database-restore.md) | Database restore administration | Completed |
-| [UI-010D](UI-010D-admin-workflow-browser-acceptance.md) | Administrator workflow browser acceptance | Completed |
+| [UI-001](UI-001-establish-workflow-coverage-matrix.md) | Controlling UI workflow and readiness matrix | Complete |
+| [UI-002](UI-002-standardize-permissions-errors-and-feedback.md) | Shared permissions, errors, and feedback | Complete |
+| [UI-003](UI-003-establish-browser-workflow-fixtures.md) | Disposable browser workflow fixtures | Complete |
+| [UI-004A](UI-004A-command-line-admin-bootstrap.md) | Supported initial administrator CLI bootstrap | Complete |
+| [UI-004B](UI-004B-loopback-admin-ui-bootstrap.md) | One-time loopback administrator UI bootstrap | Complete |
+| [UI-004C](UI-004C-token-connection-lifecycle-ui.md) | Connection and token lifecycle UI | Complete |
+| [UI-005](UI-005-adapt-entity-management-ui.md) | Permanent entity management adaptation | Complete |
+| [UI-006](UI-006-adapt-import-workflow-ui.md) | Import preview and execution UI | Complete |
+| [UI-007](UI-007-add-operation-history-ui.md) | Operation history and traceability UI | Complete |
+| [UI-008](UI-008-add-issue-and-repair-decision-ui.md) | Issue and Repair decision UI | Complete |
+| [UI-009](UI-009-add-quarantine-and-restore-ui.md) | Quarantine and item restore UI | Complete |
+| [UI-010](UI-010-establish-admin-center.md) | Administrator Center shell and policy | Complete |
+| [UI-010A](UI-010A-administer-devices-and-tokens.md) | Device registration and token administration | Complete |
+| [UI-010B](UI-010B-administer-backups-and-snapshots.md) | Backup and Snapshot administration | Complete |
+| [UI-010C](UI-010C-administer-database-restore.md) | Database restore administration | Complete |
+| [UI-010D](UI-010D-admin-workflow-browser-acceptance.md) | Administrator workflow browser acceptance | Complete |
 | [UI-010E](UI-010E-administer-digital-asset-trash.md) | Digital Asset Trash review, restore, and purge | Blocked |
-| [UI-011A](UI-011A-specify-ai-collection-workspace.md) | AI Collection Workspace product/data contract | Proposed |
-| [UI-011B](UI-011B-specify-workspace-review-state-machine.md) | Stable review state machine and read model | Proposed |
+| [UI-011A](UI-011A-specify-ai-collection-workspace.md) | AI Collection Workspace product/data contract | Complete |
+| [UI-011B](UI-011B-specify-workspace-review-state-machine.md) | Stable review state machine and read model | Complete |
 | [UI-011C](UI-011C-build-workspace-review-ui.md) | Dataset-adaptable Workspace review UI | Complete |
 | [UI-011D](UI-011D-workspace-browser-acceptance.md) | Workspace browser acceptance | Complete |
 | [UI-011E](UI-011E-build-filtered-album-work-dispatch-ui.md) | Filtered Admin Album work dispatch console | Complete |
@@ -58,7 +58,7 @@ snapshot, archive, and output resources.
 | [UI-013](UI-013-import-browser-acceptance.md) | Import browser acceptance | Complete |
 | [UI-014](UI-014-repair-and-quarantine-browser-acceptance.md) | Repair, Issue, and Quarantine browser acceptance | Complete |
 | [UI-015](UI-015-permission-disclosure-browser-acceptance.md) | Role and diagnostic-disclosure acceptance | Complete |
-| [UI-016](UI-016-establish-ui-workflow-readiness-gate.md) | Complete UI workflow readiness gate | Proposed |
+| [UI-016](UI-016-establish-ui-workflow-readiness-gate.md) | Complete UI workflow readiness gate | Complete |
 | [UI-017](UI-017-establish-playwright-browser-acceptance.md) | Reproducible real-browser acceptance infrastructure | Complete |
 | [UI-018](UI-018-prevent-stale-album-list-refresh-after-navigation.md) | Stable Album detail after list navigation | Complete |
 

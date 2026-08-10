@@ -8,7 +8,13 @@ const fixture = await startBrowserFixture({ scenario: 'empty', roles: ['admin', 
   device_name: 'Pending Browser Writer', device_identity: 'pending-browser-writer', requested_role: 'writer', requested_scopes: ['read','write'],
 }] });
 const browser = await chromium.launch({ headless: true });
-async function connect(page, token) { await page.goto(fixture.origin); await page.getByRole('button', { name: 'Connect' }).click(); await page.getByLabel('Approved device Token').fill(token); await page.getByRole('button', { name: 'Validate and connect' }).click(); }
+async function connect(page, token) {
+  await page.goto(fixture.origin);
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.getByLabel('Approved device Token').fill(token);
+  await page.getByRole('button', { name: 'Validate and connect' }).click();
+  await page.getByText(/DB OK/).waitFor();
+}
 try {
   const reader = await browser.newPage(); await connect(reader, fixture.devices.reader.token);
   await reader.goto(`${fixture.origin}/#/admin/devices`); await reader.getByRole('heading', { name: 'Permission denied' }).waitFor(); await reader.close();

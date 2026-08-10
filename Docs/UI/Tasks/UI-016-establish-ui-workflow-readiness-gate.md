@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-016` — Status: `Proposed`
+`UI-016` — Status: `Complete`
 
 ## Title
 
@@ -57,3 +57,16 @@ future Workspace suites into one deterministic readiness command and matrix.
 
 - Gate duration should be controlled through fixture reuse only where isolation remains provable; safety scenarios must not share mutable state.
 
+## Completion Record
+
+- Added `npm run test:ui-readiness` and an explicit ten-suite manifest. Every
+  suite is mandatory and names its UI task, controlling Specification, Backend
+  evidence, and timeout.
+- The runner performs startup checks, uses disposable resources, stops on the
+  first failure, retains a sanitized failure artifact, and removes the gate
+  artifact root after complete success.
+- Two consecutive final UI gate runs passed with all ten suites and no skips.
+- `workflow-readiness` passed twice (34 tests per run), followed by the full
+  Backend regression (751 tests).
+- The gate exposed three immediate UI-test reads; their acceptance scripts now
+  wait for completed authentication or visible role controls before asserting.

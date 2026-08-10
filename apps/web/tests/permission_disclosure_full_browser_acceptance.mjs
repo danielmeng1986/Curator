@@ -163,7 +163,7 @@ try {
 
     const writerContext = await browser.newContext();
     const writer = await writerContext.newPage(); await connect(writer, fixture, 'writer');
-    assert.equal(await writer.locator('[data-route="import"]').isVisible(), true);
+    await writer.locator('[data-route="import"]').waitFor({ state: 'visible' });
     for (const route of ['quarantine', 'admin', 'work-dispatch', 'ai-reviews']) {
       assert.equal(await writer.locator(`[data-route="${route}"]`).isVisible(), false, `${route} visible to Writer`);
     }
@@ -188,7 +188,7 @@ try {
     const adminContext = await browser.newContext();
     const admin = await adminContext.newPage(); await connect(admin, fixture, 'admin');
     for (const route of ['import', 'quarantine', 'admin', 'work-dispatch', 'ai-reviews']) {
-      assert.equal(await admin.locator(`[data-route="${route}"]`).isVisible(), true, `${route} hidden from Admin`);
+      await admin.locator(`[data-route="${route}"]`).waitFor({ state: 'visible' });
     }
     const adminStateResponse = admin.waitForResponse(response => response.url().endsWith('/api/v1/auth/admin/state'));
     await admin.goto(`${fixture.origin}/#/admin/devices`);

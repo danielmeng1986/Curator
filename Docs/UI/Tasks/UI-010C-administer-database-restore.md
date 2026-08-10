@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-010C` — Status: `Completed`
+`UI-010C` — Status: `Complete`
 
 ## Title
 

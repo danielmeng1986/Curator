@@ -8,6 +8,7 @@
     "test:web:import": "node apps/web/tests/import_full_browser_acceptance.mjs",
     "test:web:repair-quarantine": "node apps/web/tests/repair_quarantine_full_browser_acceptance.mjs",
     "test:web:permission-disclosure": "node apps/web/tests/permission_disclosure_full_browser_acceptance.mjs",
+    "test:ui-readiness": "node tools/run_ui_readiness.mjs",
     "playwright:install": "playwright install chromium",
     "playwright:install:all": "playwright install chromium webkit firefox"
   },

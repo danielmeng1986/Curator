@@ -26,12 +26,25 @@ try {
     await page.getByRole('button', { name: 'Initialize administrator' }).click();
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await page.getByLabel('Bootstrap Code').fill(`wrong-${attempt}`);
-      await page.getByRole('button', { name: 'Initialize', exact: true }).click();
-      await page.getByLabel('Bootstrap Code').waitFor();
+      const [response] = await Promise.all([
+        page.waitForResponse((candidate) => candidate.url().endsWith('/api/auth/bootstrap/complete')),
+        page.getByRole('button', { name: 'Initialize', exact: true }).click(),
+      ]);
+      assert.equal(response.status(), 401);
+      const failure = await response.json();
+      assert.equal(
+        failure.error.code,
+        attempt === 4 ? 'AUTHENTICATION_BOOTSTRAP_CODE_LOCKED' : 'AUTHENTICATION_INVALID_BOOTSTRAP_CODE',
+      );
     }
     await page.getByLabel('Bootstrap Code').fill(code);
-    await page.getByRole('button', { name: 'Initialize', exact: true }).click();
-    await page.getByRole('alert').filter({ hasText: /invalid or locked/i }).last().waitFor();
+    const [lockedResponse] = await Promise.all([
+      page.waitForResponse((candidate) => candidate.url().endsWith('/api/auth/bootstrap/complete')),
+      page.getByRole('button', { name: 'Initialize', exact: true }).click(),
+    ]);
+    assert.equal(lockedResponse.status(), 401);
+    assert.equal((await lockedResponse.json()).error.code, 'AUTHENTICATION_BOOTSTRAP_CODE_LOCKED');
+    await page.getByRole('alert').filter({ hasText: /locked/i }).last().waitFor();
     assert.equal(await page.evaluate(() => localStorage.getItem('curator.web.deviceToken')), null);
     await logsDoNotContain(lockedFixture, [code]);
     await page.close();

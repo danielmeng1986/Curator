@@ -31,11 +31,11 @@ zero-side-effect assertion. The final gate is owned by UI-016.
 | BT-022 Quarantine/Restore; `test_quarantine_workflow_acceptance` | Quarantine and restore individual filesystem items with verified traceability. | `/admin/quarantine`; Admin | UI-009, UI-014 | Cancel, collision, missing item, replay, and non-Admin request preserve filesystem/durable state. | Ready — Admin-only browser evidence proves intact Quarantine, cancellation, replay/collision safety, Snapshot-backed item Restore, and linked Operations. |
 | BT-023 cross-workflow trail; `test_traceability_workflow_acceptance` | Navigate Import → Issue → Repair → Snapshot/Operation evidence without losing history. | `/operations/:uuid` and linked feature pages; role-sensitive | UI-007, UI-014/015 | Archived/missing links remain truthful; sensitive recovery data is withheld. | Ready — UI-014 proves durable workflow links and UI-015 proves unavailable/missing identifiers plus rendered and network-payload disclosure boundaries. |
 | BT-030 Operation disclosure; `TestOperationHistoryDisclosure` | Reader sees public summaries; Writer/Admin see only permitted recovery context. | `/operations`, `/operations/:uuid`; Reader/Writer/Admin | UI-007, UI-015 | Direct response/rendered page does not disclose fields forbidden to the role. | Ready — role-isolated network capture proves Reader redaction, Writer/Admin operational context, and universal exclusion of sensitive diagnostics. |
-| Snapshot/Backup service and API regression | Inspect/create/clean Backend-controlled recovery points. | `/admin/recovery`; Admin | UI-010B/D | Arbitrary paths, unauthorized/cancelled cleanup, corruption, and partial failure never claim full success. | Not Implemented — legacy handlers exist; target authenticated Admin read/action contract and UI are incomplete. |
-| Snapshot decision/restore service and API regression | Restore a verified database recovery point after protective Snapshot and confirmation. | `/admin/recovery/restore`; Admin | UI-010C/D | Invalid/stale/duplicate/cancelled Restore does not change the database; failure remains recoverable. | Blocked by Specification — confirmation strength, interruption, recovery, and post-Restore session behavior require approval. |
+| BT-041 Snapshot/Backup administration contract | Inspect, create, and clean Backend-controlled recovery points. | `/admin/backups`; Admin | UI-010B/D | Arbitrary paths, unauthorized/cancelled cleanup, corruption, and partial failure never claim full success. | Ready — authenticated Admin browser evidence covers inventory, Snapshot creation, preview-bound cleanup, cancellation, stale preview, and truthful partial failure. |
+| BT-042 protected database Restore orchestration | Restore a verified database recovery point after protective Snapshot and typed confirmation. | `/admin/restore`; Admin | UI-010C/D | Invalid/stale/duplicate/cancelled Restore does not change the database; failure remains recoverable. | Ready — isolated browser evidence covers preview, cancellation, stale/replayed execution, protective Snapshot, session invalidation, and post-Restore recovery. |
 | BT-021 historical Workspace lifecycle; `test_workspace_workflow_acceptance` | Preserve historical lifecycle evidence without presenting archived rows as active UI work. | No active UI route; audit/migration evidence only | Backend evidence only; UI-001 exclusion | No active client can browse, edit, batch, or promote the archived collection. | Ready — intentional non-UI outcome established by MT-008 and the revised UI boundary. |
 | Historical Workspace Review/Promotion contract; BT-031 and MT-008 | Historical materialization/archive remains traceable; it is not a reusable active Workspace. | No active UI route | Backend/migration evidence only | Archived rows cannot be reactivated through UI. | Ready — intentional non-UI outcome; not a future Workspace implementation. |
-| Future AI Collection Workspace and Work Dispatch | Admin filters available Albums; Backend atomically reserves one Album per active Worker Group; AI Worker submits dataset-versioned results for review, Promotion, release, and archive. | Future dispatch Available/Active/History and `/workspace/:uuid`; Writer/Admin as specified | UI-011A–F; BT-043–057 | Cross-Worker duplicate reservation, stale dispatch, invalid review, duplicate Promotion, premature release, and archived mutation obey the approved contracts. | Blocked by Specification — UI-011A/B and BT-054 must establish dispatch/dataset/state contracts before UI implementation. |
+| BT-043–058 AI Collection Workspace and Work Dispatch | Admin filters available Albums; Backend atomically reserves one Album per active Worker Group; AI Worker submits dataset-versioned results for review, Promotion, release, and archive. | `/work-dispatch`, `/ai-reviews`; Admin, plus authenticated Worker API | UI-011A–F | Cross-Worker duplicate reservation, stale dispatch, invalid review, duplicate Promotion, premature release, and archived mutation obey the approved contracts. | Ready — approved contracts and isolated browser evidence cover availability filtering, exclusive reservation, review, rework, Promotion, release, and history. |
 
 ## Task-to-matrix ownership
 
@@ -50,8 +50,14 @@ zero-side-effect assertion. The final gate is owned by UI-016.
 
 ## Current gate evidence
 
-The existing `apps/web/tests/browser_workflow_acceptance.mjs` remains a smoke
-test: it proves missing-token presentation, connection with an approved Writer
-Token, Album access, and one rejected Admin request with unchanged Album count.
-It does not make the rows above Ready unless their named UI task and durable
-browser evidence are complete.
+`npm run test:ui-readiness` is the final UI-016 gate. Its explicit manifest
+contains ten mandatory suites spanning foundations, authentication, Admin,
+entities, Import, Operation history, Repair/Quarantine, disclosure, dispatch,
+and AI review. It performs startup checks, enforces timeouts, uses isolated
+fixtures, stops on failure, and reports each task, Specification, Backend
+evidence, duration, and sanitized artifact location.
+
+UI-016 completed two consecutive clean runs with no skips. Backend
+`workflow-readiness` then passed twice (34 tests each), and the full Backend
+regression passed once (751 tests). The smaller authenticated smoke scenario
+remains part of, rather than a substitute for, this complete gate.
