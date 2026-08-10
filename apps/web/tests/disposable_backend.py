@@ -183,6 +183,15 @@ def main() -> None:
     server.AUTH_REGISTRATION_SECRET = args.secret
     server.APP_CONFIG = server.load_app_config()
     server.open_db = lambda: _connect(resources["database"])
+    if args.scenario == "filesystem":
+        original_copytree = server.svc.shutil.copytree
+
+        def fixture_copytree(source, destination, *copy_args, **copy_kwargs):
+            if Path(source).name.startswith("Fail After Preview"):
+                raise OSError("Injected disposable fixture copy failure.")
+            return original_copytree(source, destination, *copy_args, **copy_kwargs)
+
+        server.svc.shutil.copytree = fixture_copytree
     if args.scenario == "future-ai-workspace":
         class FixtureMetadataWorkerAdapter(server.svc.AlbumNameAnalysisDispatchAdapter):
             worker_kind = "fixture_metadata_worker"

@@ -55,7 +55,7 @@ snapshot, archive, and output resources.
 | [UI-011E](UI-011E-build-filtered-album-work-dispatch-ui.md) | Filtered Admin Album work dispatch console | Complete |
 | [UI-011F](UI-011F-work-dispatch-browser-acceptance.md) | Album-exclusive dispatch browser acceptance | Complete |
 | [UI-012](UI-012-entity-management-browser-acceptance.md) | Entity-management browser acceptance | Complete |
-| [UI-013](UI-013-import-browser-acceptance.md) | Import browser acceptance | In Progress |
+| [UI-013](UI-013-import-browser-acceptance.md) | Import browser acceptance | Complete |
 | [UI-014](UI-014-repair-and-quarantine-browser-acceptance.md) | Repair, Issue, and Quarantine browser acceptance | Proposed |
 | [UI-015](UI-015-permission-disclosure-browser-acceptance.md) | Role and diagnostic-disclosure acceptance | Proposed |
 | [UI-016](UI-016-establish-ui-workflow-readiness-gate.md) | Complete UI workflow readiness gate | Proposed |
