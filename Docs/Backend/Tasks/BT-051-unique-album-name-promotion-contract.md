@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-051` — Status: `Proposed`
+`BT-051` — Status: `Complete`
 
 ## Title
 
@@ -70,3 +70,15 @@ Album name while preventing competing model runs from producing multiple winners
   policy; it must not be inferred by this task.
 - Promotion does not itself release the Album Work Reservation; BT-057 closes
   the Group after all terminal obligations are satisfied.
+
+## Completion Record
+
+- Added successful/failed Promotion evidence and partial unique constraints for
+  one successful Workspace/Album and Work Item winner.
+- Added signed, expiring, Admin-bound preview and exact-name confirmation with
+  Album, review, selected-name, Workspace, and Status stale checks.
+- Successful execution atomically updates Album title, maps only `TEMPORARY` to
+  `NAME_GENERATED`, retains every other Status, and records the Operation.
+- Exact replay is idempotent; competing winners, stale state, snapshot failure,
+  and injected database failure cannot mutate Album. Database failure retains
+  `PromotionFailed` evidence and a failed Operation.

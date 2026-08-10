@@ -2474,6 +2474,69 @@ class AIReviewService:
             raise ServiceConflict(code,"AI review transition conflicts with current state.",exc.details) from exc
 
 
+class AIAlbumNamePromotionService:
+    """Signed preview and single-winner Album-name Promotion."""
+
+    def __init__(self,promotion_repo,status_repo,preview_secret,snapshot_fn=None,now_fn=None):
+        self._repo,self._statuses,self._secret=promotion_repo,status_repo,preview_secret
+        self._snapshot=snapshot_fn; self._now=now_fn or (lambda:datetime.now(timezone.utc))
+
+    def _sign(self,payload):
+        raw=base64.urlsafe_b64encode(json.dumps(payload,sort_keys=True,separators=(",",":")).encode()).decode().rstrip("=")
+        return f"{raw}.{hmac.new(self._secret,raw.encode(),hashlib.sha256).hexdigest()}"
+    def _read(self,token):
+        try:
+            raw,signature=token.rsplit(".",1)
+            expected=hmac.new(self._secret,raw.encode(),hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(signature,expected): raise ValueError
+            payload=json.loads(base64.urlsafe_b64decode(raw+"="*(-len(raw)%4)))
+            if payload["expires_at"]<=self._now().isoformat(): raise ValueError
+            return payload
+        except Exception as exc: raise ServiceConflict("AI_PROMOTION_PREVIEW_INVALID","Promotion preview is invalid or expired.") from exc
+
+    def preview(self,item_uuid,actor):
+        context=self._repo.context(item_uuid)
+        if not context: raise ServiceNotFound("Approved AI Work Item not found.")
+        if context["promotion"]: return {"already_promoted":True,"promotion":context["promotion"]}
+        if context["review_state"]!="Approved" or not context["selected_name"]:
+            raise ServiceConflict("AI_PROMOTION_NOT_APPROVED","Only an Approved Work Item with a selected name is promotable.")
+        if context["workspace_state"]!="Open": raise ServiceConflict("AI_PROMOTION_WORKSPACE_INVALID","Workspace must be Open.")
+        resulting_status_id=context["status_id"]; resulting_status_name=context["status_name"]
+        if context["status_name"]=="TEMPORARY":
+            statuses=self._statuses.list_with_counts(); generated=next((item for item in statuses if item["name"]=="NAME_GENERATED"),None)
+            if not generated: raise ServiceConflict("AI_PROMOTION_STATUS_REQUIRED","NAME_GENERATED Status is not configured.")
+            resulting_status_id=generated["id"]; resulting_status_name="NAME_GENERATED"
+        bound={key:context[key] for key in ("workspace_uuid","album_id","review_state","review_version","selected_name",
+            "album_title","status_id","album_updated_at","workspace_version","workspace_state")}
+        payload={"preview_uuid":str(_uuid_mod.uuid4()),"work_item_uuid":item_uuid,"album_uuid":context["album_uuid"],
+            "created_by_token_uuid":actor,"context":bound,"resulting_status_id":resulting_status_id,
+            "expires_at":(self._now()+timedelta(minutes=10)).isoformat()}
+        return {"preview_uuid":payload["preview_uuid"],"preview_token":self._sign(payload),"expires_at":payload["expires_at"],
+            "current":{"title":context["album_title"],"status_id":context["status_id"],"status_name":context["status_name"]},
+            "resulting":{"title":context["selected_name"],"status_id":resulting_status_id,"status_name":resulting_status_name},
+            "confirmation":context["selected_name"]}
+
+    def execute(self,token,confirmation,actor):
+        payload=self._read(token)
+        if payload["created_by_token_uuid"]!=actor: raise ServiceConflict("AI_PROMOTION_PREVIEW_INVALID","Promotion preview belongs to another Admin.")
+        if confirmation!=payload["context"]["selected_name"]: raise ValueError("confirmation must exactly match the selected Album name.")
+        snapshot_reference=None
+        required,_=assess_operation_risk(SNAP_OP_WORKSPACE_PROMOTION,1)
+        if required:
+            if not self._snapshot: raise ServiceConflict("SNAPSHOT_REQUIRED","A required Promotion snapshot is unavailable.")
+            snapshot=self._snapshot("workspace_promotion")
+            if not snapshot: raise ServiceConflict("SNAPSHOT_REQUIRED","A required Promotion snapshot failed.")
+            snapshot_reference=str(snapshot)
+        try: return self._repo.execute(payload,actor,self._now().isoformat(),snapshot_reference)
+        except repo.PersistenceConflict as exc:
+            code=exc.details.get("code","AI_PROMOTION_CONFLICT")
+            raise ServiceConflict(code,"Album-name Promotion conflicts with current state.",exc.details) from exc
+        except Exception as exc:
+            failed=self._repo.record_failure(payload,actor,self._now().isoformat(),exc,snapshot_reference)
+            raise ServiceConflict("AI_PROMOTION_FAILED","Album-name Promotion failed without changing Album.",
+                {"promotion_uuid":failed["uuid"],"operation_uuid":failed["operation_uuid"]}) from exc
+
+
 class AIWorkspaceService:
     """Own the Dataset-independent AI Workspace container lifecycle."""
 

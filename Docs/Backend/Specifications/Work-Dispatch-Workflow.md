@@ -136,6 +136,12 @@ dataset-specific Promotion policy may additionally map `TEMPORARY` to
 the existing Status. Preview must disclose both the name change and any
 calculated Status transition. A client cannot nominate the target Status.
 
+Promotion requires a signed, expiring Admin preview bound to the Approved Work
+Item/review version, selected name, Album title/Status/version, Workspace state,
+and calculated Status. Exact name confirmation is required. A partial unique
+database constraint permits only one `Promoted` winner for an Album within one
+Workspace, while retaining failed attempts for audit and later safe retry.
+
 ## Album-analysis Photo evidence policy
 
 The AI model configuration supplies `sample_count` (default 8). The Backend

@@ -82,6 +82,7 @@ IMPORT_PREVIEW_SECRET = secrets.token_bytes(32)
 QUARANTINE_PREVIEW_SECRET = secrets.token_bytes(32)
 SNAPSHOT_CLEANUP_PREVIEW_SECRET = secrets.token_bytes(32)
 WORK_DISPATCH_PREVIEW_SECRET = secrets.token_bytes(32)
+AI_PROMOTION_PREVIEW_SECRET = secrets.token_bytes(32)
 RESTORE_EXECUTION_LOCK = threading.Lock()
 
 # ---------------------------------------------------------------------------
@@ -991,6 +992,10 @@ class AppHandler(SimpleHTTPRequestHandler):
     def _ai_review_service(self):
         return svc.AIReviewService(repo.AIReviewRepository(open_db))
 
+    def _ai_promotion_service(self):
+        return svc.AIAlbumNamePromotionService(repo.AIAlbumNamePromotionRepository(open_db),
+            repo.StatusRepository(open_db),AI_PROMOTION_PREVIEW_SECRET,snapshot_fn=create_db_snapshot)
+
     def _work_dispatch_service(self):
         return svc.WorkDispatchService(
             repo.AlbumAIWorkDispatchRepository(open_db), repo.AlbumRepository(open_db),
@@ -1263,6 +1268,16 @@ class AppHandler(SimpleHTTPRequestHandler):
                 review=self._ai_review_service().decide(path.split("/")[3],body.get("expected_version"),
                     body.get("action"),self._principal["token_uuid"],body)
                 self._send_success(200,{"review":review})
+            elif re.match(r"^/api/ai-work-items/[^/]+/promotion/preview$", path):
+                if not self._require_admin_principal(): return
+                preview=self._ai_promotion_service().preview(path.split("/")[3],self._principal["token_uuid"])
+                self._send_success(200,{"preview":preview})
+            elif path == "/api/ai-promotions/execute":
+                if not self._require_admin_principal(): return
+                token,confirmation=body.get("preview_token"),body.get("confirmation")
+                if not token or confirmation is None: raise ValueError("preview_token and confirmation are required.")
+                result=self._ai_promotion_service().execute(token,confirmation,self._principal["token_uuid"])
+                self._send_success(200,{"promotion":result})
             elif re.match(r"^/api/ai-work-items/[^/]+/(retry|cancel)$", path):
                 if not self._require_admin_principal(): return
                 parts = path.split("/"); expected = body.get("expected_version")

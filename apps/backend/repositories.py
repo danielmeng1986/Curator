@@ -2751,6 +2751,101 @@ class AIReviewRepository:
         result=self.detail(item_uuid); result["successor_work_item_uuid"]=successor_uuid or result["successor_work_item_uuid"]; return result
 
 
+class AIAlbumNamePromotionRepository:
+    """Atomic approved-name winner materialization."""
+
+    def __init__(self,db_factory,failure_hook=None): self._db=db_factory; self._failure_hook=failure_hook
+    @staticmethod
+    def _ensure_schema(conn):
+        AIReviewRepository._ensure_schema(conn)
+        conn.executescript("""CREATE TABLE IF NOT EXISTS workspace_album_name_promotion (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,uuid TEXT NOT NULL UNIQUE,preview_uuid TEXT NOT NULL UNIQUE,
+            workspace_uuid TEXT NOT NULL,work_item_uuid TEXT NOT NULL,album_id INTEGER NOT NULL,
+            selected_name TEXT NOT NULL,prior_title TEXT,prior_status_id INTEGER,resulting_status_id INTEGER,
+            outcome TEXT NOT NULL CHECK(outcome IN ('Promoted','PromotionFailed')),promoted_by_token_uuid TEXT NOT NULL,
+            operation_uuid TEXT NOT NULL,snapshot_reference TEXT,promoted_at TEXT NOT NULL);
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_promotion_workspace_album_winner
+            ON workspace_album_name_promotion(workspace_uuid,album_id) WHERE outcome='Promoted';
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_promotion_work_item_winner
+            ON workspace_album_name_promotion(work_item_uuid) WHERE outcome='Promoted';
+        CREATE TABLE IF NOT EXISTS ai_promotion_preview_claim(preview_uuid TEXT PRIMARY KEY,promotion_uuid TEXT NOT NULL UNIQUE,
+            claimed_by_token_uuid TEXT NOT NULL,claimed_at TEXT NOT NULL);""")
+
+    def context(self,item_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row=conn.execute("""SELECT i.uuid work_item_uuid,i.workspace_uuid,i.album_id,r.state review_state,
+                r.version review_version,r.selected_name,r.selection_source,a.uuid album_uuid,a.title album_title,
+                a.status_id,a.updated_at album_updated_at,s.name status_name,w.lifecycle_state workspace_state,w.version workspace_version
+                FROM workspace_album_ai_worker i JOIN ai_work_item_review r ON r.work_item_uuid=i.uuid
+                JOIN album a ON a.id=i.album_id LEFT JOIN status s ON s.id=a.status_id
+                JOIN ai_workspace w ON w.uuid=i.workspace_uuid WHERE i.uuid=?""",(item_uuid,)).fetchone()
+            winner=conn.execute("SELECT * FROM workspace_album_name_promotion WHERE work_item_uuid=? AND outcome='Promoted'",(item_uuid,)).fetchone()
+        result=dict(row) if row else None
+        if result: result["promotion"]=dict(winner) if winner else None
+        return result
+
+    def execute(self,payload,actor,now,snapshot_reference=None):
+        promotion_uuid,operation_uuid=str(uuid.uuid4()),str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn); conn.execute("BEGIN IMMEDIATE")
+            try:
+                replay=conn.execute("SELECT * FROM workspace_album_name_promotion WHERE preview_uuid=?",(payload["preview_uuid"],)).fetchone()
+                if replay: conn.commit(); result=dict(replay); result["idempotent"]=True; return result
+                winner=conn.execute("SELECT uuid,work_item_uuid FROM workspace_album_name_promotion WHERE workspace_uuid=? AND album_id=? AND outcome='Promoted'",
+                    (payload["context"]["workspace_uuid"],payload["context"]["album_id"])).fetchone()
+                if winner: raise PersistenceConflict({"code":"AI_PROMOTION_WINNER_EXISTS","winner_uuid":winner["uuid"]})
+                context=conn.execute("""SELECT i.workspace_uuid,i.album_id,r.state,r.version,r.selected_name,
+                    a.title,a.status_id,a.updated_at,w.version workspace_version,w.lifecycle_state
+                    FROM workspace_album_ai_worker i JOIN ai_work_item_review r ON r.work_item_uuid=i.uuid
+                    JOIN album a ON a.id=i.album_id JOIN ai_workspace w ON w.uuid=i.workspace_uuid WHERE i.uuid=?""",
+                    (payload["work_item_uuid"],)).fetchone()
+                expected=payload["context"]
+                current={"workspace_uuid":context["workspace_uuid"],"album_id":context["album_id"],"review_state":context["state"],
+                    "review_version":context["version"],"selected_name":context["selected_name"],"album_title":context["title"],
+                    "status_id":context["status_id"],"album_updated_at":context["updated_at"],
+                    "workspace_version":context["workspace_version"],"workspace_state":context["lifecycle_state"]} if context else None
+                if current!=expected: raise PersistenceConflict({"code":"AI_PROMOTION_PREVIEW_STALE"})
+                target_status=payload["resulting_status_id"]
+                conn.execute("INSERT INTO ai_promotion_preview_claim VALUES (?,?,?,?)",(payload["preview_uuid"],promotion_uuid,actor,now))
+                conn.execute("""INSERT INTO workspace_album_name_promotion
+                    (uuid,preview_uuid,workspace_uuid,work_item_uuid,album_id,selected_name,prior_title,prior_status_id,
+                     resulting_status_id,outcome,promoted_by_token_uuid,operation_uuid,snapshot_reference,promoted_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,'Promoted',?,?,?,?)""",(promotion_uuid,payload["preview_uuid"],context["workspace_uuid"],
+                    payload["work_item_uuid"],context["album_id"],context["selected_name"],context["title"],context["status_id"],
+                    target_status,actor,operation_uuid,snapshot_reference,now))
+                if self._failure_hook: self._failure_hook()
+                conn.execute("UPDATE album SET title=?,status_id=?,updated_at=? WHERE id=?",
+                    (context["selected_name"],target_status,now,context["album_id"]))
+                conn.execute("""INSERT INTO operation(uuid,operation_type,initiator,status,summary,started_at,ended_at,entity_uuid,batch_uuid)
+                    VALUES (?,'workspace_promotion','WebUI','Succeeded',?,?,?,?,?)""",(operation_uuid,
+                    f"Promoted Album name to {context['selected_name']}",now,now,payload["album_uuid"],context["workspace_uuid"]))
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                conn.rollback(); raise PersistenceConflict({"code":"AI_PROMOTION_WINNER_EXISTS"}) from exc
+            except Exception: conn.rollback(); raise
+        result=self.context(payload["work_item_uuid"])["promotion"]; result["idempotent"]=False; return result
+
+    def record_failure(self,payload,actor,now,message,snapshot_reference=None):
+        promotion_uuid,operation_uuid=str(uuid.uuid4()),str(uuid.uuid4())
+        context=payload["context"]
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute("""INSERT INTO workspace_album_name_promotion
+                (uuid,preview_uuid,workspace_uuid,work_item_uuid,album_id,selected_name,prior_title,prior_status_id,
+                 resulting_status_id,outcome,promoted_by_token_uuid,operation_uuid,snapshot_reference,promoted_at)
+                VALUES (?,?,?,?,?,?,?,?,?,'PromotionFailed',?,?,?,?)""",(promotion_uuid,payload["preview_uuid"],
+                context["workspace_uuid"],payload["work_item_uuid"],context["album_id"],context["selected_name"],
+                context["album_title"],context["status_id"],payload["resulting_status_id"],actor,operation_uuid,snapshot_reference,now))
+            conn.execute("""INSERT INTO operation(uuid,operation_type,initiator,status,summary,started_at,ended_at,entity_uuid,batch_uuid,error_category,error_code,error_details)
+                VALUES (?,'workspace_promotion','WebUI','Failed',?,?,?,?,?,'database','database.transaction-failed',?)""",
+                (operation_uuid,"Album-name Promotion failed",now,now,payload["album_uuid"],context["workspace_uuid"],str(message)[:1000]))
+            conn.commit()
+        with self._db() as conn:
+            row=conn.execute("SELECT * FROM workspace_album_name_promotion WHERE uuid=?",(promotion_uuid,)).fetchone()
+        return dict(row)
+
+
 class ImportRepository:
     """Persistence operations for the album import workflow."""
 

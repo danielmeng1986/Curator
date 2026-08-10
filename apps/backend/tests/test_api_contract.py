@@ -955,6 +955,13 @@ class TestVersionedApiAuthorization(_TestServerBase):
                 self.assertEqual(200,status); self.assertEqual("Approved",approved["data"]["review"]["review"]["state"])
                 status, detail = self._get(f"/api/v1/ai-work-items/{item_uuid}/review",admin)
                 self.assertEqual(200,status); self.assertEqual("Lakeside Family Walk",detail["data"]["review"]["review"]["selected_name"])
+                status, promotion_preview = self._post(f"/api/v1/ai-work-items/{item_uuid}/promotion/preview",{},admin)
+                self.assertEqual(200,status); promotion_preview=promotion_preview["data"]["preview"]
+                self.assertEqual("Lakeside Family Walk",promotion_preview["resulting"]["title"])
+                status, promoted = self._post("/api/v1/ai-promotions/execute",{
+                    "preview_token":promotion_preview["preview_token"],"confirmation":promotion_preview["confirmation"]},admin)
+                self.assertEqual(200,status); self.assertEqual("Promoted",promoted["data"]["promotion"]["outcome"])
+                self.assertEqual("Lakeside Family Walk",self._db.execute("SELECT title FROM album WHERE id=?",(album_id,)).fetchone()[0])
 
     def test_current_principal_and_renewal_request_are_token_safe(self):
         issued = self._issue(role="writer")

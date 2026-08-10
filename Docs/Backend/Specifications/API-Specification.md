@@ -219,6 +219,16 @@ freezes one Writer recommendation or validated human revision; Reject/Rework
 require a reason. Rework creates a linked pending Work Item in the same Group
 with the same configuration snapshot and preserves all prior evidence.
 
+`POST /api/v1/ai-work-items/{uuid}/promotion/preview` is Admin-only and requires
+an Approved frozen selection. It returns current/resulting Album title and
+Status, exact confirmation text, and a signed ten-minute token bound to review,
+Album, Workspace, and Admin versions. `POST /api/v1/ai-promotions/execute`
+accepts only that token and exact selected-name confirmation. Execution is
+single-use and idempotent, atomically records the unique Workspace/Album winner,
+Operation, title change, and `TEMPORARY → NAME_GENERATED` policy; other Statuses
+are retained. Stale and competing previews return structured `409` without an
+Album mutation. Failed materialization retains `PromotionFailed` evidence.
+
 ## Future extensions
 
 - Route/resource catalogs can be added without changing the shared contract.

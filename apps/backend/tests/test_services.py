@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 import unittest
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1855,6 +1856,86 @@ class TestAIReviewContract(unittest.TestCase):
         link=self.conn.execute("SELECT * FROM ai_work_item_rework WHERE successor_work_item_uuid=?",(successor,)).fetchone()
         self.assertEqual(self.item["uuid"],link["rework_of_work_item_uuid"])
         self.assertEqual(2,self.conn.execute("SELECT COUNT(*) FROM work_dispatch_group_item WHERE group_uuid='group-r'").fetchone()[0])
+
+
+class TestAIAlbumNamePromotionContract(unittest.TestCase):
+    _images=TestAIPhotoEvidenceManifestContract._images
+    def setUp(self):
+        TestAIReviewContract.setUp(self)
+        self.review.start(self.item["uuid"],1,"admin-one")
+        self.review.decide(self.item["uuid"],2,"approve","admin-one",{
+            "rating":5,"selection_source":"Recommendation","selected_name":"Lakeside Family Walk"})
+        self.promotions=svc.AIAlbumNamePromotionService(repo.AIAlbumNamePromotionRepository(_db_factory(self.conn)),
+            repo.StatusRepository(_db_factory(self.conn)),b"promotion-secret",
+            now_fn=lambda:datetime(2026,8,10,3,tzinfo=timezone.utc))
+    def tearDown(self): TestAIReviewContract.tearDown(self)
+
+    def test_preview_discloses_change_and_execute_is_idempotent(self):
+        before=self.conn.execute("SELECT title,status_id FROM album WHERE id=?",(self.item["album_id"],)).fetchone()
+        preview=self.promotions.preview(self.item["uuid"],"admin-one")
+        self.assertEqual(before["title"],preview["current"]["title"]); self.assertEqual("Lakeside Family Walk",preview["resulting"]["title"])
+        result=self.promotions.execute(preview["preview_token"],preview["confirmation"],"admin-one")
+        replay=self.promotions.execute(preview["preview_token"],preview["confirmation"],"admin-one")
+        self.assertFalse(result["idempotent"]); self.assertTrue(replay["idempotent"]); self.assertEqual(result["uuid"],replay["uuid"])
+        album=self.conn.execute("SELECT title,status_id FROM album WHERE id=?",(self.item["album_id"],)).fetchone()
+        self.assertEqual("Lakeside Family Walk",album["title"]); self.assertEqual(before["status_id"],album["status_id"])
+
+    def test_temporary_maps_to_name_generated_and_stale_preview_is_zero_write(self):
+        self.conn.execute("INSERT INTO status(name) VALUES ('TEMPORARY')"); temporary=self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        self.conn.execute("INSERT INTO status(name) VALUES ('NAME_GENERATED')"); generated=self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        self.conn.execute("UPDATE album SET status_id=?,updated_at='temporary-v1' WHERE id=?",(temporary,self.item["album_id"])); self.conn.commit()
+        preview=self.promotions.preview(self.item["uuid"],"admin-one"); self.assertEqual(generated,preview["resulting"]["status_id"])
+        self.conn.execute("UPDATE album SET title='Changed',updated_at='temporary-v2' WHERE id=?",(self.item["album_id"],)); self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict) as ctx: self.promotions.execute(preview["preview_token"],preview["confirmation"],"admin-one")
+        self.assertEqual("AI_PROMOTION_PREVIEW_STALE",ctx.exception.code)
+        self.assertEqual("Changed",self.conn.execute("SELECT title FROM album WHERE id=?",(self.item["album_id"],)).fetchone()[0])
+        self.assertEqual(0,self.conn.execute("SELECT COUNT(*) FROM workspace_album_name_promotion").fetchone()[0])
+
+    def test_exact_confirmation_and_admin_identity_are_bound(self):
+        preview=self.promotions.preview(self.item["uuid"],"admin-one")
+        with self.assertRaises(ValueError): self.promotions.execute(preview["preview_token"],"wrong","admin-one")
+        with self.assertRaises(svc.ServiceConflict) as ctx: self.promotions.execute(preview["preview_token"],preview["confirmation"],"admin-two")
+        self.assertEqual("AI_PROMOTION_PREVIEW_INVALID",ctx.exception.code)
+
+    def test_competing_approved_item_cannot_be_second_winner(self):
+        other=str(uuid.uuid4()); now="2026-08-10T02:30:00+00:00"
+        self.conn.execute("""INSERT INTO workspace_album_ai_worker
+            (uuid,workspace_uuid,album_id,ai_model_configuration_uuid,configuration_snapshot_json,run_state,created_at,updated_at)
+            SELECT ?,workspace_uuid,album_id,ai_model_configuration_uuid,configuration_snapshot_json,'Completed',?,?
+            FROM workspace_album_ai_worker WHERE uuid=?""",(other,now,now,self.item["uuid"]))
+        self.conn.execute("""INSERT INTO ai_work_item_review(work_item_uuid,state,selected_name,selection_source,
+            reviewer_token_uuid,decided_at,version,updated_at) VALUES (?,'Approved','Quiet Summer Shore','Recommendation','admin-one',?,3,?)""",(other,now,now)); self.conn.commit()
+        first=self.promotions.preview(self.item["uuid"],"admin-one"); second=self.promotions.preview(other,"admin-one")
+        self.promotions.execute(first["preview_token"],first["confirmation"],"admin-one")
+        with self.assertRaises(svc.ServiceConflict) as ctx:
+            self.promotions.execute(second["preview_token"],second["confirmation"],"admin-one")
+        self.assertEqual("AI_PROMOTION_WINNER_EXISTS",ctx.exception.code)
+        self.assertEqual("Lakeside Family Walk",self.conn.execute("SELECT title FROM album WHERE id=?",(self.item["album_id"],)).fetchone()[0])
+
+    def test_database_failure_is_audited_without_album_mutation(self):
+        before=self.conn.execute("SELECT title,updated_at FROM album WHERE id=?",(self.item["album_id"],)).fetchone()
+        service=svc.AIAlbumNamePromotionService(repo.AIAlbumNamePromotionRepository(
+            _db_factory(self.conn),failure_hook=lambda:(_ for _ in ()).throw(RuntimeError("injected"))),
+            repo.StatusRepository(_db_factory(self.conn)),b"promotion-secret",
+            now_fn=lambda:datetime(2026,8,10,3,tzinfo=timezone.utc))
+        preview=service.preview(self.item["uuid"],"admin-one")
+        with self.assertRaises(svc.ServiceConflict) as ctx:
+            service.execute(preview["preview_token"],preview["confirmation"],"admin-one")
+        self.assertEqual("AI_PROMOTION_FAILED",ctx.exception.code)
+        self.assertEqual(tuple(before),tuple(self.conn.execute("SELECT title,updated_at FROM album WHERE id=?",(self.item["album_id"],)).fetchone()))
+        self.assertEqual("PromotionFailed",self.conn.execute("SELECT outcome FROM workspace_album_name_promotion").fetchone()[0])
+        self.assertEqual("Failed",self.conn.execute("SELECT status FROM operation WHERE operation_type='workspace_promotion'").fetchone()[0])
+
+    def test_required_snapshot_failure_prevents_execution(self):
+        service=svc.AIAlbumNamePromotionService(repo.AIAlbumNamePromotionRepository(_db_factory(self.conn)),
+            repo.StatusRepository(_db_factory(self.conn)),b"promotion-secret",snapshot_fn=lambda *_:None,
+            now_fn=lambda:datetime(2026,8,10,3,tzinfo=timezone.utc))
+        preview=service.preview(self.item["uuid"],"admin-one")
+        with patch.object(svc,"assess_operation_risk",return_value=(True,"high-risk")):
+            with self.assertRaises(svc.ServiceConflict) as ctx:
+                service.execute(preview["preview_token"],preview["confirmation"],"admin-one")
+        self.assertEqual("SNAPSHOT_REQUIRED",ctx.exception.code)
+        self.assertEqual(0,self.conn.execute("SELECT COUNT(*) FROM workspace_album_name_promotion").fetchone()[0])
 
 
 class TestAIModelConfigurationContract(unittest.TestCase):
