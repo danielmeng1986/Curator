@@ -2108,6 +2108,27 @@ class WorkDispatchService:
         if not blocked: response["preview_token"] = self._sign_dispatch_preview(payload)
         return response
 
+    def execute(self, preview_token, created_by_token_uuid):
+        payload = self.read_preview(preview_token)
+        if payload.get("created_by_token_uuid") != created_by_token_uuid:
+            raise ServiceConflict("DISPATCH_PREVIEW_INVALID", "The Work Dispatch preview belongs to another Admin.")
+        adapter = self._adapters.get(payload.get("worker_kind"))
+        if adapter.worker_kind != "album_name_analysis":
+            raise ServiceConflict("DISPATCH_ADAPTER_NOT_EXECUTABLE", "The Worker adapter cannot execute this dispatch.")
+        try:
+            return self._repo.execute(payload, self._now().isoformat())
+        except repo.PersistenceConflict as exc:
+            code = exc.details.get("code", "ALBUM_WORK_RESERVATION_CONFLICT")
+            messages = {"DISPATCH_PREVIEW_REPLAYED":"The Work Dispatch preview was already executed.",
+                "DISPATCH_PREVIEW_STALE":"Dispatch state changed after preview.",
+                "ALBUM_WORK_RESERVATION_CONFLICT":"An Album is already reserved."}
+            raise ServiceConflict(code, messages.get(code, "Work Dispatch execution conflicted with current state."), exc.details) from exc
+
+    def batch_detail(self, batch_uuid):
+        result = self._repo.get_batch_detail(batch_uuid)
+        if not result: raise ServiceNotFound("Work Dispatch Batch not found.")
+        return result
+
     def create_batch(self, worker_kind, workspace_uuid=None, created_by_token_uuid=None):
         adapter = self._adapters.get(worker_kind)
         return self._repo.create_batch({"worker_kind": adapter.worker_kind,

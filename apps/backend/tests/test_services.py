@@ -1573,6 +1573,118 @@ class TestWorkDispatchCandidatePreviewContract(unittest.TestCase):
         self.assertEqual("ALBUM_ALREADY_RESERVED", result["items"][0]["eligibility"])
 
 
+class TestAtomicAlbumAIWorkDispatchContract(unittest.TestCase):
+    def setUp(self):
+        self.conn = _make_db(); self.now = datetime(2026,8,10,tzinfo=timezone.utc)
+        self.conn.execute("INSERT INTO status (name) VALUES ('CURATED')")
+        for number in (1,2):
+            self.conn.execute("""INSERT INTO album (uuid,status_id,title,updated_at,created_at)
+                VALUES (?,?,?,?,?)""", (f"execute-{number}",1,f"Execute {number}",f"version-{number}","now"))
+        self.conn.commit()
+        self.workspace_repo = repo.AIWorkspaceRepository(_db_factory(self.conn))
+        self.workspace = svc.AIWorkspaceService(self.workspace_repo).create("Atomic Dispatch")
+        self.config_service = svc.AIModelConfigurationService(repo.AIModelConfigurationRepository(_db_factory(self.conn)))
+        self.configs = [self._config("A"), self._config("B")]
+        self.repository = repo.AlbumAIWorkDispatchRepository(_db_factory(self.conn))
+        self.service = svc.WorkDispatchService(self.repository, repo.AlbumRepository(_db_factory(self.conn)),
+            workspace_repo=self.workspace_repo, configuration_service=self.config_service,
+            preview_secret=b"atomic-dispatch", now_fn=lambda:self.now)
+
+    def _config(self, suffix):
+        return self.config_service.create({"name":f"Atomic Config {suffix}","model_identifier":"qwen",
+            "model_file":f"qwen-{suffix}.gguf","vision_prompt_version":"v1","writer_prompt_version":"w1",
+            "sample_count":8,"context_size":4096,"threads":8,"gpu_layers":40,"max_tokens":800,
+            "temperature":0.2,"image_max_tokens":384})
+
+    def tearDown(self): self.conn.close()
+
+    def _preview(self):
+        return self.service.preview("album_name_analysis", self.workspace["uuid"],
+            [item["uuid"] for item in self.configs], album_ids=[1,2], created_by_token_uuid="admin-one")
+
+    def test_success_atomically_creates_complete_graph_and_keeps_album_status(self):
+        preview = self._preview(); before = [row[0] for row in self.conn.execute("SELECT status_id FROM album ORDER BY id")]
+        result = self.service.execute(preview["preview_token"], "admin-one")
+        self.assertEqual({"albums":2,"groups":2,"work_items":4}, result["summary"])
+        counts = {table:self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in
+            ("work_dispatch_batch","work_dispatch_group","album_work_reservation","work_dispatch_group_item",
+             "workspace_album_ai_worker","work_dispatch_preview_claim")}
+        self.assertEqual({"work_dispatch_batch":1,"work_dispatch_group":2,"album_work_reservation":2,
+            "work_dispatch_group_item":4,"workspace_album_ai_worker":4,"work_dispatch_preview_claim":1}, counts)
+        self.assertEqual(before, [row[0] for row in self.conn.execute("SELECT status_id FROM album ORDER BY id")])
+        operation = self.conn.execute("SELECT status,batch_uuid FROM operation WHERE uuid=?", (result["operation_uuid"],)).fetchone()
+        self.assertEqual(("Succeeded",result["batch_uuid"]), tuple(operation))
+        detail = self.service.batch_detail(result["batch_uuid"])
+        self.assertEqual(2,len(detail["groups"])); self.assertTrue(all(len(group["items"]) == 2 for group in detail["groups"]))
+
+    def test_successful_preview_is_single_use(self):
+        preview = self._preview(); self.service.execute(preview["preview_token"], "admin-one")
+        with self.assertRaises(svc.ServiceConflict) as replay:
+            self.service.execute(preview["preview_token"], "admin-one")
+        self.assertEqual("DISPATCH_PREVIEW_REPLAYED", replay.exception.code)
+        self.assertEqual(1, self.conn.execute("SELECT COUNT(*) FROM work_dispatch_batch").fetchone()[0])
+
+    def test_stale_album_leaves_no_partial_dispatch(self):
+        preview = self._preview(); self.conn.execute("UPDATE album SET updated_at='changed' WHERE id=2"); self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict) as stale:
+            self.service.execute(preview["preview_token"], "admin-one")
+        self.assertEqual("DISPATCH_PREVIEW_STALE", stale.exception.code)
+        for table in ("work_dispatch_batch","work_dispatch_group","album_work_reservation",
+                      "workspace_album_ai_worker","work_dispatch_preview_claim"):
+            self.assertEqual(0, self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+
+    def test_concurrent_execution_has_one_winner_and_failure_rolls_back(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "execute-race.db"; migrations = Path(__file__).parents[1] / "migrations"
+            with sqlite3.connect(database) as conn:
+                conn.executescript(_SCHEMA_SQL)
+                for name in ("0003_ai_workspace_container.sql","0004_ai_model_configuration.sql",
+                             "0005_album_ai_work_item.sql","0006_work_dispatch_foundation.sql",
+                             "0007_work_dispatch_execution.sql"):
+                    conn.executescript((migrations / name).read_text())
+                conn.execute("INSERT INTO album (id,uuid,title,updated_at) VALUES (1,'race-execute','Race','v1')")
+                conn.execute("INSERT INTO ai_dataset_schema VALUES ('album_analysis',1,'Active','{}','now')")
+                conn.execute("""INSERT INTO ai_workspace
+                    (uuid,dataset_type,schema_version,title,created_at) VALUES ('workspace','album_analysis',1,'Race','now')""")
+                conn.execute("""INSERT INTO ai_model_configuration
+                    (uuid,name,provider_type,model_identifier,model_file,vision_prompt_version,writer_prompt_version,
+                     sample_count,context_size,threads,gpu_layers,max_tokens,temperature,image_max_tokens,
+                     additional_parameters_json,created_at,updated_at)
+                    VALUES ('config','Race Config','llama_cpp','qwen','qwen.gguf','v1','w1',8,4096,8,40,800,0.2,384,'{}','now','now')""")
+                conn.commit()
+            opened = []
+            def factory():
+                conn = sqlite3.connect(database, timeout=5, check_same_thread=False); conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA foreign_keys=ON"); opened.append(conn); return conn
+            payload = {"preview_uuid":"one-preview","worker_kind":"album_name_analysis",
+                "dataset_type":"album_analysis","schema_version":1,"created_by_token_uuid":"admin",
+                "workspace":{"uuid":"workspace","version":1,"lifecycle_state":"Open"},
+                "configurations":[{"uuid":"config","version":1}],
+                "albums":[{"id":1,"uuid":"race-execute","updated_at":"v1"}]}
+            repository = repo.AlbumAIWorkDispatchRepository(factory)
+            def execute():
+                try: repository.execute(payload, "2026-08-10T00:00:00+00:00"); return "created"
+                except repo.PersistenceConflict as exc: return exc.details["code"]
+            with ThreadPoolExecutor(max_workers=2) as pool: outcomes = list(pool.map(lambda _:execute(), range(2)))
+            for conn in opened: conn.close()
+            with sqlite3.connect(database) as conn:
+                counts = tuple(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in
+                    ("work_dispatch_batch","album_work_reservation","workspace_album_ai_worker","operation"))
+            self.assertEqual(["DISPATCH_PREVIEW_REPLAYED","created"], sorted(outcomes))
+            self.assertEqual((1,1,1,1), counts)
+
+        self.conn.execute("UPDATE album SET updated_at='version-2' WHERE id=2"); self.conn.commit()
+        retry_preview = self._preview()
+        failing_repo = repo.AlbumAIWorkDispatchRepository(_db_factory(self.conn), failure_hook=lambda _: (_ for _ in ()).throw(RuntimeError("injected")))
+        failing = svc.WorkDispatchService(failing_repo, repo.AlbumRepository(_db_factory(self.conn)),
+            workspace_repo=self.workspace_repo, configuration_service=self.config_service,
+            preview_secret=b"atomic-dispatch", now_fn=lambda:self.now)
+        with self.assertRaisesRegex(RuntimeError,"injected"): failing.execute(retry_preview["preview_token"], "admin-one")
+        for table in ("work_dispatch_batch","work_dispatch_group","album_work_reservation",
+                      "workspace_album_ai_worker","work_dispatch_preview_claim"):
+            self.assertEqual(0, self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+
+
 class TestAIModelConfigurationContract(unittest.TestCase):
     def setUp(self):
         self.conn = _make_db(); self.repo = repo.AIModelConfigurationRepository(_db_factory(self.conn))

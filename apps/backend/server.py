@@ -736,6 +736,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_ai_model_configuration(path.split("/")[-1])
             elif path == "/api/work-dispatch/candidates":
                 self._get_work_dispatch_candidates(qs)
+            elif re.match(r"^/api/work-dispatch/batches/[^/]+$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200, self._work_dispatch_service().batch_detail(path.split("/")[-1]))
             elif path == "/api/backups":
                 self._get_backups()
             elif path == "/api/operations":
@@ -934,7 +937,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 
     def _work_dispatch_service(self):
         return svc.WorkDispatchService(
-            repo.WorkDispatchRepository(open_db), repo.AlbumRepository(open_db),
+            repo.AlbumAIWorkDispatchRepository(open_db), repo.AlbumRepository(open_db),
             workspace_repo=repo.AIWorkspaceRepository(open_db),
             configuration_service=self._ai_model_configuration_service(),
             preview_secret=WORK_DISPATCH_PREVIEW_SECRET,
@@ -1165,11 +1168,16 @@ class AppHandler(SimpleHTTPRequestHandler):
                     filters=body.get("filters"), first_n=body.get("first_n"),
                     created_by_token_uuid=self._principal.get("token_uuid"))
                 self._send_success(200, {"preview":preview})
+            elif path == "/api/work-dispatch/execute":
+                if not self._require_admin_principal(): return
+                token = body.get("preview_token", "")
+                if not token: raise ValueError("preview_token is required.")
+                self._send_success(200, {"result":self._work_dispatch_service().execute(
+                    token, self._principal.get("token_uuid"))})
             elif re.match(r"^/api/ai-workspaces/[^/]+/items$", path):
                 if not self._require_admin_principal(): return
-                workspace_uuid = path.split("/")[3]
-                item = self._ai_work_item_service().create(workspace_uuid, body.get("album_id"), body.get("configuration_uuid", ""))
-                self._send_success(201, {"item": item})
+                self._send_error(409, "WORK_DISPATCH_REQUIRED",
+                    "Create AI Work Items through Work Dispatch preview and execution.")
             elif path == "/api/ai-work-items/claim":
                 if not self._require_worker_principal(): return
                 item = self._ai_work_item_service().claim_next(self._principal["token_uuid"], body.get("lease_seconds", 300))

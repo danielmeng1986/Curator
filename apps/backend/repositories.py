@@ -2259,7 +2259,11 @@ class WorkDispatchRepository:
             created_at TEXT NOT NULL, UNIQUE(group_uuid,item_kind,item_uuid),
             UNIQUE(item_kind,item_uuid), FOREIGN KEY(group_uuid) REFERENCES work_dispatch_group(uuid));
         CREATE INDEX IF NOT EXISTS idx_work_dispatch_group_item_group
-            ON work_dispatch_group_item(group_uuid, created_at, id);""")
+            ON work_dispatch_group_item(group_uuid, created_at, id);
+        CREATE TABLE IF NOT EXISTS work_dispatch_preview_claim (
+            preview_uuid TEXT PRIMARY KEY, batch_uuid TEXT NOT NULL UNIQUE,
+            claimed_by_token_uuid TEXT NOT NULL, claimed_at TEXT NOT NULL,
+            FOREIGN KEY(batch_uuid) REFERENCES work_dispatch_batch(uuid));""")
 
     @staticmethod
     def _norm(row):
@@ -2365,6 +2369,116 @@ class WorkDispatchRepository:
             self._ensure_schema(conn)
             rows = conn.execute("SELECT * FROM work_dispatch_group WHERE album_id=? ORDER BY created_at DESC,id DESC", (album_id,)).fetchall()
         return [dict(row) for row in rows]
+
+
+class AlbumAIWorkDispatchRepository(WorkDispatchRepository):
+    """Atomic adapter persistence for one Album-analysis Dispatch Batch."""
+
+    def __init__(self, db_factory, failure_hook=None):
+        super().__init__(db_factory); self._failure_hook = failure_hook
+
+    def execute(self, payload, now):
+        batch_uuid, operation_uuid = str(uuid.uuid4()), str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn); AIWorkItemRepository._ensure_schema(conn)
+            OperationRepository._ensure_schema(conn)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("""INSERT INTO work_dispatch_batch
+                    (uuid,worker_kind,dataset_type,schema_version,workspace_uuid,created_by_token_uuid,created_at,updated_at)
+                    VALUES (?,?,?,?,?,?,?,?)""", (batch_uuid,payload["worker_kind"],payload["dataset_type"],
+                    payload["schema_version"],payload["workspace"]["uuid"],payload["created_by_token_uuid"],now,now))
+                try:
+                    conn.execute("""INSERT INTO work_dispatch_preview_claim
+                        (preview_uuid,batch_uuid,claimed_by_token_uuid,claimed_at) VALUES (?,?,?,?)""",
+                        (payload["preview_uuid"], batch_uuid, payload["created_by_token_uuid"], now))
+                except sqlite3.IntegrityError as exc:
+                    raise PersistenceConflict({"code":"DISPATCH_PREVIEW_REPLAYED",
+                        "preview_uuid":payload["preview_uuid"]}) from exc
+
+                workspace = conn.execute("SELECT * FROM ai_workspace WHERE uuid=?", (payload["workspace"]["uuid"],)).fetchone()
+                if not workspace or workspace["version"] != payload["workspace"]["version"] \
+                        or workspace["lifecycle_state"] != "Open":
+                    raise PersistenceConflict({"code":"DISPATCH_PREVIEW_STALE", "resource":"workspace"})
+                configurations = []
+                for expected in payload["configurations"]:
+                    row = conn.execute("SELECT * FROM ai_model_configuration WHERE uuid=?", (expected["uuid"],)).fetchone()
+                    if not row or row["version"] != expected["version"] or not row["enabled"]:
+                        raise PersistenceConflict({"code":"DISPATCH_PREVIEW_STALE", "resource":"configuration",
+                            "configuration_uuid":expected["uuid"]})
+                    configurations.append(row)
+                albums = []
+                for expected in payload["albums"]:
+                    row = conn.execute("SELECT id,uuid,title,status_id,updated_at FROM album WHERE id=?", (expected["id"],)).fetchone()
+                    if not row or row["uuid"] != expected["uuid"] or row["updated_at"] != expected["updated_at"]:
+                        raise PersistenceConflict({"code":"DISPATCH_PREVIEW_STALE", "resource":"album",
+                            "album_id":expected["id"]})
+                    active = conn.execute("SELECT * FROM album_work_reservation WHERE album_id=?", (expected["id"],)).fetchone()
+                    if active:
+                        raise PersistenceConflict({"code":"ALBUM_WORK_RESERVATION_CONFLICT", "album_id":expected["id"],
+                            "active_reservation":dict(active)})
+                    albums.append(row)
+
+                groups = []
+                for album in albums:
+                    group_uuid = str(uuid.uuid4())
+                    conn.execute("""INSERT INTO work_dispatch_group
+                        (uuid,batch_uuid,album_id,worker_kind,dataset_type,schema_version,created_at,updated_at)
+                        VALUES (?,?,?,?,?,?,?,?)""", (group_uuid,batch_uuid,album["id"],payload["worker_kind"],
+                        payload["dataset_type"],payload["schema_version"],now,now))
+                    conn.execute("""INSERT INTO album_work_reservation
+                        (album_id,group_uuid,batch_uuid,worker_kind,reserved_at) VALUES (?,?,?,?,?)""",
+                        (album["id"],group_uuid,batch_uuid,payload["worker_kind"],now))
+                    item_uuids = []
+                    for config_row in configurations:
+                        config = AIModelConfigurationRepository._norm(config_row)
+                        snapshot = {key:value for key,value in config.items() if key not in {"id","created_at","updated_at"}}
+                        item_uuid = str(uuid.uuid4())
+                        conn.execute("""INSERT INTO workspace_album_ai_worker
+                            (uuid,workspace_uuid,album_id,ai_model_configuration_uuid,configuration_snapshot_json,created_at,updated_at)
+                            VALUES (?,?,?,?,?,?,?)""", (item_uuid,payload["workspace"]["uuid"],album["id"],
+                            config["uuid"],json.dumps(snapshot,sort_keys=True),now,now))
+                        conn.execute("""INSERT INTO work_dispatch_group_item
+                            (group_uuid,item_kind,item_uuid,configuration_uuid,created_at) VALUES (?,?,?,?,?)""",
+                            (group_uuid,"workspace_album_ai_worker",item_uuid,config["uuid"],now))
+                        item_uuids.append(item_uuid)
+                    groups.append({"group_uuid":group_uuid,"album_id":album["id"],"album_uuid":album["uuid"],
+                        "work_item_uuids":item_uuids})
+                    if self._failure_hook: self._failure_hook(len(groups))
+
+                conn.execute("""INSERT INTO operation
+                    (uuid,operation_type,initiator,status,summary,started_at,ended_at,batch_uuid)
+                    VALUES (?,'work_dispatch_execution','WebUI','Succeeded',?,?,?,?)""",
+                    (operation_uuid,f"Dispatched {len(albums)} Albums to {payload['worker_kind']}",now,now,batch_uuid))
+                conn.commit()
+            except PersistenceConflict:
+                conn.rollback(); raise
+            except sqlite3.IntegrityError as exc:
+                conn.rollback()
+                conflicts = [item["id"] for item in payload["albums"] if conn.execute(
+                    "SELECT 1 FROM album_work_reservation WHERE album_id=?", (item["id"],)).fetchone()]
+                if conflicts:
+                    raise PersistenceConflict({"code":"ALBUM_WORK_RESERVATION_CONFLICT",
+                        "album_ids":conflicts}) from exc
+                raise
+            except Exception:
+                conn.rollback(); raise
+        return {"batch_uuid":batch_uuid,"operation_uuid":operation_uuid,"groups":groups,
+            "summary":{"albums":len(albums),"groups":len(groups),
+                "work_items":sum(len(group["work_item_uuids"]) for group in groups)}}
+
+    def get_batch_detail(self, batch_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            batch = conn.execute("SELECT * FROM work_dispatch_batch WHERE uuid=?", (batch_uuid,)).fetchone()
+            if not batch: return None
+            groups = []
+            for row in conn.execute("SELECT * FROM work_dispatch_group WHERE batch_uuid=? ORDER BY id", (batch_uuid,)).fetchall():
+                group = dict(row); group["items"] = [dict(item) for item in conn.execute(
+                    "SELECT * FROM work_dispatch_group_item WHERE group_uuid=? ORDER BY id", (row["uuid"],)).fetchall()]
+                groups.append(group)
+            operation = conn.execute("SELECT uuid,status FROM operation WHERE batch_uuid=? AND operation_type='work_dispatch_execution'", (batch_uuid,)).fetchone()
+        return {"batch":dict(batch),"groups":groups,"operation":dict(operation) if operation else None}
 
 
 class ImportRepository:

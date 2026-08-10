@@ -822,19 +822,32 @@ class TestVersionedApiAuthorization(_TestServerBase):
             "threads":8,"gpu_layers":40,"max_tokens":800,"temperature":0.2,"image_max_tokens":384}
         _, config_body = self._post("/api/v1/ai-model-configurations", config, admin); config_uuid = config_body["data"]["configuration"]["uuid"]
         _, workspace_body = self._post("/api/v1/ai-workspaces", {"title":f"Worker Queue {marker}"}, admin); workspace_uuid = workspace_body["data"]["workspace"]["uuid"]
-        status, created = self._post(f"/api/v1/ai-workspaces/{workspace_uuid}/items", {"album_id":album_id,"configuration_uuid":config_uuid}, admin)
-        self.assertEqual(201,status); item = created["data"]["item"]
+        status, bypass = self._post(f"/api/v1/ai-workspaces/{workspace_uuid}/items", {"album_id":album_id,"configuration_uuid":config_uuid}, admin)
+        self.assertEqual(409,status); self.assertEqual("WORK_DISPATCH_REQUIRED", bypass["error"]["code"])
+        status, preview_body = self._post("/api/v1/work-dispatch/preview", {
+            "worker_kind":"album_name_analysis","workspace_uuid":workspace_uuid,
+            "configuration_uuids":[config_uuid],"album_ids":[album_id]}, admin)
+        self.assertEqual(200,status)
+        status, executed = self._post("/api/v1/work-dispatch/execute", {
+            "preview_token":preview_body["data"]["preview"]["preview_token"]}, admin)
+        self.assertEqual(200,status); dispatch_result = executed["data"]["result"]
+        item_uuid = dispatch_result["groups"][0]["work_item_uuids"][0]
+        status, batch_detail = self._get(f"/api/v1/work-dispatch/batches/{dispatch_result['batch_uuid']}", admin)
+        self.assertEqual(200,status); self.assertEqual("Succeeded", batch_detail["data"]["operation"]["status"])
+        status, replay = self._post("/api/v1/work-dispatch/execute", {
+            "preview_token":preview_body["data"]["preview"]["preview_token"]}, admin)
+        self.assertEqual(409,status); self.assertEqual("DISPATCH_PREVIEW_REPLAYED", replay["error"]["code"])
         status, claimed = self._post("/api/v1/ai-work-items/claim", {"lease_seconds":60}, first)
-        self.assertEqual(200,status); self.assertEqual(item["uuid"], claimed["data"]["item"]["uuid"])
-        status, wrong = self._post(f"/api/v1/ai-work-items/{item['uuid']}/heartbeat", {"lease_seconds":60}, second)
+        self.assertEqual(200,status); self.assertEqual(item_uuid, claimed["data"]["item"]["uuid"])
+        status, wrong = self._post(f"/api/v1/ai-work-items/{item_uuid}/heartbeat", {"lease_seconds":60}, second)
         self.assertEqual(409,status); self.assertEqual("AI_WORK_ITEM_CLAIM_INVALID", wrong["error"]["code"])
-        status, failed = self._post(f"/api/v1/ai-work-items/{item['uuid']}/fail", {"error_code":"MODEL_TIMEOUT","message":"timed out"}, first)
+        status, failed = self._post(f"/api/v1/ai-work-items/{item_uuid}/fail", {"error_code":"MODEL_TIMEOUT","message":"timed out"}, first)
         self.assertEqual(200,status); failed_item = failed["data"]["item"]
-        status, retried = self._post(f"/api/v1/ai-work-items/{item['uuid']}/retry", {"expected_version":failed_item["version"]}, admin)
+        status, retried = self._post(f"/api/v1/ai-work-items/{item_uuid}/retry", {"expected_version":failed_item["version"]}, admin)
         self.assertEqual(200,status); self.assertEqual("Pending", retried["data"]["item"]["run_state"])
         status, claimed_again = self._post("/api/v1/ai-work-items/claim", {"lease_seconds":60}, second)
         self.assertEqual(200,status); self.assertEqual(2, claimed_again["data"]["item"]["attempt_count"])
-        status, detail = self._get(f"/api/v1/ai-work-items/{item['uuid']}", admin)
+        status, detail = self._get(f"/api/v1/ai-work-items/{item_uuid}", admin)
         self.assertEqual(200,status); self.assertEqual(2, len(detail["data"]["item"]["attempts"]))
 
     def test_work_dispatch_candidates_and_preview_are_admin_only_and_zero_write(self):

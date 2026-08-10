@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-056` — Status: `Proposed`
+`BT-056` — Status: `Complete`
 
 ## Title
 
@@ -61,3 +61,23 @@ and creating its AI comparison Work Items without partial or duplicate work.
 - Direct Admin Work Item creation must not remain an alternative path that
   bypasses reservation invariants.
 
+## Completion Record
+
+- Added migration `0007_work_dispatch_execution.sql` with a durable unique
+  successful Preview claim linked to its resulting Batch.
+- Added the Album-analysis dispatch adapter transaction. It revalidates the
+  Workspace, model configurations, Album identities/versions, and Reservation
+  absence, then atomically creates the Preview claim, Batch, one Group and
+  Reservation per Album, all configuration-specific AI Work Items and Group
+  links, and one successful Operation.
+- Added Admin-only `POST /api/v1/work-dispatch/execute` and Batch detail reads.
+  Successful execution returns Batch, Operation, Group, Album, and Work Item
+  identities for direct UI navigation.
+- Retired direct Admin creation through `/api/v1/ai-workspaces/{uuid}/items`
+  with `409 WORK_DISPATCH_REQUIRED`; Worker Claim/heartbeat/failure/retry
+  continues against the atomically dispatched Items.
+- Verified all-or-nothing behavior for stale Albums, active Reservation races,
+  concurrent execution of one Preview, replay, and injected mid-batch failure.
+  Multiple configurations remain inside one Group and Album Status is unchanged.
+- Verification: 5 focused atomic migration/service/API tests passed and the
+  complete Backend regression passed all 717 tests.

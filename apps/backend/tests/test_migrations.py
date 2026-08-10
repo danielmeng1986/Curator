@@ -123,3 +123,17 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
         self.assertIn("work_dispatch_batch", tables)
         self.assertIn("work_dispatch_group", tables)
         self.assertIn("work_dispatch_group_item", tables)
+
+    def test_0007_preview_claim_is_repeatable_and_single_use(self):
+        root = Path(__file__).parents[1] / "migrations"
+        with sqlite3.connect(":memory:") as conn:
+            conn.execute("CREATE TABLE album(id INTEGER PRIMARY KEY)")
+            conn.executescript((root / "0006_work_dispatch_foundation.sql").read_text())
+            sql = (root / "0007_work_dispatch_execution.sql").read_text()
+            conn.executescript(sql); conn.executescript(sql)
+            conn.execute("""INSERT INTO work_dispatch_batch
+                (uuid,worker_kind,dataset_type,schema_version,created_at,updated_at)
+                VALUES ('batch','album_name_analysis','album_analysis',1,'now','now')""")
+            conn.execute("INSERT INTO work_dispatch_preview_claim VALUES ('preview','batch','admin','now')")
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute("INSERT INTO work_dispatch_preview_claim VALUES ('preview','batch-2','admin','now')")
