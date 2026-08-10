@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DBDOC-004` — Status: `Proposed`
+`DBDOC-004` — Status: `Complete`
 
 ## Goal
 
@@ -59,3 +59,10 @@ reverse-engineering individual Repository methods.
 - These documents explain persistence, not product UI steps; UI behavior remains
   controlled by UI Specifications and tasks.
 
+## Completion Record
+
+- Added four persistence maps covering Import, Repair/Quarantine, Dispatch, and
+  AI execution/review/Promotion.
+- Each map distinguishes preview/claim, current projection, immutable history,
+  audit, filesystem artifact, rejection, and retention behavior.
+- Linked every workflow to controlling Specifications and acceptance evidence.

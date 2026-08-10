@@ -27,7 +27,7 @@ series rather than silently changing behavior from a documentation task.
 | [DBDOC-001](DBDOC-001-establish-database-schema-source-of-truth.md) | Authoritative database-schema source and ownership rules | Complete |
 | [DBDOC-002](DBDOC-002-build-current-database-schema-catalog.md) | Complete machine-scannable current table catalog | Complete |
 | [DBDOC-003](DBDOC-003-split-database-mermaid-model-by-domain.md) | Database overview and domain-specific Mermaid diagrams | Complete |
-| [DBDOC-004](DBDOC-004-document-persistence-workflow-boundaries.md) | Persistence maps for core cross-table workflows | Proposed |
+| [DBDOC-004](DBDOC-004-document-persistence-workflow-boundaries.md) | Persistence maps for core cross-table workflows | Complete |
 | [DBDOC-005](DBDOC-005-archive-historical-workspace-and-v02-guidance.md) | Historical schema guidance isolated from active truth | Proposed |
 | [DOC-002](DOC-002-refresh-ai-agent-context-and-documentation-index.md) | Accurate AI entry point and documentation navigation | Proposed |
 | [DOC-003](DOC-003-reconcile-conceptual-data-model.md) | Conceptual model aligned with implemented and future domains | Proposed |
