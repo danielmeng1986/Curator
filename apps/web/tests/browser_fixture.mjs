@@ -101,7 +101,7 @@ export async function startBrowserFixture({ scenario = 'empty', roles = ['writer
 
   const secret = randomBytes(24).toString('base64url');
   const child = spawn('python3', [
-    'apps/web/tests/disposable_backend.py', '--secret', secret, '--scenario', scenario,
+    'apps/web/tests/disposable_backend.py', `--secret=${secret}`, '--scenario', scenario,
   ], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', (data) => { stderr += String(data); });

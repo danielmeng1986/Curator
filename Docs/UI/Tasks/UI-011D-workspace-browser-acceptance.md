@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-011D` — Status: `Proposed`
+`UI-011D` — Status: `Complete`
 
 ## Title
 
@@ -57,4 +57,23 @@ outcomes through the UI without touching historical Workspace data.
 
 ## Risks or Notes
 
-- This task remains Blocked until a real first dataset and its disposable fixture are specified.
+- The first dataset is the approved version-1 Album-analysis adapter. Future
+  datasets require their own presentation adapter fixtures without changing the
+  stable review-state semantics.
+
+## Completion Record
+
+- Added a disposable three-Album AI Workspace browser journey with real
+  Manifest-bound JPEG evidence and formal Writer Vision/Writer submissions.
+- Proved queue discovery, immutable AI output, editable retained human draft,
+  eight-photo provenance, valid/invalid approval, exact-name Promotion, and the
+  `TEMPORARY → NAME_GENERATED` policy with one durable Promotion Operation.
+- Proved rejection leaves its Album unchanged, a concurrent decision rejects a
+  stale browser version while retaining the local draft, and ReworkRequested
+  creates an auditable successor Work Item.
+- Proved all terminal Groups release their Albums, Workspace close/archive is
+  Backend-gated, archived review remains readable and action-free, and retired
+  historical Workspace routes remain inaccessible.
+- The full browser journey passed twice from distinct clean temporary roots;
+  all Web contract/browser suites, the four-scenario Backend AI Workspace gate,
+  and all 751 Backend tests also passed on 2026-08-10.

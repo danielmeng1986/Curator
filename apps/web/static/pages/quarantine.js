@@ -65,6 +65,8 @@ const QuarantinePage = {
       { trigger, context: 'execute the reviewed Quarantine action' });
     if (!result.ok) return;
     this._previewToken = ''; closeModal(); toast(`Quarantine ${result.value.action} completed`);
-    window.location.hash = `#/quarantine/${result.value.item.uuid}`;
+    const target = `#/quarantine/${result.value.item.uuid}`;
+    if (window.location.hash === target) await this.renderDetail({ uuid: result.value.item.uuid });
+    else window.location.hash = target;
   },
 };

@@ -46,6 +46,9 @@ def _initialize_database(database_path: Path, scenario: str) -> None:
             "INSERT INTO status (name, description) VALUES (?, ?)",
             ("Active", "Active albums"),
         )
+        if scenario == "future-ai-workspace":
+            connection.execute("INSERT INTO status (name, description) VALUES ('TEMPORARY', 'Awaiting curated name')")
+            connection.execute("INSERT INTO status (name, description) VALUES ('NAME_GENERATED', 'AI name promoted')")
         if scenario in {"entities", "future-ai-workspace"}:
             connection.execute(
                 "INSERT INTO studio (uuid, name, website) VALUES (?, ?, ?)",
@@ -72,6 +75,7 @@ def _initialize_database(database_path: Path, scenario: str) -> None:
                 ("photo-ui-fixture", "cover.jpg", "cover.jpg"),
             )
             if scenario == "future-ai-workspace":
+                connection.execute("UPDATE album SET status_id=2 WHERE id=1")
                 for index in range(2, 4):
                     connection.execute(
                         """INSERT INTO album
@@ -80,6 +84,7 @@ def _initialize_database(database_path: Path, scenario: str) -> None:
                         (f"album-ai-fixture-{index}", f"AI Fixture Album {index}",
                          f"Fixture Studio/AI Fixture Album {index}", f"fixture-v{index}"),
                     )
+                    connection.execute("UPDATE album SET status_id=2 WHERE id=?", (index,))
                     connection.execute(
                         "INSERT INTO album_model (album_id, model_id, role) VALUES (?, 1, 'primary')",
                         (index,),
@@ -147,6 +152,14 @@ def main() -> None:
         repair_candidate = resources["archive"] / "F" / "Fixture Model" / "Fixture Studio" / "Fixture Album"
         repair_candidate.mkdir(parents=True)
         (repair_candidate / "conflict.jpg").write_bytes(b"fixture-conflict")
+    if args.scenario == "future-ai-workspace":
+        for title in ("Fixture Album", "AI Fixture Album 2", "AI Fixture Album 3"):
+            album_root = resources["archive"] / "Fixture Studio" / title
+            album_root.mkdir(parents=True)
+            for index in range(8):
+                (album_root / f"evidence-{index + 1:02d}.jpg").write_bytes(
+                    b"\xff\xd8\xff" + bytes([index + 1]) * (1000 + index * 10)
+                )
 
     _initialize_database(resources["database"], args.scenario)
     config_path = root / "backend.json"
