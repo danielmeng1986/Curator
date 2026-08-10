@@ -730,6 +730,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif re.match(r"^/api/ai-work-items/[^/]+$", path):
                 if not self._require_admin_principal(): return
                 self._send_success(200, {"item": self._ai_work_item_service().get(path.split("/")[-1], include_attempts=True)})
+            elif re.match(r"^/api/ai-work-items/[^/]+/evidence-manifest$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200, {"manifest":self._ai_photo_evidence_service().revalidate(path.split("/")[3])})
             elif path == "/api/ai-model-configurations":
                 self._get_ai_model_configurations()
             elif re.match(r"^/api/ai-model-configurations/[^/]+$", path):
@@ -769,6 +772,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_error(400, "REQUEST_INVALID", str(exc))
         except svc.ServiceNotFound as exc:
             self._send_error(404, "NOT_FOUND", str(exc))
+        except svc.ServiceConflict as exc:
+            self._send_error(409, exc.code, str(exc), details=exc.details)
         except Exception:
             self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 
@@ -933,6 +938,13 @@ class AppHandler(SimpleHTTPRequestHandler):
             repo.AIWorkItemRepository(open_db), repo.AIWorkspaceRepository(open_db),
             repo.AlbumRepository(open_db), self._ai_model_configuration_service(),
             svc.OperationService(repo.OperationRepository(open_db)),
+        )
+
+    def _ai_photo_evidence_service(self):
+        return svc.AIPhotoEvidenceManifestService(
+            repo.AIPhotoEvidenceRepository(open_db), repo.AIWorkItemRepository(open_db),
+            repo.AlbumRepository(open_db), APP_CONFIG.get("archive_root", ""),
+            repo.IssueRepository(open_db),
         )
 
     def _work_dispatch_service(self):
@@ -1197,6 +1209,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                 service = self._ai_work_item_service()
                 item = service.retry(parts[3], expected) if parts[4] == "retry" else service.cancel(parts[3], expected)
                 self._send_success(200, {"item": item})
+            elif re.match(r"^/api/ai-work-items/[^/]+/evidence-manifest$", path):
+                if not self._require_admin_principal(): return
+                manifest = self._ai_photo_evidence_service().create(path.split("/")[3])
+                self._send_success(201, {"manifest":manifest})
             elif path == "/api/ai-model-configurations":
                 if not self._require_admin_principal(): return
                 self._send_success(201, {"configuration": self._ai_model_configuration_service().create(body)})

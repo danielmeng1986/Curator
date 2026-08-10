@@ -186,6 +186,11 @@ and an explicit reason. Release is rejected while execution, review, rework, or
 Promotion remains active. Read models expose the links needed to move between
 candidate, active-work, history, Workspace review, and Operation detail views.
 
+Admin-only Work Item evidence-manifest create/read endpoints select and expose
+immutable relative metadata by Work Item identity. Clients cannot nominate a
+path. Responses contain opaque evidence UUIDs and relative evidence metadata,
+never the Album absolute path. Image content transfer is specified separately.
+
 ## Future extensions
 
 - Route/resource catalogs can be added without changing the shared contract.

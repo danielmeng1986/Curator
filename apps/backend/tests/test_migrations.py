@@ -137,3 +137,14 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
             conn.execute("INSERT INTO work_dispatch_preview_claim VALUES ('preview','batch','admin','now')")
             with self.assertRaises(sqlite3.IntegrityError):
                 conn.execute("INSERT INTO work_dispatch_preview_claim VALUES ('preview','batch-2','admin','now')")
+
+    def test_0008_evidence_manifest_is_repeatable_and_item_unique(self):
+        root = Path(__file__).parents[1] / "migrations"
+        with sqlite3.connect(":memory:") as conn:
+            conn.execute("PRAGMA foreign_keys=ON"); conn.execute("CREATE TABLE album(id INTEGER PRIMARY KEY)")
+            for name in ("0003_ai_workspace_container.sql","0004_ai_model_configuration.sql","0005_album_ai_work_item.sql"):
+                conn.executescript((root / name).read_text())
+            sql = (root / "0008_ai_photo_evidence_manifest.sql").read_text(); conn.executescript(sql); conn.executescript(sql)
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            indexes = {row[1] for row in conn.execute("PRAGMA index_list(ai_photo_evidence_manifest)")}
+        self.assertIn("workspace_album_ai_worker_photo",tables); self.assertTrue(indexes)

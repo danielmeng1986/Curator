@@ -14,6 +14,7 @@ contain no SQL or direct database-connection handling.
 from __future__ import annotations
 
 import re
+import os
 import shutil
 import uuid as _uuid_mod
 import hashlib
@@ -2164,6 +2165,132 @@ class WorkDispatchService:
                 configuration_uuid, self._now().isoformat())
         except repo.PersistenceConflict as exc:
             raise ServiceConflict(exc.details["code"], "Work Item is already assigned to a Group.", exc.details) from exc
+
+
+class AIPhotoEvidenceManifestService:
+    """Discover, select, hash, persist, and revalidate Album evidence."""
+
+    SUPPORTED = {".jpg":"image/jpeg", ".jpeg":"image/jpeg", ".png":"image/png", ".webp":"image/webp"}
+    MAX_BYTES = 32 * 1024 * 1024
+    SELECTION_METHOD = "mean-size-band-30pct-then-nearest-v1"
+
+    def __init__(self, evidence_repo, item_repo, album_repo, archive_root, issue_repo=None, now_fn=None):
+        self._repo, self._items, self._albums = evidence_repo, item_repo, album_repo
+        self._root = Path(archive_root).resolve(); self._issues = issue_repo
+        self._now = now_fn or (lambda:datetime.now(timezone.utc))
+
+    @staticmethod
+    def _mime(path):
+        with path.open("rb") as stream: head = stream.read(16)
+        if head.startswith(b"\xff\xd8\xff"): return "image/jpeg"
+        if head.startswith(b"\x89PNG\r\n\x1a\n"): return "image/png"
+        if len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WEBP": return "image/webp"
+        return None
+
+    def _album_root(self, album):
+        raw = Path(str(album["album"].get("path") or ""))
+        target = (raw if raw.is_absolute() else self._root / raw).resolve()
+        try: target.relative_to(self._root)
+        except ValueError as exc: raise ServiceConflict("EVIDENCE_PATH_INVALID", "Album path is outside the archive root.") from exc
+        if not target.is_dir(): raise ServiceConflict("EVIDENCE_IMAGES_UNAVAILABLE", "Album directory is unavailable.")
+        return target
+
+    def _discover(self, root):
+        accepted, excluded = [], {"unsupported":0,"oversized":0,"symlink":0,"unreadable":0}
+        for base, dirs, files in os.walk(root, followlinks=False):
+            base_path = Path(base)
+            kept = []
+            for name in sorted(dirs):
+                path = base_path / name
+                if path.is_symlink(): excluded["symlink"] += 1
+                else: kept.append(name)
+            dirs[:] = kept
+            for name in sorted(files):
+                path = base_path / name; suffix = path.suffix.lower()
+                if path.is_symlink(): excluded["symlink"] += 1; continue
+                if suffix not in self.SUPPORTED: excluded["unsupported"] += 1; continue
+                try:
+                    stat = path.stat()
+                    if not path.is_file(): excluded["unsupported"] += 1; continue
+                    if stat.st_size > self.MAX_BYTES: excluded["oversized"] += 1; continue
+                    mime = self._mime(path)
+                    if mime != self.SUPPORTED[suffix]: excluded["unsupported"] += 1; continue
+                    relative = path.resolve().relative_to(root).as_posix()
+                    accepted.append({"path":path,"relative_path":relative,"filename":path.name,
+                        "size_bytes":stat.st_size,"modified_time_ns":stat.st_mtime_ns,"mime_type":mime})
+                except (OSError, ValueError): excluded["unreadable"] += 1
+        accepted.sort(key=lambda item:item["relative_path"].casefold())
+        return accepted, excluded
+
+    @staticmethod
+    def _even(items, count):
+        if count == 1: return [items[len(items)//2]]
+        return [items[round(index*(len(items)-1)/(count-1))] for index in range(count)]
+
+    def _report(self, item, code, message, eligible, required):
+        issue = self._issues.create({"category":"AI Evidence", "description":message,
+            "suggested_resolution":"Add or compress supported Album images, then rebuild the evidence Manifest.",
+            "source_workflow":"AIPhotoEvidenceManifest", "priority":"High"}) if self._issues else None
+        details = {"work_item_uuid":item["uuid"],"album_id":item["album_id"],
+            "eligible_image_count":eligible,"required_sample_count":required}
+        if issue: details["issue_uuid"] = issue["uuid"]
+        raise ServiceConflict(code,message,details)
+
+    def create(self, item_uuid):
+        existing = self._repo.get_by_item(item_uuid)
+        if existing: return self.revalidate(item_uuid)
+        item = self._items.get(item_uuid)
+        if not item: raise ServiceNotFound("AI Work Item not found.")
+        if item["run_state"] not in {"Pending","Failed"}:
+            raise ServiceConflict("EVIDENCE_MANIFEST_STATE_INVALID", "Evidence must be selected before Worker processing.")
+        sample_count = int(item["configuration_snapshot"]["sample_count"])
+        album = self._albums.get_by_id(item["album_id"])
+        if not album: raise ServiceNotFound("Album not found.")
+        try: root = self._album_root(album)
+        except ServiceConflict as exc:
+            if exc.code == "EVIDENCE_IMAGES_UNAVAILABLE":
+                self._report(item,exc.code,str(exc),0,sample_count)
+            raise
+        images, excluded = self._discover(root)
+        if not images: self._report(item,"EVIDENCE_IMAGES_UNAVAILABLE","Album contains no usable supported images.",0,sample_count)
+        if len(images) < sample_count:
+            self._report(item,"EVIDENCE_SAMPLE_INSUFFICIENT","Album contains fewer usable images than the configured sample count.",len(images),sample_count)
+        mean = sum(item["size_bytes"] for item in images) / len(images); low, high = mean*.7, mean*1.3
+        band = [item for item in images if low <= item["size_bytes"] <= high]
+        if len(band) >= sample_count: selected = self._even(band,sample_count)
+        else:
+            chosen = list(band); used = {item["relative_path"] for item in chosen}
+            remainder = sorted((item for item in images if item["relative_path"] not in used),
+                key=lambda item:(abs(item["size_bytes"]-mean),item["relative_path"].casefold()))
+            chosen.extend(remainder[:sample_count-len(chosen)]); chosen.sort(key=lambda item:item["relative_path"].casefold())
+            selected = self._even(chosen,sample_count)
+        evidence = []
+        for selected_item in selected:
+            digest = hashlib.sha256()
+            with selected_item["path"].open("rb") as stream:
+                for chunk in iter(lambda:stream.read(1024*1024),b""): digest.update(chunk)
+            after = selected_item["path"].stat()
+            if after.st_size != selected_item["size_bytes"] or after.st_mtime_ns != selected_item["modified_time_ns"]:
+                raise ServiceConflict("EVIDENCE_CONTENT_CHANGED","An evidence image changed during Manifest creation.")
+            evidence.append({key:value for key,value in selected_item.items() if key != "path"} | {"sha256":digest.hexdigest()})
+        return self._repo.create({"work_item_uuid":item_uuid,"album_id":item["album_id"],"sample_count":sample_count,
+            "eligible_image_count":len(images),"average_size_bytes":mean,"selection_method":self.SELECTION_METHOD,
+            "discovery_summary":{"eligible":len(images),**excluded},"selected_at":self._now().isoformat()}, evidence)
+
+    def revalidate(self, item_uuid):
+        manifest = self._repo.get_by_item(item_uuid)
+        if not manifest: raise ServiceNotFound("Photo evidence Manifest not found.")
+        album = self._albums.get_by_id(manifest["album_id"]); root = self._album_root(album)
+        for item in manifest["evidence"]:
+            path = (root / item["relative_path"]).resolve()
+            try: path.relative_to(root)
+            except ValueError as exc: raise ServiceConflict("EVIDENCE_CONTENT_CHANGED","Evidence path containment changed.") from exc
+            if not path.is_file() or path.is_symlink(): raise ServiceConflict("EVIDENCE_CONTENT_CHANGED","An evidence image is missing or unsafe.")
+            stat = path.stat()
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if stat.st_size != item["size_bytes"] or stat.st_mtime_ns != item["modified_time_ns"] or digest != item["sha256"]:
+                raise ServiceConflict("EVIDENCE_CONTENT_CHANGED","An evidence image changed after selection.",{"evidence_uuid":item["uuid"]})
+        return manifest
 
 
 class AIWorkspaceService:

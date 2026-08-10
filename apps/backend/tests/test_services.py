@@ -10,6 +10,7 @@ verified here; HTTP transport concerns are verified in test_api_contract.py.
 from __future__ import annotations
 
 import sqlite3
+import os
 import sys
 import tempfile
 import unittest
@@ -1633,6 +1634,7 @@ class TestAtomicAlbumAIWorkDispatchContract(unittest.TestCase):
                       "workspace_album_ai_worker","work_dispatch_preview_claim"):
             self.assertEqual(0, self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
 
+
     def test_concurrent_execution_has_one_winner_and_failure_rolls_back(self):
         with tempfile.TemporaryDirectory() as tmp:
             database = Path(tmp) / "execute-race.db"; migrations = Path(__file__).parents[1] / "migrations"
@@ -1683,6 +1685,58 @@ class TestAtomicAlbumAIWorkDispatchContract(unittest.TestCase):
         for table in ("work_dispatch_batch","work_dispatch_group","album_work_reservation",
                       "workspace_album_ai_worker","work_dispatch_preview_claim"):
             self.assertEqual(0, self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+
+
+class TestAIPhotoEvidenceManifestContract(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name); self.album_dir = self.root / "album"
+        self.album_dir.mkdir(); self.conn = _make_db()
+        self.conn.execute("INSERT INTO album (uuid,title,path) VALUES ('evidence-album','Evidence','album')"); self.conn.commit()
+        workspace_repo = repo.AIWorkspaceRepository(_db_factory(self.conn)); workspace = svc.AIWorkspaceService(workspace_repo).create("Evidence")
+        config_service = svc.AIModelConfigurationService(repo.AIModelConfigurationRepository(_db_factory(self.conn)))
+        config = config_service.create({"name":"Evidence Config","model_identifier":"qwen","model_file":"qwen.gguf",
+            "vision_prompt_version":"v1","writer_prompt_version":"w1","sample_count":8,"context_size":4096,
+            "threads":8,"gpu_layers":40,"max_tokens":800,"temperature":0.2,"image_max_tokens":384})
+        self.item_repo = repo.AIWorkItemRepository(_db_factory(self.conn))
+        self.item = svc.AIWorkItemService(self.item_repo,workspace_repo,repo.AlbumRepository(_db_factory(self.conn)),config_service).create(
+            workspace["uuid"],1,config["uuid"])
+        self.issues = repo.IssueRepository(_db_factory(self.conn)); self.evidence_repo = repo.AIPhotoEvidenceRepository(_db_factory(self.conn))
+        self.service = svc.AIPhotoEvidenceManifestService(self.evidence_repo,self.item_repo,
+            repo.AlbumRepository(_db_factory(self.conn)),self.root,self.issues,
+            now_fn=lambda:datetime(2026,8,10,tzinfo=timezone.utc))
+
+    def tearDown(self): self.conn.close(); self.temp.cleanup()
+
+    def _images(self, count=10):
+        for index in range(count):
+            size = 1000 + index*100
+            (self.album_dir / f"image-{index:02d}.jpg").write_bytes(b"\xff\xd8\xff" + bytes([index])* (size-3))
+
+    def test_mean_band_selection_is_deterministic_immutable_and_photo_table_independent(self):
+        self._images(); first = self.service.create(self.item["uuid"]); second = self.service.create(self.item["uuid"])
+        self.assertEqual(first["uuid"],second["uuid"]); self.assertEqual(8,len(first["evidence"]))
+        self.assertEqual("mean-size-band-30pct-then-nearest-v1",first["selection_method"])
+        self.assertEqual(0,self.conn.execute("SELECT COUNT(*) FROM photo").fetchone()[0])
+        self.assertTrue(all(item["relative_path"].startswith("image-") and len(item["sha256"]) == 64 for item in first["evidence"]))
+
+    def test_insufficient_images_create_issue_and_no_manifest(self):
+        self._images(7)
+        with self.assertRaises(svc.ServiceConflict) as ctx: self.service.create(self.item["uuid"])
+        self.assertEqual("EVIDENCE_SAMPLE_INSUFFICIENT",ctx.exception.code); self.assertIn("issue_uuid",ctx.exception.details)
+        self.assertEqual(0,self.conn.execute("SELECT COUNT(*) FROM ai_photo_evidence_manifest").fetchone()[0])
+
+    def test_symlink_is_ignored_and_changed_content_is_rejected(self):
+        self._images(); outside = self.root / "outside.jpg"; outside.write_bytes(b"\xff\xd8\xffoutside")
+        os.symlink(outside,self.album_dir / "linked.jpg")
+        manifest = self.service.create(self.item["uuid"]); self.assertEqual(1,manifest["discovery_summary"]["symlink"])
+        chosen = self.album_dir / manifest["evidence"][0]["relative_path"]; chosen.write_bytes(chosen.read_bytes()+b"changed")
+        with self.assertRaises(svc.ServiceConflict) as ctx: self.service.revalidate(self.item["uuid"])
+        self.assertEqual("EVIDENCE_CONTENT_CHANGED",ctx.exception.code)
+
+    def test_album_path_cannot_escape_archive_root(self):
+        self.conn.execute("UPDATE album SET path='../outside'"); self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict) as ctx: self.service.create(self.item["uuid"])
+        self.assertEqual("EVIDENCE_PATH_INVALID",ctx.exception.code)
 
 
 class TestAIModelConfigurationContract(unittest.TestCase):

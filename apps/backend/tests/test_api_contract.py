@@ -18,6 +18,7 @@ import io
 import json
 import sqlite3
 import sys
+import tempfile
 import threading
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -882,6 +883,36 @@ class TestVersionedApiAuthorization(_TestServerBase):
             "worker_kind":"album_name_analysis", "workspace_uuid":workspace_body["data"]["workspace"]["uuid"],
             "configuration_uuids":[config_body["data"]["configuration"]["uuid"]], "first_n":101}, admin)
         self.assertEqual(400, status); self.assertEqual("REQUEST_INVALID", invalid["error"]["code"])
+
+    def test_photo_evidence_manifest_is_admin_selected_and_path_redacted(self):
+        import server as srv
+        marker = self._db.execute("SELECT COUNT(*) FROM album").fetchone()[0]
+        with tempfile.TemporaryDirectory() as root:
+            album_dir = Path(root) / "manifest-album"; album_dir.mkdir()
+            for index in range(10):
+                (album_dir / f"sample-{index:02d}.jpg").write_bytes(b"\xff\xd8\xff" + bytes([index])*(1000+index*100))
+            self._db.execute("INSERT INTO album (uuid,title,path,updated_at) VALUES (?,?,?,?)",
+                (f"manifest-{marker}","Manifest Album","manifest-album","v1"))
+            album_id = self._db.execute("SELECT last_insert_rowid()").fetchone()[0]; self._db.commit()
+            admin = self._bearer(self._issue(role="admin")); writer = self._bearer(self._issue(role="writer"))
+            config = {"name":f"Manifest Config {marker}","model_identifier":"qwen","model_file":"qwen.gguf",
+                "vision_prompt_version":"v1","writer_prompt_version":"w1","sample_count":8,"context_size":4096,
+                "threads":8,"gpu_layers":40,"max_tokens":800,"temperature":0.2,"image_max_tokens":384}
+            _, cfg = self._post("/api/v1/ai-model-configurations",config,admin)
+            _, ws = self._post("/api/v1/ai-workspaces",{"title":f"Manifest WS {marker}"},admin)
+            _, preview = self._post("/api/v1/work-dispatch/preview",{"worker_kind":"album_name_analysis",
+                "workspace_uuid":ws["data"]["workspace"]["uuid"],"configuration_uuids":[cfg["data"]["configuration"]["uuid"]],
+                "album_ids":[album_id]},admin)
+            _, executed = self._post("/api/v1/work-dispatch/execute",{"preview_token":preview["data"]["preview"]["preview_token"]},admin)
+            item_uuid = executed["data"]["result"]["groups"][0]["work_item_uuids"][0]
+            with patch.object(srv,"APP_CONFIG",{**srv.APP_CONFIG,"archive_root":root}):
+                status, denied = self._get(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",writer)
+                self.assertEqual(403,status)
+                status, created = self._post(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",{},admin)
+                self.assertEqual(201,status); manifest = created["data"]["manifest"]
+                self.assertEqual(8,len(manifest["evidence"])); self.assertNotIn(root,str(manifest))
+                status, fetched = self._get(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",admin)
+                self.assertEqual(200,status); self.assertEqual(manifest["uuid"],fetched["data"]["manifest"]["uuid"])
 
     def test_current_principal_and_renewal_request_are_token_safe(self):
         issued = self._issue(role="writer")

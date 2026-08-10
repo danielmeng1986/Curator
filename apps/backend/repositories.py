@@ -2481,6 +2481,75 @@ class AlbumAIWorkDispatchRepository(WorkDispatchRepository):
         return {"batch":dict(batch),"groups":groups,"operation":dict(operation) if operation else None}
 
 
+class AIPhotoEvidenceRepository:
+    """Immutable Manifest and evidence metadata; image bytes remain on disk."""
+
+    def __init__(self, db_factory): self._db = db_factory
+
+    @staticmethod
+    def _ensure_schema(conn):
+        AIWorkItemRepository._ensure_schema(conn)
+        conn.executescript("""CREATE TABLE IF NOT EXISTS ai_photo_evidence_manifest (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
+            work_item_uuid TEXT NOT NULL UNIQUE, album_id INTEGER NOT NULL,
+            manifest_version INTEGER NOT NULL DEFAULT 1, sample_count INTEGER NOT NULL,
+            eligible_image_count INTEGER NOT NULL, average_size_bytes REAL NOT NULL,
+            selection_method TEXT NOT NULL, discovery_summary_json TEXT NOT NULL,
+            selected_at TEXT NOT NULL, FOREIGN KEY(work_item_uuid) REFERENCES workspace_album_ai_worker(uuid),
+            FOREIGN KEY(album_id) REFERENCES album(id));
+        CREATE TABLE IF NOT EXISTS workspace_album_ai_worker_photo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
+            manifest_uuid TEXT NOT NULL, work_item_uuid TEXT NOT NULL, album_id INTEGER NOT NULL,
+            ordinal INTEGER NOT NULL, relative_path TEXT NOT NULL, filename TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL, modified_time_ns INTEGER NOT NULL, sha256 TEXT NOT NULL,
+            mime_type TEXT NOT NULL, created_at TEXT NOT NULL,
+            UNIQUE(manifest_uuid,ordinal), UNIQUE(manifest_uuid,relative_path),
+            FOREIGN KEY(manifest_uuid) REFERENCES ai_photo_evidence_manifest(uuid),
+            FOREIGN KEY(work_item_uuid) REFERENCES workspace_album_ai_worker(uuid),
+            FOREIGN KEY(album_id) REFERENCES album(id));""")
+
+    @staticmethod
+    def _manifest(row):
+        item = dict(row); item["discovery_summary"] = json.loads(item.pop("discovery_summary_json")); return item
+
+    def create(self, fields, evidence):
+        manifest_uuid = str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn); conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute("""INSERT INTO ai_photo_evidence_manifest
+                    (uuid,work_item_uuid,album_id,sample_count,eligible_image_count,average_size_bytes,
+                     selection_method,discovery_summary_json,selected_at) VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (manifest_uuid,fields["work_item_uuid"],fields["album_id"],fields["sample_count"],
+                     fields["eligible_image_count"],fields["average_size_bytes"],fields["selection_method"],
+                     json.dumps(fields["discovery_summary"],sort_keys=True),fields["selected_at"]))
+                for ordinal, item in enumerate(evidence, start=1):
+                    conn.execute("""INSERT INTO workspace_album_ai_worker_photo
+                        (uuid,manifest_uuid,work_item_uuid,album_id,ordinal,relative_path,filename,size_bytes,
+                         modified_time_ns,sha256,mime_type,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (str(uuid.uuid4()),manifest_uuid,fields["work_item_uuid"],fields["album_id"],ordinal,
+                         item["relative_path"],item["filename"],item["size_bytes"],item["modified_time_ns"],
+                         item["sha256"],item["mime_type"],fields["selected_at"]))
+                conn.commit()
+            except Exception: conn.rollback(); raise
+        return self.get_by_item(fields["work_item_uuid"])
+
+    def get_by_item(self, item_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute("SELECT * FROM ai_photo_evidence_manifest WHERE work_item_uuid=?", (item_uuid,)).fetchone()
+            if not row: return None
+            result = self._manifest(row); result["evidence"] = [dict(item) for item in conn.execute(
+                "SELECT * FROM workspace_album_ai_worker_photo WHERE manifest_uuid=? ORDER BY ordinal", (row["uuid"],)).fetchall()]
+        return result
+
+    def get_evidence(self, evidence_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn); row = conn.execute(
+                "SELECT * FROM workspace_album_ai_worker_photo WHERE uuid=?", (evidence_uuid,)).fetchone()
+        return dict(row) if row else None
+
+
 class ImportRepository:
     """Persistence operations for the album import workflow."""
 

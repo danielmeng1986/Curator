@@ -136,6 +136,27 @@ dataset-specific Promotion policy may additionally map `TEMPORARY` to
 the existing Status. Preview must disclose both the name change and any
 calculated Status transition. A client cannot nominate the target Status.
 
+## Album-analysis Photo evidence policy
+
+The AI model configuration supplies `sample_count` (default 8). The Backend
+recursively discovers regular JPG/JPEG, PNG, and WebP files beneath the Album
+root, validates file signatures, rejects symlinks, and excludes files larger
+than 32 MiB. It does not require or populate the permanent `photo` table.
+
+Selection is deterministic. The Backend computes the arithmetic mean size of
+all eligible images and prioritizes images within ±30 percent of that mean.
+That pool is ordered by normalized relative path and sampled evenly. If the
+pool is too small but the Album has enough eligible images, the Backend fills
+it with images nearest to the mean size, using relative path as the stable
+tie-breaker. Every selected file retains size, nanosecond modification time,
+SHA-256, MIME type, ordinal, and relative path in one immutable Manifest.
+
+Zero eligible images returns `EVIDENCE_IMAGES_UNAVAILABLE`. Fewer eligible
+images than the configured sample count returns `EVIDENCE_SAMPLE_INSUFFICIENT`.
+Both create an Album evidence Issue and no Manifest. A missing, replaced,
+changed, oversized, or containment-invalid selected image returns
+`EVIDENCE_CONTENT_CHANGED` before transfer or result acceptance.
+
 ## Authorization, Operations, and Issues
 
 - Candidate, preview, execute, Group cancellation, and release are Admin-only.
@@ -167,4 +188,3 @@ All conflict outcomes are zero-write outcomes and use the shared API envelope.
 - Release and redispatch tests preserve history and reject premature release.
 - Browser acceptance proves dispatched Albums leave the default candidate list
   and remain discoverable in active/history views.
-
