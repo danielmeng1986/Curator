@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-015` — Status: `Proposed`
+`UI-015` — Status: `Complete`
 
 ## Title
 
@@ -55,3 +55,22 @@ allowed UI capabilities and diagnostic fields, including direct-request attacks.
 
 - Absence from rendered HTML is insufficient if the sensitive field was already delivered in an API response; network payloads must also be checked.
 
+## Completion Record
+
+- Added isolated Reader, Writer, and Admin browser contexts so device Tokens and
+  role state cannot leak between acceptance scenarios.
+- Proved missing, malformed, invalid, expired, revoked, and insufficient-scope
+  credentials through direct protected requests with zero Album, Status,
+  Quarantine, or Backup side effects and successful approved reconnection.
+- Mapped navigation/action visibility to direct Backend enforcement for entity
+  writes, Import, Quarantine, authentication administration, Work Dispatch, and
+  AI Review routes.
+- Captured Operation, Repair, and Admin-state network payloads and proved Reader
+  redaction, Writer operational context, Admin-only candidates, and absence of
+  Token hashes, registration proof, stored plaintext Tokens, sensitive error
+  details, and private absolute paths.
+- Proved unavailable Operation identifiers are labelled without a false detail
+  route, while genuinely missing resources return a safe not-found outcome.
+- The final browser suite passed twice from clean disposable roots and 30
+  Backend authentication, authorization, Operation disclosure, and
+  Issue/Repair disclosure tests passed on 2026-08-11.
