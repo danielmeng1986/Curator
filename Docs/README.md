@@ -108,6 +108,7 @@ The documentation is organized into several independent chapters.
 | 06-Roadmap.md | Development roadmap |
 | Project/Runtime-Layout.md | Versioned source, local configuration, and runtime-data boundaries |
 | Project/Tasks/ | Cross-cutting repository migration tasks |
+| Tasks/ | Documentation governance and database-documentation maintenance tasks |
 | ADR/ | Architecture Decision Records |
 
 Each chapter focuses on a single topic.
