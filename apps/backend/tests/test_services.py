@@ -13,6 +13,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -1386,6 +1387,107 @@ class TestAIWorkItemClaimContract(unittest.TestCase):
         config_service.set_enabled(self.config["uuid"], 1, False)
         with self.assertRaises(svc.ServiceNotFound):
             self.service.create(self.workspace["uuid"], self.album_id, self.config["uuid"])
+
+
+class TestWorkDispatchFoundationContract(unittest.TestCase):
+    class OtherWorkerAdapter:
+        worker_kind = "metadata_enrichment"
+        dataset_type = "album_metadata"
+        schema_version = 1
+        item_kind = "metadata_worker_item"
+
+        def eligibility(self, album, context=None):
+            return {"can_dispatch": bool(album), "eligibility": "ELIGIBLE" if album else "ALBUM_NOT_FOUND",
+                    "reason": None if album else "Album not found.", "warnings": []}
+
+    def setUp(self):
+        self.conn = _make_db(); self.now = datetime(2026,8,10,tzinfo=timezone.utc)
+        self.conn.execute("INSERT INTO status (name) VALUES ('CURATED')")
+        self.conn.execute("""INSERT INTO album (uuid,status_id,title,path,created_at,updated_at)
+            VALUES ('dispatch-album',1,'Dispatch Album','Studio/Dispatch Album','now','now')""")
+        self.conn.commit(); self.album_id = self.conn.execute("SELECT id FROM album").fetchone()[0]
+        self.repo = repo.WorkDispatchRepository(_db_factory(self.conn))
+        registry = svc.WorkDispatchAdapterRegistry((svc.AlbumNameAnalysisDispatchAdapter(), self.OtherWorkerAdapter()))
+        self.service = svc.WorkDispatchService(self.repo, repo.AlbumRepository(_db_factory(self.conn)),
+            registry, now_fn=lambda:self.now)
+
+    def tearDown(self): self.conn.close()
+
+    def test_worker_registry_and_eligibility_are_dataset_independent(self):
+        kinds = self.service.worker_kinds()
+        self.assertEqual(["album_name_analysis", "metadata_enrichment"], [item["worker_kind"] for item in kinds])
+        self.assertEqual("ELIGIBLE", self.service.eligibility("album_name_analysis", self.album_id)["eligibility"])
+        with self.assertRaises(ValueError): self.service.eligibility("unknown", self.album_id)
+
+    def test_album_is_exclusive_across_worker_kinds(self):
+        first = self.service.create_batch("album_name_analysis")
+        group = self.service.reserve_album(first["uuid"], self.album_id)
+        second = self.service.create_batch("metadata_enrichment")
+        with self.assertRaises(svc.ServiceConflict) as ctx:
+            self.service.reserve_album(second["uuid"], self.album_id)
+        self.assertEqual("ALBUM_ALREADY_RESERVED", ctx.exception.code)
+        self.assertEqual(group["uuid"], self.repo.active_reservation(self.album_id)["group_uuid"])
+
+    def test_one_group_holds_multiple_configuration_items(self):
+        batch = self.service.create_batch("album_name_analysis", workspace_uuid="workspace-1")
+        group = self.service.reserve_album(batch["uuid"], self.album_id)
+        self.service.attach_item(group["uuid"], "item-a", "config-a")
+        result = self.service.attach_item(group["uuid"], "item-b", "config-b")
+        self.assertEqual(["config-a", "config-b"], [item["configuration_uuid"] for item in result["items"]])
+        self.assertEqual(group["uuid"], self.repo.active_reservation(self.album_id)["group_uuid"])
+
+    def test_release_preserves_history_and_never_changes_album_status(self):
+        before = self.conn.execute("SELECT status_id FROM album WHERE id=?", (self.album_id,)).fetchone()[0]
+        batch = self.service.create_batch("album_name_analysis")
+        group = self.service.reserve_album(batch["uuid"], self.album_id)
+        released = self.repo.release(group["uuid"], group["version"], self.now.isoformat(), "admin-1", "Comparison closed")
+        after = self.conn.execute("SELECT status_id FROM album WHERE id=?", (self.album_id,)).fetchone()[0]
+        self.assertEqual(before, after); self.assertIsNone(self.repo.active_reservation(self.album_id))
+        history = self.repo.album_history(self.album_id)
+        self.assertEqual("Released", history[0]["group_state"])
+        self.assertEqual("Comparison closed", history[0]["release_reason"])
+
+    def test_concurrent_repository_claims_leave_exactly_one_reservation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "dispatch-race.db"
+            with sqlite3.connect(database) as conn:
+                conn.executescript(_SCHEMA_SQL)
+                conn.execute("INSERT INTO album (uuid,title) VALUES ('race-album','Race')")
+                conn.commit()
+
+            opened = []
+
+            def factory():
+                conn = sqlite3.connect(database, timeout=5, check_same_thread=False)
+                conn.row_factory = sqlite3.Row; conn.execute("PRAGMA foreign_keys=ON")
+                opened.append(conn)
+                return conn
+
+            dispatch = repo.WorkDispatchRepository(factory)
+            now = self.now.isoformat()
+            first = dispatch.create_batch({"worker_kind":"album_name_analysis", "dataset_type":"album_analysis",
+                "schema_version":1, "created_at":now})
+            second = dispatch.create_batch({"worker_kind":"metadata_enrichment", "dataset_type":"album_metadata",
+                "schema_version":1, "created_at":now})
+
+            def reserve(batch, worker_kind, dataset_type):
+                try:
+                    dispatch.reserve_album(batch["uuid"], 1, {"worker_kind":worker_kind,
+                        "dataset_type":dataset_type, "schema_version":1, "created_at":now})
+                    return "created"
+                except repo.PersistenceConflict:
+                    return "conflict"
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                outcomes = list(pool.map(lambda args: reserve(*args), ((first,"album_name_analysis","album_analysis"),
+                    (second,"metadata_enrichment","album_metadata"))))
+            for conn in opened:
+                conn.close()
+            with sqlite3.connect(database) as conn:
+                count = conn.execute("SELECT COUNT(*) FROM album_work_reservation WHERE album_id=1").fetchone()[0]
+                active_groups = conn.execute("SELECT COUNT(*) FROM work_dispatch_group WHERE group_state='Active'").fetchone()[0]
+            self.assertEqual(["conflict", "created"], sorted(outcomes))
+            self.assertEqual(1, count); self.assertEqual(1, active_groups)
 
 
 class TestAIModelConfigurationContract(unittest.TestCase):

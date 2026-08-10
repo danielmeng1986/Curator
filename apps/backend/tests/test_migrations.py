@@ -101,3 +101,25 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
             conn.executescript((root / "0005_album_ai_work_item.sql").read_text()); conn.executescript((root / "0005_album_ai_work_item.sql").read_text())
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         self.assertIn("workspace_album_ai_worker", tables); self.assertIn("ai_work_item_attempt", tables)
+
+    def test_0006_dispatch_is_repeatable_and_reservation_is_album_unique(self):
+        root = Path(__file__).parents[1] / "migrations"
+        with sqlite3.connect(":memory:") as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("CREATE TABLE album(id INTEGER PRIMARY KEY)")
+            sql = (root / "0006_work_dispatch_foundation.sql").read_text()
+            conn.executescript(sql); conn.executescript(sql)
+            conn.execute("INSERT INTO album VALUES (1)")
+            conn.execute("""INSERT INTO work_dispatch_batch
+                (uuid,worker_kind,dataset_type,schema_version,created_at,updated_at)
+                VALUES ('b1','album_name_analysis','album_analysis',1,'now','now')""")
+            conn.execute("""INSERT INTO work_dispatch_group
+                (uuid,batch_uuid,album_id,worker_kind,dataset_type,schema_version,created_at,updated_at)
+                VALUES ('g1','b1',1,'album_name_analysis','album_analysis',1,'now','now')""")
+            conn.execute("INSERT INTO album_work_reservation VALUES (1,'g1','b1','album_name_analysis','now')")
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute("INSERT INTO album_work_reservation VALUES (1,'g2','b1','other_worker','now')")
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        self.assertIn("work_dispatch_batch", tables)
+        self.assertIn("work_dispatch_group", tables)
+        self.assertIn("work_dispatch_group_item", tables)

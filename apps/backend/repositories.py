@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import uuid
 import json
+import sqlite3
 from datetime import datetime, timezone
 
 
@@ -2186,6 +2187,147 @@ class AIWorkItemRepository:
     def attempts(self, item_uuid):
         with self._db() as conn:
             self._ensure_schema(conn); rows = conn.execute("SELECT * FROM ai_work_item_attempt WHERE work_item_uuid=? ORDER BY attempt_number", (item_uuid,)).fetchall()
+        return [dict(row) for row in rows]
+
+
+class WorkDispatchRepository:
+    """Generic dispatch identity, Album reservation, and retained Group history."""
+
+    def __init__(self, db_factory):
+        self._db = db_factory
+
+    @staticmethod
+    def _ensure_schema(conn):
+        conn.executescript("""CREATE TABLE IF NOT EXISTS work_dispatch_batch (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
+            worker_kind TEXT NOT NULL, dataset_type TEXT NOT NULL, schema_version INTEGER NOT NULL,
+            workspace_uuid TEXT, batch_state TEXT NOT NULL DEFAULT 'Active'
+                CHECK(batch_state IN ('Active','Closed','Cancelled')),
+            created_by_token_uuid TEXT, version INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS work_dispatch_group (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
+            batch_uuid TEXT NOT NULL, album_id INTEGER NOT NULL, worker_kind TEXT NOT NULL,
+            dataset_type TEXT NOT NULL, schema_version INTEGER NOT NULL,
+            group_state TEXT NOT NULL DEFAULT 'Active' CHECK(group_state IN ('Active','Released')),
+            version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            released_at TEXT, released_by_token_uuid TEXT, release_reason TEXT,
+            FOREIGN KEY(batch_uuid) REFERENCES work_dispatch_batch(uuid),
+            FOREIGN KEY(album_id) REFERENCES album(id));
+        CREATE INDEX IF NOT EXISTS idx_work_dispatch_group_album_history
+            ON work_dispatch_group(album_id, created_at DESC, id DESC);
+        CREATE TABLE IF NOT EXISTS album_work_reservation (
+            album_id INTEGER PRIMARY KEY, group_uuid TEXT NOT NULL UNIQUE,
+            batch_uuid TEXT NOT NULL, worker_kind TEXT NOT NULL, reserved_at TEXT NOT NULL,
+            FOREIGN KEY(album_id) REFERENCES album(id),
+            FOREIGN KEY(group_uuid) REFERENCES work_dispatch_group(uuid),
+            FOREIGN KEY(batch_uuid) REFERENCES work_dispatch_batch(uuid));
+        CREATE TABLE IF NOT EXISTS work_dispatch_group_item (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, group_uuid TEXT NOT NULL,
+            item_kind TEXT NOT NULL, item_uuid TEXT NOT NULL, configuration_uuid TEXT,
+            created_at TEXT NOT NULL, UNIQUE(group_uuid,item_kind,item_uuid),
+            UNIQUE(item_kind,item_uuid), FOREIGN KEY(group_uuid) REFERENCES work_dispatch_group(uuid));
+        CREATE INDEX IF NOT EXISTS idx_work_dispatch_group_item_group
+            ON work_dispatch_group_item(group_uuid, created_at, id);""")
+
+    @staticmethod
+    def _norm(row):
+        return dict(row) if row else None
+
+    def create_batch(self, fields):
+        batch_uuid = str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute("""INSERT INTO work_dispatch_batch
+                (uuid,worker_kind,dataset_type,schema_version,workspace_uuid,
+                 created_by_token_uuid,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?)""", (batch_uuid, fields["worker_kind"],
+                fields["dataset_type"], fields["schema_version"], fields.get("workspace_uuid"),
+                fields.get("created_by_token_uuid"), fields["created_at"], fields["created_at"]))
+            conn.commit()
+            row = conn.execute("SELECT * FROM work_dispatch_batch WHERE uuid=?", (batch_uuid,)).fetchone()
+        return self._norm(row)
+
+    def get_batch(self, batch_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute("SELECT * FROM work_dispatch_batch WHERE uuid=?", (batch_uuid,)).fetchone()
+        return self._norm(row)
+
+    def reserve_album(self, batch_uuid, album_id, fields):
+        """Atomically create one Group and the Album-wide active reservation."""
+        group_uuid = str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("""INSERT INTO work_dispatch_group
+                    (uuid,batch_uuid,album_id,worker_kind,dataset_type,schema_version,created_at,updated_at)
+                    VALUES (?,?,?,?,?,?,?,?)""", (group_uuid, batch_uuid, album_id,
+                    fields["worker_kind"], fields["dataset_type"], fields["schema_version"],
+                    fields["created_at"], fields["created_at"]))
+                conn.execute("""INSERT INTO album_work_reservation
+                    (album_id,group_uuid,batch_uuid,worker_kind,reserved_at) VALUES (?,?,?,?,?)""",
+                    (album_id, group_uuid, batch_uuid, fields["worker_kind"], fields["created_at"]))
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                conn.rollback()
+                active = conn.execute("SELECT * FROM album_work_reservation WHERE album_id=?", (album_id,)).fetchone()
+                if active:
+                    raise PersistenceConflict({"code": "ALBUM_WORK_RESERVATION_CONFLICT",
+                        "album_id": album_id, "active_reservation": self._norm(active)}) from exc
+                raise
+            row = conn.execute("SELECT * FROM work_dispatch_group WHERE uuid=?", (group_uuid,)).fetchone()
+        return self._norm(row)
+
+    def get_group(self, group_uuid, include_items=False):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute("SELECT * FROM work_dispatch_group WHERE uuid=?", (group_uuid,)).fetchone()
+            result = self._norm(row)
+            if result and include_items:
+                result["items"] = [dict(item) for item in conn.execute(
+                    "SELECT * FROM work_dispatch_group_item WHERE group_uuid=? ORDER BY created_at,id", (group_uuid,)).fetchall()]
+        return result
+
+    def active_reservation(self, album_id):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute("SELECT * FROM album_work_reservation WHERE album_id=?", (album_id,)).fetchone()
+        return self._norm(row)
+
+    def attach_item(self, group_uuid, item_kind, item_uuid, configuration_uuid, created_at):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            try:
+                conn.execute("""INSERT INTO work_dispatch_group_item
+                    (group_uuid,item_kind,item_uuid,configuration_uuid,created_at) VALUES (?,?,?,?,?)""",
+                    (group_uuid,item_kind,item_uuid,configuration_uuid,created_at)); conn.commit()
+            except sqlite3.IntegrityError as exc:
+                conn.rollback()
+                raise PersistenceConflict({"code": "DUPLICATE_ACTIVE_WORK", "item_uuid": item_uuid}) from exc
+        return self.get_group(group_uuid, include_items=True)
+
+    def release(self, group_uuid, expected_version, released_at, released_by_token_uuid, reason):
+        with self._db() as conn:
+            self._ensure_schema(conn); conn.execute("BEGIN IMMEDIATE")
+            group = conn.execute("SELECT * FROM work_dispatch_group WHERE uuid=?", (group_uuid,)).fetchone()
+            if not group or group["group_state"] != "Active" or group["version"] != expected_version:
+                conn.rollback(); return None
+            deleted = conn.execute("DELETE FROM album_work_reservation WHERE album_id=? AND group_uuid=?",
+                (group["album_id"], group_uuid))
+            if deleted.rowcount != 1:
+                conn.rollback(); return None
+            conn.execute("""UPDATE work_dispatch_group SET group_state='Released',version=version+1,
+                updated_at=?,released_at=?,released_by_token_uuid=?,release_reason=? WHERE uuid=?""",
+                (released_at,released_at,released_by_token_uuid,reason,group_uuid)); conn.commit()
+            row = conn.execute("SELECT * FROM work_dispatch_group WHERE uuid=?", (group_uuid,)).fetchone()
+        return self._norm(row)
+
+    def album_history(self, album_id):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute("SELECT * FROM work_dispatch_group WHERE album_id=? ORDER BY created_at DESC,id DESC", (album_id,)).fetchall()
         return [dict(row) for row in rows]
 
 

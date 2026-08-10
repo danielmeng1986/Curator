@@ -1891,6 +1891,103 @@ class AIWorkItemService:
             self._operations.succeed(op["uuid"], summary=summary)
 
 
+class AlbumNameAnalysisDispatchAdapter:
+    """First Worker-kind adapter; result and Photo eligibility arrive later."""
+
+    worker_kind = "album_name_analysis"
+    dataset_type = "album_analysis"
+    schema_version = 1
+    item_kind = "workspace_album_ai_worker"
+
+    def eligibility(self, album, context=None):
+        if not album:
+            return {"can_dispatch": False, "eligibility": "ALBUM_NOT_FOUND",
+                    "reason": "Album not found.", "warnings": []}
+        return {"can_dispatch": True, "eligibility": "ELIGIBLE",
+                "reason": None, "warnings": []}
+
+
+class WorkDispatchAdapterRegistry:
+    """Stable Worker-kind lookup without coupling dispatch to Item schemas."""
+
+    def __init__(self, adapters=None):
+        adapters = adapters or (AlbumNameAnalysisDispatchAdapter(),)
+        self._adapters = {adapter.worker_kind: adapter for adapter in adapters}
+        if len(self._adapters) != len(adapters):
+            raise ValueError("Worker kind registrations must be unique.")
+
+    def get(self, worker_kind):
+        adapter = self._adapters.get(str(worker_kind or ""))
+        if not adapter:
+            raise ValueError("worker_kind is not supported.")
+        return adapter
+
+    def describe(self):
+        return [{"worker_kind": adapter.worker_kind, "dataset_type": adapter.dataset_type,
+                 "schema_version": adapter.schema_version, "item_kind": adapter.item_kind}
+                for adapter in self._adapters.values()]
+
+
+class WorkDispatchService:
+    """Foundation for generic Batches, exclusive Album Groups, and Item links."""
+
+    def __init__(self, dispatch_repo, album_repo, adapter_registry=None, now_fn=None):
+        self._repo, self._albums = dispatch_repo, album_repo
+        self._adapters = adapter_registry or WorkDispatchAdapterRegistry()
+        self._now = now_fn or (lambda: datetime.now(timezone.utc))
+
+    def worker_kinds(self):
+        return self._adapters.describe()
+
+    def eligibility(self, worker_kind, album_id, context=None):
+        adapter = self._adapters.get(worker_kind)
+        if not isinstance(album_id, int):
+            raise ValueError("album_id must be an integer.")
+        result = adapter.eligibility(self._albums.get_by_id(album_id), context)
+        reservation = self._repo.active_reservation(album_id)
+        if reservation:
+            return {"can_dispatch": False, "eligibility": "ALBUM_ALREADY_RESERVED",
+                    "reason": "Album already belongs to an active Work Dispatch Group.",
+                    "warnings": result.get("warnings", []), "active_reservation": reservation}
+        return result
+
+    def create_batch(self, worker_kind, workspace_uuid=None, created_by_token_uuid=None):
+        adapter = self._adapters.get(worker_kind)
+        return self._repo.create_batch({"worker_kind": adapter.worker_kind,
+            "dataset_type": adapter.dataset_type, "schema_version": adapter.schema_version,
+            "workspace_uuid": workspace_uuid, "created_by_token_uuid": created_by_token_uuid,
+            "created_at": self._now().isoformat()})
+
+    def reserve_album(self, batch_uuid, album_id):
+        batch = self._repo.get_batch(batch_uuid)
+        if not batch:
+            raise ServiceNotFound("Work Dispatch Batch not found.")
+        adapter = self._adapters.get(batch["worker_kind"])
+        eligible = self.eligibility(adapter.worker_kind, album_id)
+        if not eligible["can_dispatch"]:
+            raise ServiceConflict(eligible["eligibility"], eligible["reason"], eligible)
+        try:
+            return self._repo.reserve_album(batch_uuid, album_id,
+                {"worker_kind": adapter.worker_kind, "dataset_type": adapter.dataset_type,
+                 "schema_version": adapter.schema_version, "created_at": self._now().isoformat()})
+        except repo.PersistenceConflict as exc:
+            raise ServiceConflict("ALBUM_WORK_RESERVATION_CONFLICT",
+                "Album already belongs to an active Work Dispatch Group.", exc.details) from exc
+
+    def attach_item(self, group_uuid, item_uuid, configuration_uuid=None):
+        group = self._repo.get_group(group_uuid)
+        if not group:
+            raise ServiceNotFound("Work Dispatch Group not found.")
+        if group["group_state"] != "Active":
+            raise ServiceConflict("WORK_GROUP_NOT_ACTIVE", "Work Items require an active Group.")
+        adapter = self._adapters.get(group["worker_kind"])
+        try:
+            return self._repo.attach_item(group_uuid, adapter.item_kind, item_uuid,
+                configuration_uuid, self._now().isoformat())
+        except repo.PersistenceConflict as exc:
+            raise ServiceConflict(exc.details["code"], "Work Item is already assigned to a Group.", exc.details) from exc
+
+
 class AIWorkspaceService:
     """Own the Dataset-independent AI Workspace container lifecycle."""
 

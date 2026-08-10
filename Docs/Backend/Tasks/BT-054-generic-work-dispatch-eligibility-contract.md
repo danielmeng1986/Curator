@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-054` — Status: `Ready`
+`BT-054` — Status: `Complete`
 
 ## Title
 
@@ -65,3 +65,22 @@ without coupling assignment to Album Status or a particular Worker result schema
 - Do not generalize dataset result fields into the dispatch tables; adapters own
   their Work Items and evidence.
 
+## Completion Record
+
+- Added migration `0006_work_dispatch_foundation.sql` with versioned Dispatch
+  Batches, retained Groups, Album-wide active Reservations, and polymorphic
+  Group–Item associations.
+- Enforced one active Reservation per `album_id` in the database. Competing
+  Worker kinds share the same invariant; a failed race rolls back its tentative
+  Group and leaves exactly one winner.
+- Added the `album_name_analysis` Worker adapter plus a registry and stable
+  eligibility result contract without embedding AI result fields in the
+  generic dispatch layer.
+- Added Repository/Service foundations for Batch creation, Album reservation,
+  adapter-owned Item association, active lookup, release persistence, and
+  retained Album history. Candidate API/preview and atomic multi-Album execution
+  remain owned by BT-055 and BT-056.
+- Verified that one Group can contain multiple configuration Work Items and
+  that reservation/release never changes Album Status.
+- Verification: 6 focused BT-054 tests passed, migration/service suites passed
+  326 tests, and the complete Backend regression passed all 706 tests.
