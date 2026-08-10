@@ -302,7 +302,7 @@ const AlbumsPage = {
           </div>
 
           <div class="form-section">
-            <div class="form-section-title">Relations</div>
+            <div class="form-section-title">Belongs to / Related Releases</div>
             <div id="relationsSection"></div>
             <button class="btn btn-sm btn-secondary" data-required-scope="write" style="margin-top:8px" onclick="AlbumsPage._openAddRelation()">+ Add Relation</button>
           </div>

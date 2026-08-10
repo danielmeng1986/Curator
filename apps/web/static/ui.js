@@ -171,7 +171,13 @@
         element.classList.toggle('hidden', !allowed);
         element.setAttribute('aria-hidden', String(!allowed));
       } else {
-        element.disabled = !allowed;
+        if (!allowed) {
+          if (!element.disabled) element.dataset.permissionDisabled = 'true';
+          element.disabled = true;
+        } else if (element.dataset.permissionDisabled === 'true') {
+          element.disabled = false;
+          delete element.dataset.permissionDisabled;
+        }
         element.classList.toggle('hidden', !allowed);
       }
     });

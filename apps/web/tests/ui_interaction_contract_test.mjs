@@ -25,6 +25,16 @@ assert.equal(ui.can('reader', 'write'), false);
 assert.equal(ui.can('writer', 'admin'), false);
 assert.equal(ui.can('admin', 'admin'), true);
 
+const classList = () => ({ toggle() {} });
+const businessDisabled = { disabled: true, dataset: { requiredScope:'write' }, classList:classList(), matches:() => false };
+ui.applyPermissions({ querySelectorAll:() => [businessDisabled] }, { role:'writer' });
+assert.equal(businessDisabled.disabled, true, 'permission grant must preserve business-disabled controls');
+const permissionDisabled = { disabled:false, dataset:{ requiredScope:'write' }, classList:classList(), matches:() => false };
+ui.applyPermissions({ querySelectorAll:() => [permissionDisabled] }, { role:'reader' });
+assert.equal(permissionDisabled.disabled, true);
+ui.applyPermissions({ querySelectorAll:() => [permissionDisabled] }, { role:'writer' });
+assert.equal(permissionDisabled.disabled, false, 'permission-owned disabling must be reversible');
+
 let calls = 0;
 let release;
 const pending = new Promise((resolve) => { release = resolve; });

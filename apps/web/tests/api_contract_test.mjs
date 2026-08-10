@@ -25,11 +25,11 @@ api.configure({ backendUrl: 'http://127.0.0.1:8788/', token: 'approved-token' })
 nextResponse = {
   ok: true,
   status: 200,
-  json: async () => ({ data: [{ id: 1, name: 'Example' }], meta: { total: 1 } }),
+  json: async () => ({ data: [{ id: 1, name: 'Example' }], meta: { pagination: { total: 53 } } }),
 };
 assert.equal(
   JSON.stringify(await api.get('/albums?limit=1')),
-  JSON.stringify({ albums: [{ id: 1, name: 'Example' }], total: 1 }),
+  JSON.stringify({ albums: [{ id: 1, name: 'Example' }], total: 53 }),
 );
 assert.equal(calls[0][0], 'http://127.0.0.1:8788/api/v1/albums?limit=1');
 assert.equal(calls[0][1].headers.Authorization, 'Bearer approved-token');

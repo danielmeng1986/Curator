@@ -104,7 +104,7 @@
       '/models': 'models',
       '/studios': 'studios',
     }[route];
-    return key ? { [key]: data, total: meta?.total ?? data.length } : data;
+    return key ? { [key]: data, total: meta?.pagination?.total ?? meta?.total ?? data.length } : data;
   }
 
   async function performFetch(path, options, token) {

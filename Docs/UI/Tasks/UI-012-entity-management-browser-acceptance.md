@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-012` — Status: `Proposed`
+`UI-012` — Status: `Complete`
 
 ## Title
 
@@ -53,3 +53,22 @@ UI against disposable Backend state.
 ## Risks or Notes
 
 - Tests should assert user-facing labels and roles, not brittle CSS layout details.
+
+## Completion Record
+
+- Added a disposable browser journey covering create, edit, refresh persistence,
+  search, filtering, and real second-page navigation across Album, Model,
+  Studio, and Status surfaces.
+- Proved inline and dedicated relationships: Model and `BELONGS_TO` links are
+  added and removed transactionally, duplicate selections are rejected, the
+  current Album cannot be selected as its own related release, and cancelling
+  the modal causes no durable side effect.
+- Proved invalid form drafts remain visible, referenced Model/Studio deletion is
+  rejected, referenced Status deletion remains disabled, Reader UI/direct API
+  writes are denied, Photo CRUD is absent, and Album hard delete remains absent.
+- Corrected the versioned collection adapter to consume
+  `meta.pagination.total`, and corrected shared permission handling so it does
+  not overwrite a component's Backend-derived business-disabled state.
+- The UI-012 suite passed twice from clean disposable roots; Web API/interaction
+  contracts and relevant Backend entity/API regression also passed on
+  2026-08-11.
