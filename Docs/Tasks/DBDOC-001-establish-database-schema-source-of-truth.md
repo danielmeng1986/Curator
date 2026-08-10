@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DBDOC-001` — Status: `Proposed`
+`DBDOC-001` — Status: `Complete`
 
 ## Goal
 
@@ -59,3 +59,11 @@ current Curator database can be reconstructed and understood deterministically.
 - The current implementation may reveal genuinely duplicated schema authority;
   documenting that fact is success, while changing it requires a Backend task.
 
+## Completion Record
+
+- Added `Docs/Database/Schema-Source-of-Truth.md` with table-to-source inventory,
+  construction behavior, fixture boundaries, and future change rules.
+- Confirmed that the default runner currently applies only `0001`, while base,
+  operational, and AI schema authority is split.
+- Added BT-059 to own canonical bootstrap and ordered-migration consolidation;
+  no runtime behavior or live database was changed.
