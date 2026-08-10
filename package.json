@@ -6,6 +6,7 @@
     "test:web:e2e": "node tools/run_web_e2e.mjs",
     "test:web:e2e:all-browsers": "CURATOR_E2E_ALL_BROWSERS=1 node tools/run_web_e2e.mjs",
     "test:web:import": "node apps/web/tests/import_full_browser_acceptance.mjs",
+    "test:web:repair-quarantine": "node apps/web/tests/repair_quarantine_full_browser_acceptance.mjs",
     "playwright:install": "playwright install chromium",
     "playwright:install:all": "playwright install chromium webkit firefox"
   },

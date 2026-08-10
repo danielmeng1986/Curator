@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-014` — Status: `Proposed`
+`UI-014` — Status: `Complete`
 
 ## Title
 
@@ -54,3 +54,18 @@ item Restore safety through role-appropriate UI journeys.
 
 - Ensure the word “Restore” is visibly distinguished from database Restore in UI copy and tests.
 
+## Completion Record
+
+- Added role-separated Chromium journeys from a failed Import Operation through
+  its linked Issue and Repair evidence, including durable decision Operations.
+- Proved Issue assignment, begin-work, resolution, stale decision rejection,
+  Reader redaction, and Writer/Admin decision boundaries.
+- Proved assisted/manual confirmation cannot be bypassed, failed verification
+  remains unresolved, later verified repair resolves, and ignore/suppression
+  policy remains Backend-owned and role-bounded.
+- Proved Quarantine cancellation, Admin-only execution, intact inventory,
+  Preview replay rejection, restore collision/staleness, Snapshot creation,
+  successful item Restore, and linked Quarantine/Restore Operations.
+- The complete browser suite passed twice from clean disposable roots. Import,
+  Repair policy/decision, Quarantine, and cross-workflow traceability Backend
+  acceptance passed on 2026-08-11.
