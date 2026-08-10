@@ -912,6 +912,7 @@ class TestVersionedApiAuthorization(_TestServerBase):
                 "album_ids":[album_id]},admin)
             _, executed = self._post("/api/v1/work-dispatch/execute",{"preview_token":preview["data"]["preview"]["preview_token"]},admin)
             item_uuid = executed["data"]["result"]["groups"][0]["work_item_uuids"][0]
+            group_uuid = executed["data"]["result"]["groups"][0]["group_uuid"]
             with patch.object(srv,"APP_CONFIG",{**srv.APP_CONFIG,"archive_root":root}):
                 status, denied = self._get(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",writer)
                 self.assertEqual(403,status)
@@ -962,6 +963,21 @@ class TestVersionedApiAuthorization(_TestServerBase):
                     "preview_token":promotion_preview["preview_token"],"confirmation":promotion_preview["confirmation"]},admin)
                 self.assertEqual(200,status); self.assertEqual("Promoted",promoted["data"]["promotion"]["outcome"])
                 self.assertEqual("Lakeside Family Walk",self._db.execute("SELECT title FROM album WHERE id=?",(album_id,)).fetchone()[0])
+                status, group_detail = self._get(f"/api/v1/work-dispatch/groups/{group_uuid}",admin)
+                self.assertEqual(200,status); self.assertIn("release",group_detail["data"]["group"]["allowed_actions"])
+                status, released = self._post(f"/api/v1/work-dispatch/groups/{group_uuid}/release",{
+                    "expected_version":1,"reason":"Promotion completed"},admin)
+                self.assertEqual(200,status); self.assertEqual("Closed",released["data"]["closure"]["disposition"])
+                status, history = self._get(f"/api/v1/work-dispatch/history?album_id={album_id}",admin)
+                self.assertEqual(200,status); self.assertEqual("Released",history["data"]["items"][0]["group_state"])
+                status, candidates = self._get("/api/v1/work-dispatch/candidates?worker_kind=album_name_analysis&availability=available",admin)
+                self.assertEqual(200,status); self.assertTrue(any(row["id"]==album_id for row in candidates["data"]))
+                _, redispatch_preview = self._post("/api/v1/work-dispatch/preview",{"worker_kind":"album_name_analysis",
+                    "workspace_uuid":ws["data"]["workspace"]["uuid"],"configuration_uuids":[cfg["data"]["configuration"]["uuid"]],
+                    "album_ids":[album_id]},admin)
+                status, redispatched = self._post("/api/v1/work-dispatch/execute",{
+                    "preview_token":redispatch_preview["data"]["preview"]["preview_token"]},admin)
+                self.assertEqual(200,status); self.assertNotEqual(group_uuid,redispatched["data"]["result"]["groups"][0]["group_uuid"])
 
     def test_current_principal_and_renewal_request_are_token_safe(self):
         issued = self._issue(role="writer")

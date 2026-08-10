@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-057` — Status: `Proposed`
+`BT-057` — Status: `Complete`
 
 ## Title
 
@@ -57,3 +57,15 @@ Album reservation, and redispatch later without erasing earlier evidence.
 
 - Individual Work Item terminal states are insufficient to infer Group release.
 
+## Completion Record
+
+- Added retained `Closed`, `Cancelled`, and `Abandoned` Group closure evidence.
+- Added Group-wide obligation projection and guarded optimistic Admin commands.
+- Normal release recognizes one successful Group Promotion winner across
+  competing Approved model runs; active execution, review, Rework, retryable
+  failure, and missing Promotion remain blockers.
+- Release atomically removes only the reservation, records an Operation, never
+  changes Album Status, and preserves all Batch, Group, Item, result, review,
+  attempt, and Promotion evidence.
+- Verified idempotent release, cancellation-before-work, explicit abandonment,
+  candidate reappearance, history reads, and redispatch with new identities.

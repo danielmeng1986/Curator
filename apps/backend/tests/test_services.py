@@ -1938,6 +1938,54 @@ class TestAIAlbumNamePromotionContract(unittest.TestCase):
         self.assertEqual(0,self.conn.execute("SELECT COUNT(*) FROM workspace_album_name_promotion").fetchone()[0])
 
 
+class TestWorkDispatchReleaseSafety(unittest.TestCase):
+    _images=TestAIPhotoEvidenceManifestContract._images
+    def setUp(self):
+        TestAIAlbumNamePromotionContract.setUp(self); now="2026-08-10T02:30:00+00:00"
+        self.dispatch_repo=repo.WorkDispatchRepository(_db_factory(self.conn)); self.dispatch_repo.prepare()
+        self.conn.execute("INSERT INTO work_dispatch_batch(uuid,worker_kind,dataset_type,schema_version,workspace_uuid,created_at,updated_at) VALUES ('batch-close','album_name_analysis','album_analysis',1,?,?,?)",
+            (self.item["workspace_uuid"],now,now))
+        self.conn.execute("INSERT INTO work_dispatch_group(uuid,batch_uuid,album_id,worker_kind,dataset_type,schema_version,created_at,updated_at) VALUES ('group-close','batch-close',?,'album_name_analysis','album_analysis',1,?,?)",
+            (self.item["album_id"],now,now))
+        self.conn.execute("INSERT INTO album_work_reservation VALUES (?,'group-close','batch-close','album_name_analysis',?)",(self.item["album_id"],now))
+        self.conn.execute("INSERT INTO work_dispatch_group_item(group_uuid,item_kind,item_uuid,configuration_uuid,created_at) VALUES ('group-close','workspace_album_ai_worker',?,?,?)",
+            (self.item["uuid"],self.item["ai_model_configuration_uuid"],now)); self.conn.commit()
+        self.dispatch=svc.WorkDispatchService(self.dispatch_repo,repo.AlbumRepository(_db_factory(self.conn)),
+            now_fn=lambda:datetime(2026,8,10,4,tzinfo=timezone.utc))
+    def tearDown(self): TestAIAlbumNamePromotionContract.tearDown(self)
+
+    def test_approved_without_winner_blocks_then_promoted_group_releases_idempotently(self):
+        detail=self.dispatch.group_detail("group-close")
+        self.assertNotIn("release",detail["allowed_actions"]); self.assertIn({"reason":"promotion_required"},detail["blockers"])
+        with self.assertRaises(svc.ServiceConflict) as ctx:
+            self.dispatch.close_group("group-close",1,"release","Finished comparison","admin-one")
+        self.assertEqual("WORK_GROUP_NOT_RELEASABLE",ctx.exception.code)
+        preview=self.promotions.preview(self.item["uuid"],"admin-one")
+        self.promotions.execute(preview["preview_token"],preview["confirmation"],"admin-one")
+        before_status=self.conn.execute("SELECT status_id FROM album WHERE id=?",(self.item["album_id"],)).fetchone()[0]
+        closed=self.dispatch.close_group("group-close",1,"release","Finished comparison","admin-one")
+        replay=self.dispatch.close_group("group-close",1,"release","Finished comparison","admin-one")
+        self.assertFalse(closed["idempotent"]); self.assertTrue(replay["idempotent"])
+        self.assertIsNone(self.dispatch_repo.active_reservation(self.item["album_id"]))
+        self.assertEqual(before_status,self.conn.execute("SELECT status_id FROM album WHERE id=?",(self.item["album_id"],)).fetchone()[0])
+
+    def test_claimed_work_blocks_abandon_and_explicit_abandon_retains_evidence(self):
+        self.conn.execute("UPDATE workspace_album_ai_worker SET run_state='Claimed' WHERE uuid=?",(self.item["uuid"],)); self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict): self.dispatch.close_group("group-close",1,"abandon","No longer needed","admin-one")
+        self.conn.execute("UPDATE workspace_album_ai_worker SET run_state='Completed' WHERE uuid=?",(self.item["uuid"],));
+        self.conn.execute("UPDATE ai_work_item_review SET state='InReview' WHERE work_item_uuid=?",(self.item["uuid"],)); self.conn.commit()
+        abandoned=self.dispatch.close_group("group-close",1,"abandon","No longer needed","admin-one")
+        self.assertEqual("Abandoned",abandoned["disposition"])
+        self.assertEqual(2,self.conn.execute("SELECT COUNT(*) FROM ai_work_item_result_stage WHERE work_item_uuid=?",(self.item["uuid"],)).fetchone()[0])
+
+    def test_cancel_before_material_execution_marks_item_cancelled(self):
+        self.conn.execute("UPDATE workspace_album_ai_worker SET run_state='Pending',attempt_count=0 WHERE uuid=?",(self.item["uuid"],))
+        self.conn.execute("DELETE FROM ai_work_item_review WHERE work_item_uuid=?",(self.item["uuid"],)); self.conn.commit()
+        cancelled=self.dispatch.close_group("group-close",1,"cancel","Dispatch no longer required","admin-one")
+        self.assertEqual("Cancelled",cancelled["disposition"])
+        self.assertEqual("Cancelled",self.conn.execute("SELECT run_state FROM workspace_album_ai_worker WHERE uuid=?",(self.item["uuid"],)).fetchone()[0])
+
+
 class TestAIModelConfigurationContract(unittest.TestCase):
     def setUp(self):
         self.conn = _make_db(); self.repo = repo.AIModelConfigurationRepository(_db_factory(self.conn))

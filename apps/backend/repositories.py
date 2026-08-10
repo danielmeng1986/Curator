@@ -2329,6 +2329,9 @@ class WorkDispatchRepository:
             if result and include_items:
                 result["items"] = [dict(item) for item in conn.execute(
                     "SELECT * FROM work_dispatch_group_item WHERE group_uuid=? ORDER BY created_at,id", (group_uuid,)).fetchall()]
+                closure = conn.execute("SELECT * FROM work_dispatch_group_closure WHERE group_uuid=?",(group_uuid,)).fetchone() \
+                    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_dispatch_group_closure'").fetchone() else None
+                result["closure"] = dict(closure) if closure else None
         return result
 
     def active_reservation(self, album_id):
@@ -2368,8 +2371,85 @@ class WorkDispatchRepository:
     def album_history(self, album_id):
         with self._db() as conn:
             self._ensure_schema(conn)
-            rows = conn.execute("SELECT * FROM work_dispatch_group WHERE album_id=? ORDER BY created_at DESC,id DESC", (album_id,)).fetchall()
+            has_closure=conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_dispatch_group_closure'").fetchone()
+            rows = conn.execute("""SELECT g.*,c.disposition,c.operation_uuid AS closure_operation_uuid,c.closed_at
+                FROM work_dispatch_group g LEFT JOIN work_dispatch_group_closure c ON c.group_uuid=g.uuid
+                WHERE g.album_id=? ORDER BY g.created_at DESC,g.id DESC""" if has_closure else
+                "SELECT * FROM work_dispatch_group WHERE album_id=? ORDER BY created_at DESC,id DESC", (album_id,)).fetchall()
         return [dict(row) for row in rows]
+
+    def group_obligations(self,group_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn); AIReviewRepository._ensure_schema(conn); AIAlbumNamePromotionRepository._ensure_schema(conn)
+            group=conn.execute("SELECT * FROM work_dispatch_group WHERE uuid=?",(group_uuid,)).fetchone()
+            if not group: return None
+            rows=conn.execute("""SELECT gi.item_uuid,i.run_state,i.attempt_count,r.state review_state,
+                p.outcome promotion_outcome FROM work_dispatch_group_item gi
+                LEFT JOIN workspace_album_ai_worker i ON i.uuid=gi.item_uuid
+                LEFT JOIN ai_work_item_review r ON r.work_item_uuid=i.uuid
+                LEFT JOIN workspace_album_name_promotion p ON p.work_item_uuid=i.uuid AND p.outcome='Promoted'
+                WHERE gi.group_uuid=? ORDER BY gi.id""",(group_uuid,)).fetchall()
+            winner=conn.execute("""SELECT p.* FROM workspace_album_name_promotion p
+                JOIN work_dispatch_group_item gi ON gi.item_uuid=p.work_item_uuid
+                WHERE gi.group_uuid=? AND p.outcome='Promoted' LIMIT 1""",(group_uuid,)).fetchone()
+        return {"group":dict(group),"items":[dict(row) for row in rows],"winner":dict(winner) if winner else None}
+
+    def close_group(self,group_uuid,expected_version,actor,reason,disposition,now):
+        operation_uuid=str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn); AIReviewRepository._ensure_schema(conn); AIAlbumNamePromotionRepository._ensure_schema(conn)
+            conn.execute("""CREATE TABLE IF NOT EXISTS work_dispatch_group_closure(
+                group_uuid TEXT PRIMARY KEY,disposition TEXT NOT NULL,reason TEXT NOT NULL,
+                closed_by_token_uuid TEXT NOT NULL,operation_uuid TEXT NOT NULL UNIQUE,
+                summary_json TEXT NOT NULL,closed_at TEXT NOT NULL)""")
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                group=conn.execute("""SELECT g.*,a.uuid AS album_uuid FROM work_dispatch_group g
+                    JOIN album a ON a.id=g.album_id WHERE g.uuid=?""",(group_uuid,)).fetchone()
+                if not group: raise PersistenceNotFound()
+                closure=conn.execute("SELECT * FROM work_dispatch_group_closure WHERE group_uuid=?",(group_uuid,)).fetchone()
+                if closure:
+                    if group["version"]==expected_version+1 and closure["closed_by_token_uuid"]==actor \
+                            and closure["reason"]==reason and closure["disposition"]==disposition:
+                        conn.commit(); result=dict(closure); result["idempotent"]=True; return result
+                    raise PersistenceConflict({"code":"WORK_GROUP_ALREADY_RELEASED","current_version":group["version"]})
+                if group["version"]!=expected_version or group["group_state"]!="Active":
+                    raise PersistenceConflict({"code":"WORK_GROUP_STALE","current_version":group["version"],"current_state":group["group_state"]})
+                items=[dict(row) for row in conn.execute("""SELECT gi.item_uuid,i.run_state,i.attempt_count,r.state review_state
+                    FROM work_dispatch_group_item gi LEFT JOIN workspace_album_ai_worker i ON i.uuid=gi.item_uuid
+                    LEFT JOIN ai_work_item_review r ON r.work_item_uuid=i.uuid WHERE gi.group_uuid=? ORDER BY gi.id""",(group_uuid,)).fetchall()]
+                winner=conn.execute("""SELECT p.uuid FROM workspace_album_name_promotion p JOIN work_dispatch_group_item gi
+                    ON gi.item_uuid=p.work_item_uuid WHERE gi.group_uuid=? AND p.outcome='Promoted' LIMIT 1""",(group_uuid,)).fetchone()
+                blockers=[]
+                if disposition=="Cancelled":
+                    blockers=[item for item in items if item["run_state"]!="Pending" or item["attempt_count"]!=0 or item["review_state"]]
+                    if not items: blockers=[{"reason":"empty_group"}]
+                    if not blockers:
+                        conn.execute("""UPDATE workspace_album_ai_worker SET run_state='Cancelled',version=version+1,updated_at=?
+                            WHERE uuid IN (SELECT item_uuid FROM work_dispatch_group_item WHERE group_uuid=?)""",(now,group_uuid))
+                elif disposition=="Abandoned":
+                    blockers=[item for item in items if item["run_state"] in {"Pending","Claimed"}]
+                else:
+                    for item in items:
+                        if item["run_state"] not in {"Completed","Cancelled"}: blockers.append(item); continue
+                        if item["run_state"]=="Completed" and item["review_state"] not in {"Approved","Rejected"}: blockers.append(item)
+                    if any(item["review_state"]=="Approved" for item in items) and not winner: blockers.append({"reason":"promotion_required"})
+                if blockers: raise PersistenceConflict({"code":"WORK_GROUP_NOT_RELEASABLE","blockers":blockers[:20]})
+                summary={"item_count":len(items),"winner_uuid":winner[0] if winner else None,"disposition":disposition}
+                deleted=conn.execute("DELETE FROM album_work_reservation WHERE album_id=? AND group_uuid=?",(group["album_id"],group_uuid))
+                if deleted.rowcount!=1: raise PersistenceConflict({"code":"WORK_GROUP_RESERVATION_MISSING"})
+                conn.execute("""UPDATE work_dispatch_group SET group_state='Released',version=version+1,updated_at=?,released_at=?,
+                    released_by_token_uuid=?,release_reason=? WHERE uuid=?""",(now,now,actor,reason,group_uuid))
+                conn.execute("INSERT INTO work_dispatch_group_closure VALUES (?,?,?,?,?,?,?)",
+                    (group_uuid,disposition,reason,actor,operation_uuid,json.dumps(summary,sort_keys=True),now))
+                conn.execute("""INSERT INTO operation(uuid,operation_type,initiator,status,summary,started_at,ended_at,
+                    entity_uuid,batch_uuid,recovery_context) VALUES (?,'work_dispatch_group_release','WebUI','Succeeded',?,?,?,?,?,?)""",
+                    (operation_uuid,f"{disposition} Work Dispatch Group",now,now,group["album_uuid"],group["batch_uuid"],
+                     json.dumps({"group_uuid":group_uuid,"disposition":disposition,"reason":reason},sort_keys=True)))
+                conn.commit()
+            except Exception: conn.rollback(); raise
+        with self._db() as conn: result=dict(conn.execute("SELECT * FROM work_dispatch_group_closure WHERE group_uuid=?",(group_uuid,)).fetchone())
+        result["idempotent"]=False; return result
 
 
 class AlbumAIWorkDispatchRepository(WorkDispatchRepository):

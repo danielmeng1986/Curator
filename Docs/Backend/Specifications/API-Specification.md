@@ -186,6 +186,16 @@ and an explicit reason. Release is rejected while execution, review, rework, or
 Promotion remains active. Read models expose the links needed to move between
 candidate, active-work, history, Workspace review, and Operation detail views.
 
+`GET /api/v1/work-dispatch/groups/{group_uuid}` returns Group-wide obligations,
+blockers, the successful Promotion winner, and permitted actions. Admin-only
+`/release`, `/cancel`, and `/abandon` commands require `expected_version` and a
+reason. Release requires all execution/review obligations terminal and one
+winner when any Item is Approved. Cancel applies only before every Item's first
+attempt. Abandon is explicit and cannot interrupt Pending or Claimed work.
+Success atomically removes the reservation, retains every Batch/Group/Item and
+AI artifact, records closure and Operation evidence, and never changes Album
+Status. `GET /api/v1/work-dispatch/history?album_id=` exposes retained history.
+
 Admin-only Work Item evidence-manifest create/read endpoints select and expose
 immutable relative metadata by Work Item identity. Clients cannot nominate a
 path. Responses contain opaque evidence UUIDs and relative evidence metadata,

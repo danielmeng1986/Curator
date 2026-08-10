@@ -777,6 +777,14 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif re.match(r"^/api/work-dispatch/batches/[^/]+$", path):
                 if not self._require_admin_principal(): return
                 self._send_success(200, self._work_dispatch_service().batch_detail(path.split("/")[-1]))
+            elif re.match(r"^/api/work-dispatch/groups/[^/]+$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"group":self._work_dispatch_service().group_detail(path.split("/")[-1])})
+            elif path == "/api/work-dispatch/history":
+                if not self._require_admin_principal(): return
+                album_id=int(qs.get("album_id",["0"])[0])
+                if album_id<=0: raise ValueError("album_id is required.")
+                self._send_success(200,{"items":self._work_dispatch_service().album_history(album_id)})
             elif path == "/api/backups":
                 self._get_backups()
             elif path == "/api/operations":
@@ -1235,6 +1243,11 @@ class AppHandler(SimpleHTTPRequestHandler):
                 if not token: raise ValueError("preview_token is required.")
                 self._send_success(200, {"result":self._work_dispatch_service().execute(
                     token, self._principal.get("token_uuid"))})
+            elif re.match(r"^/api/work-dispatch/groups/[^/]+/(release|cancel|abandon)$", path):
+                if not self._require_admin_principal(): return
+                parts=path.split("/"); result=self._work_dispatch_service().close_group(parts[4],body.get("expected_version"),
+                    parts[5],body.get("reason"),self._principal["token_uuid"])
+                self._send_success(200,{"closure":result})
             elif re.match(r"^/api/ai-workspaces/[^/]+/items$", path):
                 if not self._require_admin_principal(): return
                 self._send_error(409, "WORK_DISPATCH_REQUIRED",

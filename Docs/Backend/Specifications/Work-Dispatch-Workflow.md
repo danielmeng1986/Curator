@@ -127,6 +127,14 @@ running, review, rework, or pending Promotion obligations remain.
 Release records actor, reason, time, Group version, and Operation. Redispatch
 creates new Batch/Group/Work Item identities and preserves all earlier evidence.
 
+Group closure has three explicit dispositions. `Closed` requires every Item to
+be Completed/Cancelled, every completed review to be Approved/Rejected, and a
+single Group winner if any Item is Approved. Other Approved comparison runs are
+losing evidence once that winner exists; they do not each require Promotion.
+`Cancelled` is available only while every Item is Pending with no attempt or
+review. `Abandoned` is an explicit Admin waiver after no Item remains Pending or
+Claimed. None deletes attempts, results, reviews, Operations, or Promotion data.
+
 ## Album-name Promotion policy
 
 Dispatch, Worker completion, and review approval never change Album Status.

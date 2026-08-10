@@ -2167,6 +2167,40 @@ class WorkDispatchService:
         except repo.PersistenceConflict as exc:
             raise ServiceConflict(exc.details["code"], "Work Item is already assigned to a Group.", exc.details) from exc
 
+    def group_detail(self,group_uuid):
+        detail=self._repo.group_obligations(group_uuid)
+        if not detail: raise ServiceNotFound("Work Dispatch Group not found.")
+        group,items,winner=detail["group"],detail["items"],detail["winner"]
+        actions=[]; blockers=[]
+        if group["group_state"]=="Active":
+            if items and all(item["run_state"]=="Pending" and item["attempt_count"]==0 and not item["review_state"] for item in items):
+                actions.append("cancel")
+            normal=True
+            for item in items:
+                if item["run_state"] not in {"Completed","Cancelled"}: normal=False; blockers.append({"item_uuid":item["item_uuid"],"reason":"execution_active_or_retryable"}); continue
+                if item["run_state"]=="Completed" and item["review_state"] not in {"Approved","Rejected"}:
+                    normal=False; blockers.append({"item_uuid":item["item_uuid"],"reason":"review_obligation"})
+            if any(item["review_state"]=="Approved" for item in items) and not winner:
+                normal=False; blockers.append({"reason":"promotion_required"})
+            if items and normal: actions.append("release")
+            if items and all(item["run_state"] not in {"Pending","Claimed"} for item in items): actions.append("abandon")
+        detail["allowed_actions"]=actions; detail["blockers"]=blockers; return detail
+
+    def close_group(self,group_uuid,expected_version,action,reason,actor):
+        if action not in {"release","cancel","abandon"}: raise ValueError("Group action must be release, cancel, or abandon.")
+        if not isinstance(expected_version,int): raise ValueError("expected_version is required and must be an integer.")
+        reason=str(reason or "").strip()
+        if not reason or len(reason)>1000: raise ValueError("A release reason of at most 1000 characters is required.")
+        disposition={"release":"Closed","cancel":"Cancelled","abandon":"Abandoned"}[action]
+        try: return self._repo.close_group(group_uuid,expected_version,actor,reason,disposition,self._now().isoformat())
+        except repo.PersistenceNotFound as exc: raise ServiceNotFound("Work Dispatch Group not found.") from exc
+        except repo.PersistenceConflict as exc:
+            code=exc.details.get("code","WORK_GROUP_NOT_RELEASABLE")
+            raise ServiceConflict(code,"Work Dispatch Group cannot be released.",exc.details) from exc
+
+    def album_history(self,album_id):
+        return self._repo.album_history(album_id)
+
 
 class AIPhotoEvidenceManifestService:
     """Discover, select, hash, persist, and revalidate Album evidence."""

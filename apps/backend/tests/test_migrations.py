@@ -185,3 +185,11 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
             sql=(root/"0011_ai_album_name_promotion.sql").read_text(); conn.executescript(sql); conn.executescript(sql)
             indexes=conn.execute("PRAGMA index_list(workspace_album_name_promotion)").fetchall()
         self.assertTrue(any(row[2] for row in indexes))
+
+    def test_0012_group_closure_schema_is_repeatable(self):
+        root=Path(__file__).parents[1]/"migrations"
+        with sqlite3.connect(":memory:") as conn:
+            conn.execute("CREATE TABLE work_dispatch_group(uuid TEXT PRIMARY KEY)")
+            sql=(root/"0012_work_dispatch_group_closure.sql").read_text(); conn.executescript(sql); conn.executescript(sql)
+            columns={row[1] for row in conn.execute("PRAGMA table_info(work_dispatch_group_closure)")}
+        self.assertTrue({"group_uuid","disposition","operation_uuid","summary_json"}<=columns)
