@@ -45,12 +45,13 @@ configurations used for one comparison appear as Work Items inside that single
 Group. Dispatch never changes `album.status_id`; Album business Status, Worker
 run state, and human review state are displayed as separate concepts.
 
-## Stable review direction
+## Stable review contract
 
-The exact state names and transitions remain a UI-011B Specification decision.
-The stable review surface is expected to include submission, reviewer, decision,
-decision time, review notes, concurrency version, Promotion result, and latest
-Operation identity. Approval and Promotion are not assumed to be the same step.
+The stable state machine is `ReadyForReview → InReview → Approved | Rejected |
+ReworkRequested`. Approval and Promotion are separate. Approval freezes one AI
+recommendation or a validated human revision; rating is optional from 1–5, and
+Reject/Rework require a reason. Rework creates a new linked Work Item in the
+same Dispatch Group and preserves all prior output and decision evidence.
 
 AI suggestions are always visibly distinct from human revisions and final
 accepted values. No suggestion is accepted automatically, and no permanent
@@ -58,6 +59,5 @@ Album is created until the approved Backend workflow permits it.
 
 ## Readiness
 
-The new Workspace is `Blocked by Specification` until UI-011A/B are approved,
-and then remains `Not Implemented` until its Backend APIs, UI-011C, and browser
-acceptance UI-011D are complete.
+UI-011A/B are approved. The Backend implementation proceeds through BT-050/051;
+the visible review UI and browser acceptance remain UI-011C/D work.

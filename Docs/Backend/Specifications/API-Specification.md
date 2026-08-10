@@ -211,6 +211,14 @@ execution and makes the Work Item `ReadyForReview`—it does not change Album.
 the immutable accepted payloads, runtime metrics, configuration and Manifest
 bindings, submitter identity, Operations, and current result-review state.
 
+`GET /api/v1/ai-reviews` and `/ai-work-items/{uuid}/review` expose the stable
+Admin review queue/detail projection. Admin commands `/review/start` and
+`/review/decision` require `expected_version`. The only transitions are
+`ReadyForReview → InReview → Approved | Rejected | ReworkRequested`. Approval
+freezes one Writer recommendation or validated human revision; Reject/Rework
+require a reason. Rework creates a linked pending Work Item in the same Group
+with the same configuration snapshot and preserves all prior evidence.
+
 ## Future extensions
 
 - Route/resource catalogs can be added without changing the shared contract.

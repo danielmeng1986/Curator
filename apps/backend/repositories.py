@@ -2619,6 +2619,12 @@ class AIResultRepository:
                         version=version+1,updated_at=? WHERE uuid=?""",(now,item_uuid))
                     conn.execute("""UPDATE ai_work_item_attempt SET ended_at=?,outcome='Completed'
                         WHERE work_item_uuid=? AND ended_at IS NULL""",(now,item_uuid))
+                    conn.execute("""CREATE TABLE IF NOT EXISTS ai_work_item_review (
+                        work_item_uuid TEXT PRIMARY KEY,state TEXT NOT NULL DEFAULT 'ReadyForReview',rating INTEGER,
+                        notes TEXT,selected_name TEXT,selection_source TEXT,selected_recommendation TEXT,
+                        reviewer_token_uuid TEXT,review_started_at TEXT,decided_at TEXT,decision_reason TEXT,
+                        version INTEGER NOT NULL DEFAULT 1,latest_operation_uuid TEXT,updated_at TEXT NOT NULL)""")
+                    conn.execute("INSERT INTO ai_work_item_review(work_item_uuid,state,version,updated_at) VALUES (?,'ReadyForReview',1,?)",(item_uuid,now))
                 conn.execute("""INSERT INTO operation
                     (uuid,operation_type,initiator,status,summary,started_at,ended_at,entity_uuid)
                     VALUES (?,?,?,'Succeeded',?,?,?,?)""",(operation_uuid,f"ai_result_{stage.lower()}","AIWorker",
@@ -2638,6 +2644,111 @@ class AIResultRepository:
             rows = conn.execute("SELECT * FROM ai_work_item_result_stage WHERE work_item_uuid=? ORDER BY id",(item_uuid,)).fetchall()
         return {"state":dict(state) if state else {"work_item_uuid":item_uuid,"state":"AwaitingVision","version":0},
             "stages":[self._stage(row) for row in rows]}
+
+
+class AIReviewRepository:
+    """Stable review projection and atomic transition/rework persistence."""
+
+    def __init__(self, db_factory): self._db=db_factory
+
+    @staticmethod
+    def _ensure_schema(conn):
+        AIResultRepository._ensure_schema(conn); WorkDispatchRepository._ensure_schema(conn)
+        conn.executescript("""CREATE TABLE IF NOT EXISTS ai_work_item_review (
+            work_item_uuid TEXT PRIMARY KEY,state TEXT NOT NULL DEFAULT 'ReadyForReview'
+                CHECK(state IN ('ReadyForReview','InReview','Approved','Rejected','ReworkRequested')),
+            rating INTEGER CHECK(rating BETWEEN 1 AND 5),notes TEXT,selected_name TEXT,
+            selection_source TEXT CHECK(selection_source IN ('Recommendation','HumanRevision')),
+            selected_recommendation TEXT,reviewer_token_uuid TEXT,review_started_at TEXT,decided_at TEXT,
+            decision_reason TEXT,version INTEGER NOT NULL DEFAULT 1,latest_operation_uuid TEXT,updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS ai_work_item_review_decision (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,uuid TEXT NOT NULL UNIQUE,work_item_uuid TEXT NOT NULL,
+            from_state TEXT NOT NULL,to_state TEXT NOT NULL,evidence_json TEXT NOT NULL,
+            reviewer_token_uuid TEXT NOT NULL,operation_uuid TEXT NOT NULL,created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS ai_work_item_rework (
+            rework_of_work_item_uuid TEXT NOT NULL UNIQUE,successor_work_item_uuid TEXT NOT NULL UNIQUE,
+            reason TEXT NOT NULL,requested_by_token_uuid TEXT NOT NULL,created_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_ai_work_item_review_queue ON ai_work_item_review(state,updated_at DESC);""")
+
+    @staticmethod
+    def _review(row): return dict(row) if row else None
+
+    def queue(self, state=None, workspace_uuid=None, limit=50, offset=0):
+        conditions=[]; params=[]
+        if state: conditions.append("r.state=?"); params.append(state)
+        if workspace_uuid: conditions.append("i.workspace_uuid=?"); params.append(workspace_uuid)
+        where="WHERE "+" AND ".join(conditions) if conditions else ""
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows=conn.execute(f"""SELECT r.*,i.workspace_uuid,i.album_id,i.ai_model_configuration_uuid,
+                a.uuid AS album_uuid,a.title AS album_title,c.name AS configuration_name
+                FROM ai_work_item_review r JOIN workspace_album_ai_worker i ON i.uuid=r.work_item_uuid
+                JOIN album a ON a.id=i.album_id JOIN ai_model_configuration c ON c.uuid=i.ai_model_configuration_uuid
+                {where} ORDER BY r.updated_at DESC,r.work_item_uuid LIMIT ? OFFSET ?""",params+[limit,offset]).fetchall()
+            total=conn.execute(f"""SELECT COUNT(*) FROM ai_work_item_review r
+                JOIN workspace_album_ai_worker i ON i.uuid=r.work_item_uuid {where}""",params).fetchone()[0]
+        return [dict(row) for row in rows],total
+
+    def detail(self,item_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            review=conn.execute("SELECT * FROM ai_work_item_review WHERE work_item_uuid=?",(item_uuid,)).fetchone()
+            if not review: return None
+            item=conn.execute("""SELECT i.*,a.uuid album_uuid,a.title album_title,a.status_id,a.updated_at album_updated_at,
+                c.name configuration_name FROM workspace_album_ai_worker i JOIN album a ON a.id=i.album_id
+                JOIN ai_model_configuration c ON c.uuid=i.ai_model_configuration_uuid WHERE i.uuid=?""",(item_uuid,)).fetchone()
+            stages=conn.execute("SELECT * FROM ai_work_item_result_stage WHERE work_item_uuid=? ORDER BY id",(item_uuid,)).fetchall()
+            manifest=conn.execute("SELECT * FROM ai_photo_evidence_manifest WHERE work_item_uuid=?",(item_uuid,)).fetchone()
+            decisions=conn.execute("SELECT * FROM ai_work_item_review_decision WHERE work_item_uuid=? ORDER BY id",(item_uuid,)).fetchall()
+            group=conn.execute("SELECT group_uuid FROM work_dispatch_group_item WHERE item_uuid=?",(item_uuid,)).fetchone()
+            successor=conn.execute("SELECT successor_work_item_uuid FROM ai_work_item_rework WHERE rework_of_work_item_uuid=?",(item_uuid,)).fetchone()
+        result={"review":dict(review),"item":dict(item),"results":[AIResultRepository._stage(row) for row in stages],
+            "manifest":dict(manifest) if manifest else None,"decisions":[dict(row) for row in decisions],
+            "group_uuid":group[0] if group else None,"successor_work_item_uuid":successor[0] if successor else None}
+        return result
+
+    def transition(self,item_uuid,expected_version,to_state,actor,evidence,now):
+        operation_uuid,decision_uuid=str(uuid.uuid4()),str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn); conn.execute("BEGIN IMMEDIATE")
+            try:
+                review=conn.execute("SELECT * FROM ai_work_item_review WHERE work_item_uuid=?",(item_uuid,)).fetchone()
+                if not review: raise PersistenceNotFound()
+                expected_from="ReadyForReview" if to_state=="InReview" else "InReview"
+                if review["version"]!=expected_version:
+                    raise PersistenceConflict({"code":"AI_REVIEW_STALE","current_version":review["version"],"current_state":review["state"]})
+                if review["state"]!=expected_from:
+                    raise PersistenceConflict({"code":"AI_REVIEW_TRANSITION_INVALID","current_state":review["state"],"target_state":to_state})
+                fields={"reviewer_token_uuid":actor,"latest_operation_uuid":operation_uuid,"updated_at":now}
+                if to_state=="InReview": fields["review_started_at"]=now
+                else:
+                    fields.update({"decided_at":now,"rating":evidence.get("rating"),"notes":evidence.get("notes"),
+                        "decision_reason":evidence.get("reason"),"selected_name":evidence.get("selected_name"),
+                        "selection_source":evidence.get("selection_source"),
+                        "selected_recommendation":evidence.get("selected_recommendation")})
+                assignments=",".join(f"{key}=?" for key in fields)
+                conn.execute(f"UPDATE ai_work_item_review SET state=?,{assignments},version=version+1 WHERE work_item_uuid=?",
+                    [to_state,*fields.values(),item_uuid])
+                conn.execute("INSERT INTO ai_work_item_review_decision VALUES (NULL,?,?,?,?,?,?,?,?)",
+                    (decision_uuid,item_uuid,review["state"],to_state,json.dumps(evidence,sort_keys=True),actor,operation_uuid,now))
+                successor_uuid=None
+                if to_state=="ReworkRequested":
+                    item=conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?",(item_uuid,)).fetchone()
+                    link=conn.execute("SELECT group_uuid FROM work_dispatch_group_item WHERE item_uuid=?",(item_uuid,)).fetchone()
+                    if not link: raise PersistenceConflict({"code":"AI_REWORK_GROUP_REQUIRED"})
+                    successor_uuid=str(uuid.uuid4())
+                    conn.execute("""INSERT INTO workspace_album_ai_worker
+                        (uuid,workspace_uuid,album_id,ai_model_configuration_uuid,configuration_snapshot_json,created_at,updated_at)
+                        VALUES (?,?,?,?,?,?,?)""",(successor_uuid,item["workspace_uuid"],item["album_id"],item["ai_model_configuration_uuid"],item["configuration_snapshot_json"],now,now))
+                    conn.execute("INSERT INTO work_dispatch_group_item(group_uuid,item_kind,item_uuid,configuration_uuid,created_at) VALUES (?,?,?,?,?)",
+                        (link[0],"workspace_album_ai_worker",successor_uuid,item["ai_model_configuration_uuid"],now))
+                    conn.execute("INSERT INTO ai_work_item_rework VALUES (?,?,?,?,?)",(item_uuid,successor_uuid,evidence["reason"],actor,now))
+                conn.execute("""INSERT INTO operation(uuid,operation_type,initiator,status,summary,started_at,ended_at,entity_uuid)
+                    VALUES (?,'ai_review_decision','WebUI','Succeeded',?,?,?,?)""",
+                    (operation_uuid,f"AI review {review['state']} to {to_state}",now,now,item_uuid))
+                conn.commit()
+            except Exception: conn.rollback(); raise
+        result=self.detail(item_uuid); result["successor_work_item_uuid"]=successor_uuid or result["successor_work_item_uuid"]; return result
 
 
 class ImportRepository:

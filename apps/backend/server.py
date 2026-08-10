@@ -750,6 +750,15 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif re.match(r"^/api/ai-work-items/[^/]+/results$", path):
                 if not self._require_admin_principal(): return
                 self._send_success(200, {"results":self._ai_result_service().get(path.split("/")[3])})
+            elif path == "/api/ai-reviews":
+                if not self._require_admin_principal(): return
+                state=qs.get("state",[None])[0]; workspace_uuid=qs.get("workspace_uuid",[None])[0]
+                result=self._ai_review_service().queue(state,workspace_uuid,
+                    int(qs.get("limit",["50"])[0]),int(qs.get("offset",["0"])[0]))
+                self._send_collection(result["items"],limit=result["limit"],offset=result["offset"],total=result["total"])
+            elif re.match(r"^/api/ai-work-items/[^/]+/review$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"review":self._ai_review_service().detail(path.split("/")[3])})
             elif re.match(r"^/api/ai-evidence/[^/]+$", path):
                 evidence_uuid = path.split("/")[3]
                 self._send_success(200,{"evidence":self._ai_photo_evidence_service().metadata(
@@ -978,6 +987,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         return svc.AIResultSubmissionService(
             repo.AIResultRepository(open_db), self._ai_photo_evidence_service()
         )
+
+    def _ai_review_service(self):
+        return svc.AIReviewService(repo.AIReviewRepository(open_db))
 
     def _work_dispatch_service(self):
         return svc.WorkDispatchService(
@@ -1242,6 +1254,15 @@ class AppHandler(SimpleHTTPRequestHandler):
                     body.get("schema_version"), body.get("payload"), body.get("runtime_metrics")
                 )
                 self._send_success(200, {"result": result})
+            elif re.match(r"^/api/ai-work-items/[^/]+/review/start$", path):
+                if not self._require_admin_principal(): return
+                review=self._ai_review_service().start(path.split("/")[3],body.get("expected_version"),self._principal["token_uuid"])
+                self._send_success(200,{"review":review})
+            elif re.match(r"^/api/ai-work-items/[^/]+/review/decision$", path):
+                if not self._require_admin_principal(): return
+                review=self._ai_review_service().decide(path.split("/")[3],body.get("expected_version"),
+                    body.get("action"),self._principal["token_uuid"],body)
+                self._send_success(200,{"review":review})
             elif re.match(r"^/api/ai-work-items/[^/]+/(retry|cancel)$", path):
                 if not self._require_admin_principal(): return
                 parts = path.split("/"); expected = body.get("expected_version")

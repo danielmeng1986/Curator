@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-011A` — Status: `Proposed`
+`UI-011A` — Status: `Complete`
 
 ## Title
 
@@ -63,4 +63,5 @@ reopening or coupling the UI to the archived historical `workspace_album` table.
 
 ## Risks or Notes
 
-- This is a Specification task; implementation remains blocked until its decisions are approved.
+- The product and data boundaries are approved. AI output remains immutable;
+  human review and Promotion use separate stable records and commands.

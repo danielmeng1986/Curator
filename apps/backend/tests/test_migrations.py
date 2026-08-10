@@ -167,3 +167,11 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
             conn.execute("INSERT INTO ai_work_item_result_stage(uuid,work_item_uuid,stage,schema_version,manifest_uuid,manifest_version,configuration_snapshot_sha256,payload_json,payload_sha256,runtime_metrics_json,operation_uuid,submitted_by_token_uuid,submitted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",values)
             with self.assertRaises(sqlite3.IntegrityError):
                 conn.execute("INSERT INTO ai_work_item_result_stage(uuid,work_item_uuid,stage,schema_version,manifest_uuid,manifest_version,configuration_snapshot_sha256,payload_json,payload_sha256,runtime_metrics_json,operation_uuid,submitted_by_token_uuid,submitted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",("r2",)+values[1:])
+
+    def test_0010_review_schema_is_repeatable_and_preserves_rework_lineage(self):
+        root=Path(__file__).parents[1]/"migrations"
+        with sqlite3.connect(":memory:") as conn:
+            conn.execute("CREATE TABLE workspace_album_ai_worker(uuid TEXT PRIMARY KEY)")
+            sql=(root/"0010_ai_work_item_review.sql").read_text(); conn.executescript(sql); conn.executescript(sql)
+            tables={row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        self.assertTrue({"ai_work_item_review","ai_work_item_review_decision","ai_work_item_rework"}<=tables)

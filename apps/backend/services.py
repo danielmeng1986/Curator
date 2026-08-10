@@ -2399,6 +2399,81 @@ class AIResultSubmissionService:
     def get(self,item_uuid): return self._repo.get_results(item_uuid)
 
 
+class AIReviewService:
+    """Admin-owned stable review state machine for immutable AI output."""
+
+    STATES={"ReadyForReview","InReview","Approved","Rejected","ReworkRequested"}
+
+    def __init__(self,review_repo,now_fn=None):
+        self._repo=review_repo; self._now=now_fn or (lambda:datetime.now(timezone.utc))
+
+    @staticmethod
+    def _name(value):
+        value=str(value or "").strip(); words=value.split()
+        forbidden={"photo","photos","collection","session","gallery"}
+        if not 2<=len(words)<=5 or len(value)>120 or any(not re.fullmatch(r"[A-Z][A-Za-z'’-]*",word) for word in words) \
+                or any(word.casefold() in forbidden for word in words):
+            raise ValueError("The selected name must contain 2-5 capitalized English words and no forbidden term.")
+        return value
+
+    @staticmethod
+    def allowed_actions(state):
+        return ["start"] if state=="ReadyForReview" else ["approve","reject","request_rework"] if state=="InReview" else []
+
+    def queue(self,state=None,workspace_uuid=None,limit=50,offset=0):
+        if state and state not in self.STATES: raise ValueError("Review state filter is invalid.")
+        if not 1<=limit<=100 or offset<0: raise ValueError("Review pagination is invalid.")
+        rows,total=self._repo.queue(state,workspace_uuid,limit,offset)
+        for row in rows: row["allowed_actions"]=self.allowed_actions(row["state"])
+        return {"items":rows,"total":total,"limit":limit,"offset":offset}
+
+    def detail(self,item_uuid):
+        result=self._repo.detail(item_uuid)
+        if not result: raise ServiceNotFound("AI review not found.")
+        result["review"]["allowed_actions"]=self.allowed_actions(result["review"]["state"])
+        return result
+
+    def start(self,item_uuid,expected_version,actor):
+        return self._transition(item_uuid,expected_version,"InReview",actor,{})
+
+    def decide(self,item_uuid,expected_version,action,actor,body):
+        targets={"approve":"Approved","reject":"Rejected","request_rework":"ReworkRequested"}
+        if action not in targets: raise ValueError("Review action must be approve, reject, or request_rework.")
+        rating=body.get("rating")
+        if rating is not None and (isinstance(rating,bool) or not isinstance(rating,int) or not 1<=rating<=5):
+            raise ValueError("rating must be an integer from 1 to 5.")
+        notes=str(body.get("notes") or "").strip()
+        if len(notes)>4000: raise ValueError("notes must not exceed 4000 characters.")
+        reason=str(body.get("reason") or "").strip()
+        if targets[action] in {"Rejected","ReworkRequested"} and not reason:
+            raise ValueError("reason is required for rejection or rework.")
+        if len(reason)>1000: raise ValueError("reason must not exceed 1000 characters.")
+        evidence={"rating":rating,"notes":notes or None,"reason":reason or None}
+        if action=="approve":
+            source=body.get("selection_source")
+            if source not in {"Recommendation","HumanRevision"}: raise ValueError("selection_source is required.")
+            selected=self._name(body.get("selected_name")); detail=self.detail(item_uuid)
+            writer=next((stage for stage in detail["results"] if stage["stage"]=="Writer"),None)
+            if not writer: raise ServiceConflict("AI_REVIEW_RESULT_REQUIRED","Writer result is required for approval.")
+            recommendations=writer["payload"]["suggested_names"]
+            if source=="Recommendation" and selected not in recommendations:
+                raise ValueError("The selected recommendation is not part of the accepted Writer result.")
+            evidence.update({"selected_name":selected,"selection_source":source,
+                "selected_recommendation":selected if source=="Recommendation" else None})
+        return self._transition(item_uuid,expected_version,targets[action],actor,evidence)
+
+    def _transition(self,item_uuid,expected_version,target,actor,evidence):
+        if not isinstance(expected_version,int): raise ValueError("expected_version is required and must be an integer.")
+        try:
+            result=self._repo.transition(item_uuid,expected_version,target,actor,evidence,self._now().isoformat())
+            result["review"]["allowed_actions"]=self.allowed_actions(result["review"]["state"])
+            return result
+        except repo.PersistenceNotFound as exc: raise ServiceNotFound("AI review not found.") from exc
+        except repo.PersistenceConflict as exc:
+            code=exc.details.get("code","AI_REVIEW_CONFLICT")
+            raise ServiceConflict(code,"AI review transition conflicts with current state.",exc.details) from exc
+
+
 class AIWorkspaceService:
     """Own the Dataset-independent AI Workspace container lifecycle."""
 

@@ -945,6 +945,16 @@ class TestVersionedApiAuthorization(_TestServerBase):
                 self.assertEqual(200,status); self.assertEqual("Writer",accepted["data"]["result"]["stage"])
                 status, results = self._get(f"/api/v1/ai-work-items/{item_uuid}/results",admin)
                 self.assertEqual(200,status); self.assertEqual("ReadyForReview",results["data"]["results"]["state"]["state"])
+                status, queue = self._get("/api/v1/ai-reviews?state=ReadyForReview",admin)
+                self.assertEqual(200,status); self.assertTrue(any(row["work_item_uuid"]==item_uuid for row in queue["data"]))
+                status, started = self._post(f"/api/v1/ai-work-items/{item_uuid}/review/start",{"expected_version":1},admin)
+                self.assertEqual(200,status); self.assertEqual("InReview",started["data"]["review"]["review"]["state"])
+                status, approved = self._post(f"/api/v1/ai-work-items/{item_uuid}/review/decision",{
+                    "expected_version":2,"action":"approve","rating":5,"notes":"Good result",
+                    "selection_source":"Recommendation","selected_name":"Lakeside Family Walk"},admin)
+                self.assertEqual(200,status); self.assertEqual("Approved",approved["data"]["review"]["review"]["state"])
+                status, detail = self._get(f"/api/v1/ai-work-items/{item_uuid}/review",admin)
+                self.assertEqual(200,status); self.assertEqual("Lakeside Family Walk",detail["data"]["review"]["review"]["selected_name"])
 
     def test_current_principal_and_renewal_request_are_token_safe(self):
         issued = self._issue(role="writer")

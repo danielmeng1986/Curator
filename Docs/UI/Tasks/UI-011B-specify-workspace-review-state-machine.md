@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-011B` — Status: `Proposed`
+`UI-011B` — Status: `Complete`
 
 ## Title
 
@@ -58,4 +58,13 @@ concurrency, and a stable UI read model that can survive underlying table change
 
 ## Risks or Notes
 
-- Approval and Promotion may be separate steps; the Specification must decide rather than letting UI behavior imply the answer.
+- Approval and Promotion are separate steps. The approved state machine is
+  `ReadyForReview → InReview → Approved | Rejected | ReworkRequested`.
+- Rework creates a new pending Work Item in the same Dispatch Group, inherits
+  the immutable model configuration snapshot, and records
+  `rework_of_work_item_uuid`; it never overwrites the prior attempt or output.
+- Approval freezes either one accepted Writer recommendation or one explicit
+  human revision. Human revisions use the same 2–5 capitalized English-word
+  rule and forbidden terms as Writer schema v1.
+- Rating is optional integer 1–5. Reject and Rework require a reason. Every
+  command uses optimistic `expected_version`; assignment/merge is deferred.

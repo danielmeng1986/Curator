@@ -1807,6 +1807,56 @@ class TestAIResultSubmissionContract(unittest.TestCase):
         self.assertEqual(1,self.conn.execute("SELECT COUNT(*) FROM ai_work_item_result_stage").fetchone()[0])
 
 
+class TestAIReviewContract(unittest.TestCase):
+    _images = TestAIPhotoEvidenceManifestContract._images
+
+    def setUp(self):
+        TestAIResultSubmissionContract.setUp(self)
+        self.results.submit(self.item["uuid"],"worker-one","Vision",self.results.VISION_SCHEMA,self.vision)
+        self.results.submit(self.item["uuid"],"worker-one","Writer",self.results.WRITER_SCHEMA,self.writer)
+        self.review=svc.AIReviewService(repo.AIReviewRepository(_db_factory(self.conn)),
+            now_fn=lambda:datetime(2026,8,10,2,tzinfo=timezone.utc))
+    def tearDown(self): TestAIResultSubmissionContract.tearDown(self)
+
+    def test_approval_freezes_recommendation_and_stale_write_fails(self):
+        started=self.review.start(self.item["uuid"],1,"admin-one")
+        self.assertEqual("InReview",started["review"]["state"])
+        with self.assertRaises(svc.ServiceConflict) as ctx: self.review.start(self.item["uuid"],1,"admin-two")
+        self.assertEqual("AI_REVIEW_STALE",ctx.exception.code)
+        approved=self.review.decide(self.item["uuid"],2,"approve","admin-one",{
+            "rating":5,"notes":"Strong output","selection_source":"Recommendation",
+            "selected_name":"Lakeside Family Walk"})
+        self.assertEqual("Approved",approved["review"]["state"])
+        self.assertEqual("Lakeside Family Walk",approved["review"]["selected_name"])
+        self.assertEqual([],approved["review"]["allowed_actions"])
+        self.assertEqual(2,len(approved["decisions"])); self.assertEqual(2,self.conn.execute(
+            "SELECT COUNT(*) FROM operation WHERE operation_type='ai_review_decision'").fetchone()[0])
+
+    def test_human_revision_validation_and_rejection_reason(self):
+        self.review.start(self.item["uuid"],1,"admin-one")
+        with self.assertRaises(ValueError): self.review.decide(self.item["uuid"],2,"approve","admin-one",{
+            "selection_source":"HumanRevision","selected_name":"bad photos","rating":6})
+        rejected=self.review.decide(self.item["uuid"],2,"reject","admin-one",{"reason":"Analysis is inaccurate","rating":1})
+        self.assertEqual("Rejected",rejected["review"]["state"])
+        self.assertEqual("Completed",rejected["item"]["run_state"])
+
+    def test_rework_creates_linked_pending_item_in_same_group(self):
+        now="2026-08-10T00:00:00+00:00"
+        self.review.queue()
+        self.conn.execute("INSERT INTO work_dispatch_batch(uuid,worker_kind,dataset_type,schema_version,created_at,updated_at) VALUES ('batch-r','album_name_analysis','album_analysis',1,?,?)",(now,now))
+        self.conn.execute("INSERT INTO work_dispatch_group(uuid,batch_uuid,album_id,worker_kind,dataset_type,schema_version,created_at,updated_at) VALUES ('group-r','batch-r',1,'album_name_analysis','album_analysis',1,?,?)",(now,now))
+        self.conn.execute("INSERT INTO work_dispatch_group_item(group_uuid,item_kind,item_uuid,configuration_uuid,created_at) VALUES ('group-r','workspace_album_ai_worker',?,?,?)",
+            (self.item["uuid"],self.item["ai_model_configuration_uuid"],now)); self.conn.commit()
+        self.review.start(self.item["uuid"],1,"admin-one")
+        result=self.review.decide(self.item["uuid"],2,"request_rework","admin-one",{"reason":"Use a clearer scene summary"})
+        successor=result["successor_work_item_uuid"]; self.assertTrue(successor)
+        child=self.conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?",(successor,)).fetchone()
+        self.assertEqual("Pending",child["run_state"]); self.assertEqual(self.item["ai_model_configuration_uuid"],child["ai_model_configuration_uuid"])
+        link=self.conn.execute("SELECT * FROM ai_work_item_rework WHERE successor_work_item_uuid=?",(successor,)).fetchone()
+        self.assertEqual(self.item["uuid"],link["rework_of_work_item_uuid"])
+        self.assertEqual(2,self.conn.execute("SELECT COUNT(*) FROM work_dispatch_group_item WHERE group_uuid='group-r'").fetchone()[0])
+
+
 class TestAIModelConfigurationContract(unittest.TestCase):
     def setUp(self):
         self.conn = _make_db(); self.repo = repo.AIModelConfigurationRepository(_db_factory(self.conn))

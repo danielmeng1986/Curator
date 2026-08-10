@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-050` — Status: `Proposed`
+`BT-050` — Status: `Complete`
 
 ## Title
 
@@ -58,3 +58,12 @@ AI evidence, human evaluation, final selection, and system-managed history.
 
 - The current single-administrator deployment does not require assignment or
   merge UX, but the version field preserves a safe future concurrency boundary.
+
+## Completion Record
+
+- Added stable review, immutable decision, and rework-lineage persistence.
+- Added queue/detail read models and optimistic Admin start/decision APIs.
+- Approval freezes one recommendation or validated human revision; ratings are
+  optional 1–5, while Reject/Rework require reasons.
+- Rework atomically creates a pending successor in the same Dispatch Group with
+  the inherited model configuration snapshot and retained predecessor evidence.
