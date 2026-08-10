@@ -69,6 +69,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
         "test_quarantine_workflow_acceptance",
         "test_repair_decision_workflow_acceptance",
         "test_traceability_workflow_acceptance",
+        "test_ai_workspace_workflow_acceptance",
     ),
     "workflow-readiness": (
         "test_workflow_foundation",
@@ -78,8 +79,12 @@ GROUPS: dict[str, tuple[str, ...]] = {
         "test_quarantine_workflow_acceptance",
         "test_repair_decision_workflow_acceptance",
         "test_traceability_workflow_acceptance",
+        "test_ai_workspace_workflow_acceptance",
         "test_api_contract.TestAuthenticatedApiWorkflow",
         "test_api_contract.TestOperationHistoryDisclosure",
+    ),
+    "ai-workspace-workflow": (
+        "test_ai_workspace_workflow_acceptance",
     ),
 }
 

@@ -2181,7 +2181,9 @@ class WorkDispatchService:
             normal=True
             for item in items:
                 if item["run_state"] not in {"Completed","Cancelled"}: normal=False; blockers.append({"item_uuid":item["item_uuid"],"reason":"execution_active_or_retryable"}); continue
-                if item["run_state"]=="Completed" and item["review_state"] not in {"Approved","Rejected"}:
+                review_terminal=item["review_state"] in {"Approved","Rejected"} or \
+                    (item["review_state"]=="ReworkRequested" and item.get("successor_work_item_uuid"))
+                if item["run_state"]=="Completed" and not review_terminal:
                     normal=False; blockers.append({"item_uuid":item["item_uuid"],"reason":"review_obligation"})
             if any(item["review_state"]=="Approved" for item in items) and not winner:
                 normal=False; blockers.append({"reason":"promotion_required"})

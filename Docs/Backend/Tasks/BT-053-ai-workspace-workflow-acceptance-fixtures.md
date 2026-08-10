@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-053` — Status: `Proposed`
+`BT-053` — Status: `Complete`
 
 ## Title
 
@@ -69,3 +69,18 @@ Photo sampling, two-stage AI output, review, unique Promotion, and archival.
 
 - Mock outputs must exercise the same versioned JSON validation as real llama.cpp
   results rather than bypassing the submission boundary.
+
+## Completion Record
+
+- Added a clean-root `ai-workspace-workflow` suite with synthetic images,
+  mock llama.cpp-compatible v1 output, two model configurations, two Worker
+  kinds, and no production or historical Workspace input.
+- Proved claim-bound opaque evidence, schema/hash failures, Rework lineage,
+  rejection, stale decisions, unique/idempotent Promotion, Status policy,
+  release, archive, degraded history, redispatch, and durable traceability.
+- Corrected the integration rule so a `ReworkRequested` predecessor with a
+  linked successor is terminal; the successor owns the remaining obligation.
+- Published the reusable Backend fixture contract for UI-011D and added the
+  suite to Backend workflow/readiness regression groups.
+- Verification completed with two clean 4-scenario AI Workspace runs, two
+  clean 34-test workflow-readiness runs, and a 751-test complete regression.

@@ -2080,7 +2080,9 @@ class AIWorkspaceRepository:
         if any(value=="Abandoned" for value in dispositions): classification="Abandoned"
         elif dispositions and all(value=="Cancelled" for value in dispositions): classification="Cancelled"
         elif review_counts and set(review_counts)=={"Rejected"} and not promotions: classification="Rejected"
-        elif not dispositions or all(value=="Closed" for value in dispositions): classification="Completed"
+        elif (not dispositions or all(value=="Closed" for value in dispositions)) and \
+                (not review_counts or (promotions and set(review_counts)<={"Approved","Rejected"})):
+            classification="Completed"
         else: classification="Mixed"
         return {"workspace":self._norm(workspace),"groups":groups,"ungrouped_items":[dict(row) for row in ungrouped],
             "review_counts":review_counts,"promotion_count":promotions,"blockers":blockers,
@@ -2478,9 +2480,11 @@ class WorkDispatchRepository:
             group=conn.execute("SELECT * FROM work_dispatch_group WHERE uuid=?",(group_uuid,)).fetchone()
             if not group: return None
             rows=conn.execute("""SELECT gi.item_uuid,i.run_state,i.attempt_count,r.state review_state,
+                rw.successor_work_item_uuid,
                 p.outcome promotion_outcome FROM work_dispatch_group_item gi
                 LEFT JOIN workspace_album_ai_worker i ON i.uuid=gi.item_uuid
                 LEFT JOIN ai_work_item_review r ON r.work_item_uuid=i.uuid
+                LEFT JOIN ai_work_item_rework rw ON rw.rework_of_work_item_uuid=i.uuid
                 LEFT JOIN workspace_album_name_promotion p ON p.work_item_uuid=i.uuid AND p.outcome='Promoted'
                 WHERE gi.group_uuid=? ORDER BY gi.id""",(group_uuid,)).fetchall()
             winner=conn.execute("""SELECT p.* FROM workspace_album_name_promotion p
@@ -2509,9 +2513,12 @@ class WorkDispatchRepository:
                     raise PersistenceConflict({"code":"WORK_GROUP_ALREADY_RELEASED","current_version":group["version"]})
                 if group["version"]!=expected_version or group["group_state"]!="Active":
                     raise PersistenceConflict({"code":"WORK_GROUP_STALE","current_version":group["version"],"current_state":group["group_state"]})
-                items=[dict(row) for row in conn.execute("""SELECT gi.item_uuid,i.run_state,i.attempt_count,r.state review_state
+                items=[dict(row) for row in conn.execute("""SELECT gi.item_uuid,i.run_state,i.attempt_count,r.state review_state,
+                    rw.successor_work_item_uuid
                     FROM work_dispatch_group_item gi LEFT JOIN workspace_album_ai_worker i ON i.uuid=gi.item_uuid
-                    LEFT JOIN ai_work_item_review r ON r.work_item_uuid=i.uuid WHERE gi.group_uuid=? ORDER BY gi.id""",(group_uuid,)).fetchall()]
+                    LEFT JOIN ai_work_item_review r ON r.work_item_uuid=i.uuid
+                    LEFT JOIN ai_work_item_rework rw ON rw.rework_of_work_item_uuid=i.uuid
+                    WHERE gi.group_uuid=? ORDER BY gi.id""",(group_uuid,)).fetchall()]
                 winner=conn.execute("""SELECT p.uuid FROM workspace_album_name_promotion p JOIN work_dispatch_group_item gi
                     ON gi.item_uuid=p.work_item_uuid WHERE gi.group_uuid=? AND p.outcome='Promoted' LIMIT 1""",(group_uuid,)).fetchone()
                 blockers=[]
@@ -2526,7 +2533,9 @@ class WorkDispatchRepository:
                 else:
                     for item in items:
                         if item["run_state"] not in {"Completed","Cancelled"}: blockers.append(item); continue
-                        if item["run_state"]=="Completed" and item["review_state"] not in {"Approved","Rejected"}: blockers.append(item)
+                        review_terminal=item["review_state"] in {"Approved","Rejected"} or \
+                            (item["review_state"]=="ReworkRequested" and item["successor_work_item_uuid"])
+                        if item["run_state"]=="Completed" and not review_terminal: blockers.append(item)
                     if any(item["review_state"]=="Approved" for item in items) and not winner: blockers.append({"reason":"promotion_required"})
                 if blockers: raise PersistenceConflict({"code":"WORK_GROUP_NOT_RELEASABLE","blockers":blockers[:20]})
                 summary={"item_count":len(items),"winner_uuid":winner[0] if winner else None,"disposition":disposition}
