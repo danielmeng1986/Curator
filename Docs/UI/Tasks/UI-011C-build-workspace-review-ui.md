@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-011C` — Status: `Proposed`
+`UI-011C` — Status: `Complete`
 
 ## Title
 
@@ -58,3 +58,19 @@ review contracts plus dataset-specific field presentation adapters.
 ## Risks or Notes
 
 - Dataset adapters must be presentation mappings, not alternate business-rule implementations.
+
+## Completion Record
+
+- Added Admin-only AI Workspace list/overview, review queue, review detail, and
+  Dispatch Group detail routes.
+- Implemented the Album-analysis presentation adapter with visually distinct
+  immutable AI output, retained editable human draft, and system evidence and
+  provenance panels.
+- Rendered only Backend-provided review and Workspace lifecycle actions; every
+  mutation sends the current record version. Failed stale mutations leave the
+  in-memory human draft intact for conflict recovery.
+- Added review start, approval, rejection, rework, exact-name Promotion,
+  Workspace close/archive, Group release/cancel/abandon, and durable
+  Operation/Issue/evidence/lineage navigation.
+- Added focused Workspace Review UI contract coverage and retained the complete
+  Backend AI Workspace acceptance suite as the data/state-machine gate.

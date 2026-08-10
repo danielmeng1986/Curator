@@ -391,3 +391,12 @@ code {
 .dispatch-controls { padding:16px; margin-bottom:16px; }
 .dispatch-configs { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:8px; }
 .dispatch-configs label { padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+.workspace-summary, .review-panel { padding:18px; }
+.review-grid { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr); gap:16px; margin-bottom:16px; }
+.ai-output { border-left:4px solid var(--primary); }
+.human-decision { border-left:4px solid var(--accent); }
+.system-evidence { border-left:4px solid var(--ink-soft); }
+.recommendation { display:block; padding:7px 0; }
+.evidence-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px; margin:12px 0; }
+.evidence-card { display:grid; gap:5px; padding:10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+@media (max-width:900px) { .review-grid { grid-template-columns:1fr; } }

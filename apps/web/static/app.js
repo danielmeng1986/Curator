@@ -26,6 +26,11 @@ const ROUTES = [
   { pattern: /^#\/admin\/backups$/, page: 'admin-backups', params: [], scope: 'admin' },
   { pattern: /^#\/admin\/restore$/, page: 'admin-restore', params: [], scope: 'admin' },
   { pattern: /^#\/work-dispatch(?:\?view=(available|active|history))?$/, page: 'work-dispatch', params: ['view'], scope: 'admin' },
+  { pattern: /^#\/work-dispatch\/groups\/([^/?]+)$/, page: 'work-dispatch-group', params: ['uuid'], scope: 'admin' },
+  { pattern: /^#\/ai-workspaces$/, page: 'ai-workspaces', params: [], scope: 'admin' },
+  { pattern: /^#\/ai-workspaces\/([^/?]+)$/, page: 'ai-workspace-detail', params: ['uuid'], scope: 'admin' },
+  { pattern: /^#\/ai-reviews(?:\?.*)?$/, page: 'ai-reviews', params: [], scope: 'admin' },
+  { pattern: /^#\/ai-work-items\/([^/?]+)\/review$/, page: 'ai-review-detail', params: ['uuid'], scope: 'admin' },
 ];
 
 function navigate(hash) {
@@ -84,6 +89,11 @@ function route() {
         case 'admin-backups':   renderPage(AdminBackupsPage.render(paramValues)); break;
         case 'admin-restore':   renderPage(AdminRestorePage.render(paramValues)); break;
         case 'work-dispatch':   renderPage(WorkDispatchPage.render(paramValues)); break;
+        case 'work-dispatch-group': renderPage(WorkDispatchPage.renderGroup(paramValues)); break;
+        case 'ai-workspaces':   renderPage(WorkspaceReviewPage.renderWorkspaces(paramValues)); break;
+        case 'ai-workspace-detail': renderPage(WorkspaceReviewPage.renderWorkspace(paramValues)); break;
+        case 'ai-reviews':      renderPage(WorkspaceReviewPage.renderQueue(paramValues)); break;
+        case 'ai-review-detail': renderPage(WorkspaceReviewPage.renderDetail(paramValues)); break;
         default:                renderNotFound();
       }
       return;

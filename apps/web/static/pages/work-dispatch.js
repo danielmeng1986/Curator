@@ -23,6 +23,24 @@ const WorkDispatchPage = {
     } catch (error) { ui.renderPageError(el, error, 'Work Dispatch'); }
   },
 
+  async renderGroup({ uuid }) {
+    const el=document.getElementById('page-content'); el.innerHTML='<div class="loading">Loading Dispatch Group…</div>';
+    try {
+      const result=await api.get(`/work-dispatch/groups/${encodeURIComponent(uuid)}`); const detail=result.group; const group=detail.group;
+      el.innerHTML=`<div class="page-header"><div><a href="#/work-dispatch">← Work Dispatch</a><h1 class="page-title">Dispatch Group</h1></div><span class="chip">${esc(group.group_state)}</span></div>
+        <div class="card workspace-summary"><p>Group: <code>${esc(group.uuid)}</code></p><p>Album #${group.album_id} · Worker ${esc(group.worker_kind)} · Version ${group.version}</p>
+        ${detail.blockers.length ? `<div class="alert alert-warning">${detail.blockers.map(item=>esc(item.reason)).join(' · ')}</div>` : ''}
+        <div class="detail-actions">${detail.items.map(item=>`<a class="btn btn-secondary" href="#/ai-work-items/${esc(item.item_uuid)}/review">${esc(item.review_state || item.run_state)}</a>`).join('')}
+        ${detail.allowed_actions.map(action=>`<button class="btn ${action==='release'?'btn-primary':'btn-danger'}" onclick="WorkDispatchPage.closeGroup('${esc(group.uuid)}','${action}',${group.version},this)">${action}</button>`).join('')}</div></div>`;
+    } catch(error){ui.renderPageError(el,error,'Dispatch Group');}
+  },
+
+  async closeGroup(uuid,action,version,trigger){
+    const reason=window.prompt(`Reason to ${action} this Group:`); if(!reason?.trim())return;
+    const result=await ui.runAction(`group-${action}`,()=>api.post(`/work-dispatch/groups/${uuid}/${action}`,{expected_version:version,reason:reason.trim()}),{trigger,context:`${action} the Dispatch Group`});
+    if(result.ok)await this.renderGroup({uuid});
+  },
+
   async loadView() {
     const el = document.getElementById('page-content');
     const q = document.getElementById('dispatchSearch')?.value?.trim() || '';
