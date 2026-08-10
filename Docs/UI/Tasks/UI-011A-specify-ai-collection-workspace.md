@@ -22,10 +22,13 @@ reopening or coupling the UI to the archived historical `workspace_album` table.
 ## Scope
 
 - Workspace/dataset identity, ownership, schema version, source provenance, AI result submission, and lifecycle boundaries.
+- Album candidate source, Worker kind, Dispatch Batch, exclusive Album
+  Reservation, one Dispatch Group per Album, and multi-configuration Work Items.
 - AI-owned, human-editable, review-only, and system-managed field categories.
 - Relationship to Issues, Operations, permanent entities, and Promotion.
 - Rejection/rework, retention, closure, archival, concurrency, and recovery rules.
 - Required Backend APIs/read models and UI information needs.
+- Explicit separation of Album business Status, Work Item run state, and review state.
 
 ## Out of Scope
 
@@ -50,6 +53,8 @@ reopening or coupling the UI to the archived historical `workspace_album` table.
 - Historical Workspace data cannot become active input through the new contract.
 - Schema evolution does not require changing stable review fields or state semantics.
 - Promotion/rejection/rework and partial-failure outcomes are explicit and testable.
+- Dispatch never changes Album Status, and one Album cannot belong to two active
+  Worker Groups even when the Workers target different fields.
 
 ## Verification
 
@@ -59,4 +64,3 @@ reopening or coupling the UI to the archived historical `workspace_album` table.
 ## Risks or Notes
 
 - This is a Specification task; implementation remains blocked until its decisions are approved.
-

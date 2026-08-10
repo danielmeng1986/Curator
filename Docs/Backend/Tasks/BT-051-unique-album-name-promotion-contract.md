@@ -27,7 +27,11 @@ Album name while preventing competing model runs from producing multiple winners
 - Signed expiring single-use execution, validation, exact Admin confirmation,
   unique `workspace_album_name_promotion` winner evidence, and idempotent retry.
 - Atomic Album-title update, prior/new value retention, Operation, snapshot risk,
-  Issue/failure context, and `Promoted`/`PromotionFailed` outcome.
+  Issue/failure context, calculated Album Status consequence, and
+  `Promoted`/`PromotionFailed` outcome.
+- Dataset policy maps source Status `TEMPORARY` to `NAME_GENERATED` on success;
+  every other source Status is retained in the first implementation. Clients
+  cannot nominate a target Status.
 
 ## Out of Scope
 
@@ -50,7 +54,10 @@ Album name while preventing competing model runs from producing multiple winners
 - Only an Approved Item with a frozen selected name is promotable.
 - Competing approved runs for the same Album cannot both succeed in one Workspace.
 - Reject, Rework, preview, cancellation, stale, and failed execution do not change Album title.
-- Success updates exactly one Album, persists the winner and Operation, and is idempotent.
+- Success updates exactly one Album, applies the specified Status policy in the
+  same transaction, persists the winner and Operation, and is idempotent.
+- Preview discloses the current name/Status and calculated resulting name/Status;
+  reject, failure, or stale execution changes neither field.
 
 ## Verification
 
@@ -61,3 +68,5 @@ Album name while preventing competing model runs from producing multiple winners
 
 - A future rename from another Workspace requires an explicit supersede/history
   policy; it must not be inferred by this task.
+- Promotion does not itself release the Album Work Reservation; BT-057 closes
+  the Group after all terminal obligations are satisfied.

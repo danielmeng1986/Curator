@@ -22,7 +22,7 @@ evaluation, configuration, Photo Manifest, failure, or Promotion traceability.
 ## Scope
 
 - Closure preflight for queued, claimed, running, reviewable, approved, failed,
-  and unresolved Items.
+  and unresolved Items plus active Album Reservations/Groups.
 - Explicit cancel/retain/block policy for unfinished Items.
 - Closed and Archived transitions, archive classification/reason, timestamps,
   Operation links, retention read models, and read-only enforcement.
@@ -35,7 +35,7 @@ evaluation, configuration, Photo Manifest, failure, or Promotion traceability.
 
 ## Dependencies
 
-- BT-044 through BT-051.
+- BT-044 through BT-051 and BT-057.
 - Approved UI-011A retention duration and unfinished-work closure policy.
 
 ## Implementation Steps
@@ -47,6 +47,8 @@ evaluation, configuration, Photo Manifest, failure, or Promotion traceability.
 ## Acceptance Criteria
 
 - Closure never silently abandons a running claim or unresolved approved Promotion.
+- Closure cannot strand or silently release an Album reservation; every owning
+  Group must have a permitted terminal release outcome.
 - Closed Workspaces accept no new runs or decisions; Archived Workspaces accept no mutations.
 - Missing source images do not erase Manifest metadata or historical conclusions.
 - Every close/archive result has an explicit classification and Operation.

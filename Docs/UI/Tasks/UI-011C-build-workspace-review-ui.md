@@ -33,7 +33,9 @@ review contracts plus dataset-specific field presentation adapters.
 
 ## Dependencies
 
-- UI-002, UI-003, UI-007, UI-011A/B, and completed Backend Workspace API tasks.
+- UI-002, UI-003, UI-007, UI-011A/B, UI-011E, and completed Backend Workspace
+  API tasks. Review consumes Backend-created Groups and Work Items rather than
+  direct table or ad hoc Item creation.
 
 ## Implementation Steps
 
@@ -56,4 +58,3 @@ review contracts plus dataset-specific field presentation adapters.
 ## Risks or Notes
 
 - Dataset adapters must be presentation mappings, not alternate business-rule implementations.
-

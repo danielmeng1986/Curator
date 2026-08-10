@@ -52,6 +52,8 @@ snapshot, archive, and output resources.
 | [UI-011B](UI-011B-specify-workspace-review-state-machine.md) | Stable review state machine and read model | Proposed |
 | [UI-011C](UI-011C-build-workspace-review-ui.md) | Dataset-adaptable Workspace review UI | Proposed |
 | [UI-011D](UI-011D-workspace-browser-acceptance.md) | Workspace browser acceptance | Proposed |
+| [UI-011E](UI-011E-build-filtered-album-work-dispatch-ui.md) | Filtered Admin Album work dispatch console | Proposed |
+| [UI-011F](UI-011F-work-dispatch-browser-acceptance.md) | Album-exclusive dispatch browser acceptance | Proposed |
 | [UI-012](UI-012-entity-management-browser-acceptance.md) | Entity-management browser acceptance | Proposed |
 | [UI-013](UI-013-import-browser-acceptance.md) | Import browser acceptance | Proposed |
 | [UI-014](UI-014-repair-and-quarantine-browser-acceptance.md) | Repair, Issue, and Quarantine browser acceptance | Proposed |
@@ -64,3 +66,7 @@ snapshot, archive, and output resources.
 test foundations. Feature tasks `UI-004*` through `UI-011*` build on those
 foundations. Acceptance tasks `UI-012` through `UI-015` verify the feature
 workflows, and `UI-016` composes them into the final readiness gate.
+
+For AI Workspace delivery, UI-011A/B precede dispatch implementation UI-011E.
+UI-011F proves the dispatch boundary; UI-011C/D consume the resulting Groups
+and Work Items for review and end-to-end acceptance.

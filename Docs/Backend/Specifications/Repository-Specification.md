@@ -6,6 +6,14 @@ This Specification defines the persistence boundary used by Backend Services. A 
 
 Repository contracts are organized around business capabilities and workflow operations, not individual database tables. They support such operations as Import Preview, AI Review, Validation, Repair, and Promotion rather than exposing generic CRUD methods for every table.
 
+Work Dispatch repositories support normalized Album candidate queries and an
+atomic persistence operation that creates a Dispatch Batch, one Group and one
+unique active reservation per Album, and the adapter-owned Work Items. Active
+reservation uniqueness is enforced by the database on Album identity across
+all Worker kinds. History remains queryable after release; clients and Services
+must not simulate this invariant by checking then inserting in separate
+transactions.
+
 It does not prescribe repository classes, interfaces, ORM usage, SQL, schema syntax, or database libraries.
 
 ## Responsibilities

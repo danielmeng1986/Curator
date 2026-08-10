@@ -27,6 +27,24 @@ The future contract must keep these concerns distinct:
 - dataset adapters for variable fields without duplicating state-transition or
   Promotion policy in the client.
 
+## Album work dispatch entry
+
+The active AI Workspace begins with an Admin dispatch console, not by copying
+all `TEMPORARY` Albums or reopening historical `workspace_album`. An Admin may
+filter the permanent Album catalogue by supported Album fields and choose a
+bounded set for one Worker kind and Workspace.
+
+The default Available view contains only Albums for which the Backend reports
+no active Album Work Reservation. A successful dispatch moves the Album from
+Available to Active work and exposes its Batch, Group, Work Items, Workspace,
+and Operation links. History remains visible after release.
+
+One Album may have only one active Dispatch Group across every Worker kind,
+even when different Workers would edit different fields. Multiple model
+configurations used for one comparison appear as Work Items inside that single
+Group. Dispatch never changes `album.status_id`; Album business Status, Worker
+run state, and human review state are displayed as separate concepts.
+
 ## Stable review direction
 
 The exact state names and transitions remain a UI-011B Specification decision.

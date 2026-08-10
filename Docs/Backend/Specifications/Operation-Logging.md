@@ -53,6 +53,7 @@ When an Operation is unsuccessful, cancelled because of an error, or enters `Nee
 | Material write | Record according to the owning workflow policy. |
 | Import execution | Required, with per-item outcome/recovery context as needed. |
 | Workspace promotion or material batch action | Required. |
+| Work Dispatch execution, Group cancellation, or reservation release | Required, linked to the Dispatch Batch/Group and affected Albums. |
 | Snapshot and restore | Required. |
 | Repair action | Required. |
 | Authentication approval, issuance, revocation, or security-relevant event | Required or linked Issue as specified by Authentication. |
@@ -67,6 +68,8 @@ Every Operation requires its own stable `operation_uuid`. It must additionally i
 | Entity or asset action | `entity_uuid` |
 | Import execution | `import_uuid` |
 | Batch execution or workspace promotion | `batch_uuid` |
+| Work Dispatch execution | `batch_uuid`; affected Group and Album UUIDs in bounded related-entity evidence |
+| Work Dispatch Group cancellation or release | `group_uuid`, `entity_uuid` for the Album, and the originating `batch_uuid` |
 | Repair workflow | `repair_uuid`, `related_operation_uuid` identifying the original failed Operation |
 | Device registration | `device_uuid` and/or `registration_uuid`, as applicable to the workflow |
 | Issue-driven workflow | `issue_uuid` when the Issue is the tracking anchor |

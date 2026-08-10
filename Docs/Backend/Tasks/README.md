@@ -67,3 +67,15 @@ are approved.
 | [BT-051](BT-051-unique-album-name-promotion-contract.md) | Promote one unique approved Album name. |
 | [BT-052](BT-052-ai-workspace-closure-archive-retention-contract.md) | Close/archive Workspaces and retain evidence. |
 | [BT-053](BT-053-ai-workspace-workflow-acceptance-fixtures.md) | Prove the full workflow with disposable Worker/Photo fixtures. |
+| [BT-054](BT-054-generic-work-dispatch-eligibility-contract.md) | Add generic dispatch identities, Worker eligibility, and Album-exclusive reservations. |
+| [BT-055](BT-055-album-dispatch-candidate-preview-contract.md) | Query filtered Album candidates and bind a zero-write dispatch preview. |
+| [BT-056](BT-056-atomic-album-ai-work-dispatch-execution.md) | Atomically reserve Albums and create AI comparison Work Items. |
+| [BT-057](BT-057-work-dispatch-release-redispatch-safety.md) | Safely close Groups, release Albums, and preserve redispatch history. |
+
+BT identifiers record planning order, not mandatory execution order. Dispatch
+is an entry boundary for AI work, so BT-054 through BT-056 precede BT-047 in
+the first complete workflow. BT-057 follows review and Promotion behavior.
+
+Recommended implementation order:
+
+`BT-054 → BT-055 → BT-056 → BT-047 → BT-048 → BT-049 → BT-050 → BT-051 → BT-057 → BT-052 → BT-053`.

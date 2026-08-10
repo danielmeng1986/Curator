@@ -34,6 +34,7 @@ Specifications define observable behavior, valid and invalid states, responsibil
 | [API Contract](API-Contract.md) | Shared `/api/v1` envelopes, errors, status mapping, access policy, collections, and workflow outcomes. |
 | [Repository Specification](Repository-Specification.md) | Persistence contracts, entities, and read models. |
 | [Workspace Workflow](Workspace-Workflow.md) | Temporary workspace lifecycle and controlled promotion. |
+| [Work Dispatch Workflow](Work-Dispatch-Workflow.md) | Album selection, exclusive reservations, dispatch batches, Worker groups, and redispatch safety. |
 | [Import Workflow](Import-Workflow.md) | Import preview, validation, persistence, filesystem work, and repair hand-off. |
 | [Repair Workflow](Repair-Workflow.md) | Detection, repair states, user confirmation, and verification. |
 | [Snapshot Specification](Snapshot-Specification.md) | Risk-based snapshot decisions, restore, retention, and metadata. |

@@ -159,6 +159,31 @@ Workspace tables, including the existing `workspace_album` and possible future w
 
 Services enforce lifecycle permissions and transitions; repositories persist the lifecycle state; Controllers only expose the permitted operation. This keeps workspaces disposable and prevents temporary processing data from silently becoming permanent domain data. Exact transition rules belong in a Workspace Lifecycle Specification.
 
+### Work Dispatch Orchestration
+
+Worker scheduling is separate from Album business state and Workspace review
+state. `album.status_id` describes the digital asset; it is never used as a
+queue lock or overwritten merely because work was dispatched.
+
+The Backend reserves an Album as the exclusive scheduling unit. One active
+Album Work Reservation owns one Dispatch Group, Worker kind, and work purpose.
+No second Worker kind, Workspace, or Administrator request may reserve that
+Album until the Group is safely closed and released. Database uniqueness, not
+UI filtering, enforces this invariant.
+
+A Dispatch Batch records one Admin-confirmed selection. Each selected Album
+receives one Group and reservation. Dataset-specific Work Items live beneath
+the Group; therefore an Album-analysis Group may contain several model
+configuration runs for comparison without becoming several competing Album
+assignments. Physical Worker devices claim eligible Work Items later and are
+not the ordinary dispatch target.
+
+Candidate filtering, preview, atomic execution, cancellation, release, and
+redispatch are Service-owned workflows exposed through `/api/v1`. The Web UI
+shows available, active, and historical work but does not infer eligibility or
+loop over single-item creation calls. Exact rules are defined by the
+[Work Dispatch Workflow](Specifications/Work-Dispatch-Workflow.md).
+
 ### Future Import Workflows
 
 Future large imports, including photo imports, follow the same layered Backend design and must not grow into standalone scripts that bypass Services or repositories. The architectural workflow is:

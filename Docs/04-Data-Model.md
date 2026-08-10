@@ -100,6 +100,23 @@ Typical information includes:
 - metadata
 - AI annotations
 
+Album business Status is independent from work being performed against the
+Album. Dispatching an Album to a Worker does not replace its Status.
+
+## Work Dispatch
+
+A Work Dispatch Batch records one Administrator-confirmed selection of Albums
+for a Worker kind. Each selected Album receives one active Work Reservation and
+one Dispatch Group. The reservation makes Album the exclusive scheduling unit:
+no second Worker kind may work on it concurrently, even when the Workers target
+different metadata.
+
+A Group may contain several Work Items for the same purpose. For example, one
+Album-name-analysis Group may run several model configurations for comparison.
+Work Item execution state and human review state remain separate from Album
+business Status. Closing and releasing a Group preserves its history and makes
+the Album eligible for a later Dispatch.
+
 ---
 
 ## Studio

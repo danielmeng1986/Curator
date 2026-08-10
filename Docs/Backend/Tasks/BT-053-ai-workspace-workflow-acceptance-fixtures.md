@@ -21,13 +21,16 @@ Photo sampling, two-stage AI output, review, unique Promotion, and archival.
 
 ## Scope
 
-- Disposable Album database, directories/images, Tokens, AI Workspace,
-  configurations, mock llama.cpp provider, Worker process, logs, snapshots, and outputs.
+- Disposable Album database, directories/images, Tokens, filtered dispatch
+  candidates, Batches/Reservations/Groups, AI Workspace, configurations, mock
+  llama.cpp provider, Worker process, logs, snapshots, and outputs.
 - Happy paths for one Album under multiple model configurations.
 - Authorization, claim, Manifest, transfer, hash-change, result-schema, rework,
   rejection, stale decision, competing Promotion, idempotency, and archive scenarios.
 - Durable assertions across Workspace, Item, evidence, Operation, Issue, Album,
-  promotion, and historical access boundaries.
+  Reservation, promotion, release, and historical access boundaries.
+- Cross-Worker reservation conflict, multi-configuration single-Group behavior,
+  unchanged Status at dispatch, Promotion Status policy, and redispatch history.
 
 ## Out of Scope
 
@@ -36,12 +39,13 @@ Photo sampling, two-stage AI output, review, unique Promotion, and archival.
 
 ## Dependencies
 
-- BT-043 through BT-052 implemented.
+- BT-043 through BT-052 and BT-054 through BT-057 implemented.
 - Approved test JSON corpus and tiny non-sensitive image fixtures.
 
 ## Implementation Steps
 
-1. Extend workflow sandbox and mock Worker/provider with safe image fixtures.
+1. Extend workflow sandbox and mock Worker/provider with safe image fixtures
+   plus at least two Worker kinds for reservation-conflict proof.
 2. Implement scenario matrix with exact zero-side-effect and durable-state assertions.
 3. Add an AI Workspace workflow-readiness suite and run it repeatedly from clean roots.
 
@@ -51,6 +55,8 @@ Photo sampling, two-stage AI output, review, unique Promotion, and archival.
 - Same Album/different configurations remain comparable and independently auditable.
 - Reject has no permanent side effect; exactly one competing approved run promotes.
 - Archived history is read-only and legacy `workspace_album` never enters any scenario.
+- Dispatch does not change Album Status; successful name Promotion maps only
+  `TEMPORARY` to `NAME_GENERATED`, and release preserves all Group history.
 - All retained artifacts are disposable and redact Tokens and absolute production paths.
 
 ## Verification

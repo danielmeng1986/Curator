@@ -120,6 +120,19 @@ auditable rejection or cancellation reason.
 - API adapters expose only actions permitted by the current lifecycle state.
 - Clients submit edits and approvals through `/api/v1`; they never modify workspace tables directly.
 
+## Relationship to Album work dispatch
+
+An AI Workspace supplies the Dataset and review container for dispatched Album
+work; it does not decide whether an Album is globally available to another
+Worker. Availability is owned by the Album Work Reservation defined in the
+[Work Dispatch Workflow](Work-Dispatch-Workflow.md).
+
+One reserved Album has one active Dispatch Group. The Group may contain several
+AI Work Items using different model configurations inside the same Workspace.
+Closing or archiving a Workspace cannot silently release a Group with running,
+review, rework, or pending Promotion obligations. Album Status, Workspace
+lifecycle, Work Item run state, and review state remain distinct dimensions.
+
 ## Workflow
 
 ```text

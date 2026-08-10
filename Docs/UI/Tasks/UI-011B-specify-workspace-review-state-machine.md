@@ -24,6 +24,8 @@ concurrency, and a stable UI read model that can survive underlying table change
 - Submission/reviewer/decision timestamps, reviewer, decision, notes, version, Promotion target, and Operation identifiers.
 - Allowed actors, editable fields, transition guards, idempotency, stale-write handling, and immutable terminal evidence.
 - Dataset adapter boundary for variable AI result fields.
+- Relationship among Album Reservation/Group lifecycle, Work Item run state,
+  review state, Promotion, Group closure, and release.
 
 ## Out of Scope
 
@@ -46,6 +48,8 @@ concurrency, and a stable UI read model that can survive underlying table change
 - Invalid and stale transitions are rejected before mutation and are idempotent where specified.
 - Approval freezes the specified final selection; Promotion cannot create duplicate permanent entities.
 - Stable review fields do not depend on a particular dataset table layout.
+- Review or individual Work Item completion cannot prematurely release the
+  Album; every state identifies whether the Group still owns its reservation.
 
 ## Verification
 
@@ -55,4 +59,3 @@ concurrency, and a stable UI read model that can survive underlying table change
 ## Risks or Notes
 
 - Approval and Promotion may be separate steps; the Specification must decide rather than letting UI behavior imply the answer.
-

@@ -105,3 +105,10 @@ erDiagram
 - `album_relation` represents an Album-to-Album relationship. For `BELONGS_TO`, `album_id` is a separately released part and `related_album_id` is its logical/canonical Album.
 - A default/self relationship is implicit: do not store an `album_relation` row when both sides would be the same Album.
 - `workspace_album.belongs_to_album_id` points to `workspace_album.id`. It must be translated to permanent Album IDs through `workspace_album.album_id` during migration.
+- Album work assignment is represented by Dispatch Batch, Album Work
+  Reservation, Dispatch Group, and adapter-specific Work Item records; it is
+  not represented by `album.status_id`.
+- An Album has at most one active Work Reservation across all Worker kinds. One
+  Group may contain multiple model-configuration Work Items for comparison.
+- Releasing a reservation preserves Batch, Group, Work Item, result, review,
+  attempt, and Operation history.

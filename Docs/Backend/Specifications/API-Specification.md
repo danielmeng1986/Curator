@@ -162,6 +162,30 @@ replay return a structured `409` before production mutation. The first valid
 request atomically claims the Preview. After the claim, per-item execution,
 Operation outcome, and `NeedsRepair` behavior follow the Import Workflow.
 
+## Work dispatch contracts
+
+Admin-only Album dispatch APIs expose candidate, active, and historical views.
+The candidate query composes the normal Album filters with `worker_kind` and
+reservation/work summaries; its default projection excludes Albums with an
+active Album Work Reservation. Eligibility and permitted actions are Backend
+results, not client-derived rules.
+
+`POST /api/v1/work-dispatch/preview` accepts an explicit bounded Album selection
+or normalized first-`N` filter selection, one Worker kind, and its required
+Workspace/configuration inputs. It performs no write and returns per-Album
+eligibility, warnings, Group/Work Item counts, and a signed short-lived token.
+
+`POST /api/v1/work-dispatch/execute` accepts only the preview token. It is
+single-use and atomically creates the Batch, one exclusive reservation and
+Group per Album, dataset-specific Work Items, and Operation. Any stale input or
+reservation race returns structured `409` with no partial creation and no Album
+Status mutation.
+
+Admin Group cancellation/release endpoints require the current Group version
+and an explicit reason. Release is rejected while execution, review, rework, or
+Promotion remains active. Read models expose the links needed to move between
+candidate, active-work, history, Workspace review, and Operation detail views.
+
 ## Future extensions
 
 - Route/resource catalogs can be added without changing the shared contract.

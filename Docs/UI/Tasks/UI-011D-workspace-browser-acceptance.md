@@ -21,7 +21,9 @@ outcomes through the UI without touching historical Workspace data.
 ## Scope
 
 - AI result appears in queue; provenance and field ownership are rendered correctly.
-- Human draft/revision, valid and invalid transitions, reject/rework, approval, Promotion, duplicate protection, and archive/read-only behavior.
+- Entry from an existing Dispatch Group; human draft/revision, valid and invalid
+  transitions, reject/rework, approval, Promotion, Group release, duplicate
+  protection, and archive/read-only behavior.
 - Stale concurrent edit and dataset-adapter compatibility scenarios.
 - Durable Operation, Issue, Workspace, and permanent-entity assertions.
 
@@ -32,7 +34,7 @@ outcomes through the UI without touching historical Workspace data.
 
 ## Dependencies
 
-- UI-003 and completed UI-011A/B/C plus Backend workflow evidence.
+- UI-003 and completed UI-011A/B/C/F plus Backend workflow evidence.
 
 ## Implementation Steps
 
@@ -44,6 +46,8 @@ outcomes through the UI without touching historical Workspace data.
 
 - UI cannot transition a record outside the approved state machine or overwrite a newer version.
 - Reject has no permanent-entity side effect; Promotion is idempotent and exactly traceable.
+- Dispatch leaves Album Status unchanged; successful name Promotion applies the
+  specified Status policy, and terminal Group release preserves history.
 - Archived records are read-only and remain auditable.
 - Variable dataset fields do not change the stable review-state semantics.
 
@@ -54,4 +58,3 @@ outcomes through the UI without touching historical Workspace data.
 ## Risks or Notes
 
 - This task remains Blocked until a real first dataset and its disposable fixture are specified.
-
