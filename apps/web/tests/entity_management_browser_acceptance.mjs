@@ -25,6 +25,8 @@ try {
   assert.match(page.url(), /q=Fixture/);
   await page.getByText('Fixture Album', { exact: true }).click();
   await page.getByRole('heading', { name: 'Fixture Album' }).waitFor();
+  await page.waitForTimeout(500);
+  await page.getByRole('heading', { name: 'Fixture Album' }).waitFor();
   assert.equal(await page.getByRole('heading', { name: /Photos/ }).count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Delete Album' }).count(), 0);
   await page.getByText(/Digital Asset Trash/).waitFor();

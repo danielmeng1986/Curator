@@ -3,9 +3,12 @@ const AlbumsPage = {
   _editRelations: [],
   _listState: { q: '', studio_id: '', status_id: '', model_id: '', rating_min: '', rating_max: '', capture_date_from: '', capture_date_to: '', publish_date_from: '', publish_date_to: '', sort: 'updated_at', limit: 50, offset: 0 },
   _selectedIds: new Set(),
+  _searchDebounce: null,
+  _listRequestId: 0,
 
   async renderList(params) {
     const el = document.getElementById('page-content');
+    const renderRequestId = ++this._listRequestId;
     el.innerHTML = '<div class="loading">Loading…</div>';
 
     // Read hash params
@@ -34,13 +37,18 @@ const AlbumsPage = {
       this._statuses = statuses;
       this._studios = studios;
       this._allModels = modelsData.models || [];
-      await this._loadList(el, statuses, studios, this._allModels);
+      if (renderRequestId !== this._listRequestId || !this._isListRoute()) return;
+      await this._loadList(el, statuses, studios, this._allModels, renderRequestId);
     } catch (e) {
-      ui.renderPageError(el, e, 'Albums');
+      if (renderRequestId === this._listRequestId && this._isListRoute()) {
+        ui.renderPageError(el, e, 'Albums');
+      }
     }
   },
 
-  async _loadList(el, statuses, studios, models = []) {
+  _isListRoute() { return /^#\/albums(?:\?.*)?$/.test(window.location.hash); },
+
+  async _loadList(el, statuses, studios, models = [], requestId = ++this._listRequestId) {
     const s = this._listState;
     const qs = new URLSearchParams({
       q: s.q, studio_id: s.studio_id, status_id: s.status_id,
@@ -51,6 +59,7 @@ const AlbumsPage = {
     });
     if (s.model_id) qs.set('model_id', s.model_id);
     const data = await api.get('/albums?' + qs);
+    if (requestId !== this._listRequestId || !this._isListRoute() || !el.isConnected) return;
     const albums = data.albums || [];
     const total = data.total || 0;
 
@@ -113,10 +122,15 @@ const AlbumsPage = {
     `;
 
     // Debounced search
-    let debounce;
     document.getElementById('albumQ').addEventListener('input', e => {
-      clearTimeout(debounce);
-      debounce = setTimeout(() => { this._listState.q = e.target.value; this._listState.offset = 0; this._loadList(el, this._statuses, this._studios); }, 350);
+      clearTimeout(this._searchDebounce);
+      const input = e.currentTarget;
+      this._searchDebounce = setTimeout(() => {
+        if (!input.isConnected || !this._isListRoute()) return;
+        this._listState.q = input.value;
+        this._listState.offset = 0;
+        this._loadList(el, this._statuses, this._studios, this._allModels || []);
+      }, 350);
     });
     document.getElementById('albumStudio').addEventListener('change', e => { this._listState.studio_id = e.target.value; this._listState.offset = 0; });
     document.getElementById('albumStatus').addEventListener('change', e => { this._listState.status_id = e.target.value; this._listState.offset = 0; });
@@ -131,6 +145,8 @@ const AlbumsPage = {
   },
 
   _applyFilter() {
+    clearTimeout(this._searchDebounce);
+    this._searchDebounce = null;
     Object.assign(this._listState, {
       q: document.getElementById('albumQ').value.trim(),
       studio_id: document.getElementById('albumStudio').value,
@@ -204,6 +220,9 @@ const AlbumsPage = {
   },
 
   async renderDetail({ id }) {
+    clearTimeout(this._searchDebounce);
+    this._searchDebounce = null;
+    this._listRequestId += 1;
     const el = document.getElementById('page-content');
     el.innerHTML = '<div class="loading">Loading…</div>';
     const isNew = !id;
