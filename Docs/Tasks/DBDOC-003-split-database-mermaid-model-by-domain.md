@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DBDOC-003` — Status: `Proposed`
+`DBDOC-003` — Status: `Complete`
 
 ## Goal
 
@@ -59,3 +59,10 @@ bounded domain diagrams that accurately represent the current schema.
 - Mermaid ER syntax cannot express partial unique indexes or all polymorphic
   links; those rules must be stated accurately rather than implied by a false edge.
 
+## Completion Record
+
+- Replaced the obsolete single v0.2 diagram with a current diagram index.
+- Added a domain overview plus Asset, Authentication, Operations/Recovery,
+  Dispatch, and split AI Workspace ER models.
+- Documented logical/polymorphic edges, Service rules, partial unique indexes,
+  claims, active reservations, retained history, and historical exclusion.

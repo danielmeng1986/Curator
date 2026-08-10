@@ -53,24 +53,24 @@ a retired import/review model; the latter is the active AI Work Item table.
 | Table | Role and lifecycle | Identity / important fields | Relationships and constraints | Source / contract |
 | --- | --- | --- | --- | --- |
 | `device_registration` | Current registration request/device identity | UUID PK; device name/identity, requested/approved role/scopes, status | identity/role transition constraints are Service-owned | `AuthRepository`; Authentication Specification |
-| `auth_token` | Current credential metadata; secret stored only as hash | UUID PK; registration UUID, token hash, scopes, expiry/revocation | registration logical/FK relation; active Admin safety is Service rule | `AuthRepository`; BT-040 |
-| `token_renewal_request` | Current approval workflow/history | UUID PK; source token/registration, request status and timestamps | unique/open renewal behavior enforced by Service/Repository | `AuthRepository`; Authentication Specification |
+| `auth_token` | Current credential metadata; secret stored only as hash | UUID PK; registration UUID, token hash, scopes, expiry/revocation | FK → registration; active Admin safety is Service rule | `AuthRepository`; BT-040 |
+| `token_renewal_request` | Current approval workflow/history | UUID PK; previous Token/registration, requested role/scopes, status and timestamps | FK → registration and previous Token; open-renewal behavior enforced by Service | `AuthRepository`; Authentication Specification |
 | `admin_bootstrap_code` | One-time bootstrap credential state | UUID PK; code hash, expiry, use/lock state, failed attempts | only one current usable code by service policy; never stores plaintext | `AuthRepository`; UI-004A/B |
 
 ## Import, Operations, Repair, and Recovery
 
 | Table | Role and lifecycle | Identity / important fields | Relationships and constraints | Source / contract |
 | --- | --- | --- | --- | --- |
-| `import_preview_claim` | Claim | preview UUID PK; Import UUID, claimant and claim time | one successful execution per reviewed preview | `ImportRepository`; BT-036 |
+| `import_preview_claim` | Claim | preview UUID PK; claim time | one successful execution per reviewed preview | `ImportRepository`; BT-036 |
 | `operation` | Audit | integer `id`, unique operation `uuid`; type, initiator, status, timestamps, entity/workflow links, error and recovery context | logical links across Imports, Repairs, Issues, Snapshots and AI workflows; role-sensitive disclosure | `OperationRepository`; Operation Logging Specification |
 | `issue` | Current review state plus retained resolution | integer `id`, unique `uuid`; category, state, source workflow, priority/owner | affected Operation logical link; links via `issue_link` | `IssueRepository`; BT-038 |
-| `issue_link` | Current/history relationship | integer `id`; Issue UUID, target kind/UUID | unique link tuple; polymorphic target checked by workflow | `IssueRepository`; Issue Management Specification |
+| `issue_link` | Current/history relationship | Issue UUID, relationship, target UUID, created time | unique tuple; polymorphic target checked by workflow; logical Issue UUID link | `IssueRepository`; Issue Management Specification |
 | `repair_case` | Current Repair state and durable outcome | integer `id`, unique `uuid`; Operation/Album UUID, expected path, state/category, verification | logical Operation and Album links; state machine in Service | `RepairRepository`; Repair Workflow |
-| `repair_suppression` | Current bounded Admin policy | suppression identity and matching scope; expiry/reason | exact scope and authorization enforced by Service | `RepairSuppressionRepository`; BT-028 |
-| `snapshot_cleanup_preview_claim` | Claim | preview UUID PK and cleanup execution identity | single-use reviewed cleanup | `SnapshotCleanupRepository`; BT-041 |
-| `restore_preview_claim` | Claim | preview UUID PK and Restore execution identity | single-use reviewed protected Restore | `RestorePreviewRepository`; BT-042 |
-| `quarantine_item` | Current recoverable filesystem item plus retained outcome | UUID identity; source/quarantine path, metadata, state and timestamps | Operation/Snapshot logical evidence; restore never overwrites | `QuarantineRepository`; BT-039 |
-| `quarantine_preview_claim` | Claim | preview UUID PK and Quarantine/Restore execution binding | prevents replay of reviewed action | `QuarantineRepository`; BT-039 |
+| `repair_suppression` | Current bounded Admin policy | integer ID, unique UUID; fingerprint, scope path, expiry/revocation and reason | exact scope and authorization enforced by Service | `RepairSuppressionRepository`; BT-028 |
+| `snapshot_cleanup_preview_claim` | Claim | preview UUID PK and claim time | single-use reviewed cleanup | `SnapshotCleanupRepository`; BT-041 |
+| `restore_preview_claim` | Claim | preview UUID PK and claim time | single-use reviewed protected Restore | `RestorePreviewRepository`; BT-042 |
+| `quarantine_item` | Current recoverable filesystem item plus retained outcome | integer ID, unique UUID; original/quarantine path, inventory, expiry/hold and restore fields | Repair/Operation UUID evidence; restore never overwrites | `QuarantineRepository`; BT-039 |
+| `quarantine_preview_claim` | Claim | preview UUID PK and claim time | prevents replay of reviewed action | `QuarantineRepository`; BT-039 |
 
 Snapshot database files are filesystem recovery artifacts, not rows in a
 Snapshot table. Their listing and validation are Backend-controlled.
@@ -140,4 +140,3 @@ Any persistent schema change must update this catalog, its authoritative source,
 the affected domain diagram and persistence workflow, and the schema drift
 inventory introduced by DBDOC-006. A task may not declare completion merely
 because Repository code can create a missing table lazily.
-
