@@ -1381,7 +1381,8 @@ class TestAIWorkItemClaimContract(unittest.TestCase):
         self.assertEqual("LeaseExpired", self.service.get(item["uuid"], True)["attempts"][0]["outcome"])
 
     def test_closed_workspace_and_disabled_config_cannot_queue(self):
-        closed = svc.AIWorkspaceService(self.workspace_repo).close(self.workspace["uuid"], 1)
+        self.conn.execute("UPDATE ai_workspace SET lifecycle_state='Closed',version=2 WHERE uuid=?",(self.workspace["uuid"],)); self.conn.commit()
+        closed = self.workspace_repo.get(self.workspace["uuid"])
         with self.assertRaises(svc.ServiceConflict): self.service.create(closed["uuid"], self.album_id, self.config["uuid"])
 
     def test_disabled_configuration_cannot_queue_in_open_workspace(self):
@@ -1986,6 +1987,53 @@ class TestWorkDispatchReleaseSafety(unittest.TestCase):
         self.assertEqual("Cancelled",self.conn.execute("SELECT run_state FROM workspace_album_ai_worker WHERE uuid=?",(self.item["uuid"],)).fetchone()[0])
 
 
+class TestAIWorkspaceRetentionContract(unittest.TestCase):
+    _images=TestAIPhotoEvidenceManifestContract._images
+    def setUp(self): TestWorkDispatchReleaseSafety.setUp(self)
+    def tearDown(self): TestWorkDispatchReleaseSafety.tearDown(self)
+
+    def _complete_and_release(self):
+        preview=self.promotions.preview(self.item["uuid"],"admin-one")
+        self.promotions.execute(preview["preview_token"],preview["confirmation"],"admin-one")
+        self.dispatch.close_group("group-close",1,"release","Promotion completed","admin-one")
+
+    def test_active_group_blocks_close_without_implicit_release(self):
+        workspace=svc.AIWorkspaceService(repo.AIWorkspaceRepository(_db_factory(self.conn)),now_fn=lambda:datetime(2026,8,10,5,tzinfo=timezone.utc))
+        with self.assertRaises(svc.ServiceConflict) as ctx:
+            workspace.close(self.item["workspace_uuid"],1,"Attempt close","admin-one")
+        self.assertEqual("AI_WORKSPACE_NOT_CLOSABLE",ctx.exception.code)
+        self.assertIsNotNone(self.dispatch_repo.active_reservation(self.item["album_id"]))
+
+    def test_close_archive_preserve_artifacts_and_make_workspace_read_only(self):
+        self._complete_and_release()
+        workspace=svc.AIWorkspaceService(repo.AIWorkspaceRepository(_db_factory(self.conn)),now_fn=lambda:datetime(2026,8,10,5,tzinfo=timezone.utc))
+        closed=workspace.close(self.item["workspace_uuid"],1,"All groups released","admin-one")
+        self.assertEqual("Completed",closed["retention"]["outcome_classification"])
+        self.assertEqual("IndefiniteAudit",closed["retention"]["retention_classification"])
+        archived=workspace.archive(self.item["workspace_uuid"],2,"Retain audit indefinitely","admin-one")
+        self.assertEqual("Archived",archived["lifecycle_state"])
+        self.assertEqual("Completed",workspace.list("Archived")[0]["retention"]["outcome_classification"])
+        with self.assertRaises(svc.ServiceConflict) as ctx:
+            self.review.decide(self.item["uuid"],3,"reject","admin-one",{"reason":"late change"})
+        self.assertEqual("AI_WORKSPACE_READ_ONLY",ctx.exception.code)
+        item_service=svc.AIWorkItemService(self.item_repo,repo.AIWorkspaceRepository(_db_factory(self.conn)),
+            repo.AlbumRepository(_db_factory(self.conn)),svc.AIModelConfigurationService(repo.AIModelConfigurationRepository(_db_factory(self.conn))))
+        with self.assertRaises(svc.ServiceConflict) as ctx: item_service.cancel(self.item["uuid"],self.item_repo.get(self.item["uuid"])["version"])
+        self.assertEqual("AI_WORKSPACE_READ_ONLY",ctx.exception.code)
+        self.assertEqual(2,self.conn.execute("SELECT COUNT(*) FROM ai_work_item_result_stage WHERE work_item_uuid=?",(self.item["uuid"],)).fetchone()[0])
+
+    def test_missing_historical_image_degrades_read_without_erasing_manifest(self):
+        self._complete_and_release()
+        workspace=svc.AIWorkspaceService(repo.AIWorkspaceRepository(_db_factory(self.conn)))
+        workspace.close(self.item["workspace_uuid"],1,"Complete","admin-one"); workspace.archive(self.item["workspace_uuid"],2,"Audit","admin-one")
+        manifest=self.service.historical(self.item["uuid"]); selected=manifest["evidence"][0]["filename"]
+        (self.album_dir/selected).unlink()
+        history=self.service.historical(self.item["uuid"])
+        self.assertEqual(1,history["availability_counts"]["Missing"]); self.assertEqual("Degraded",history["availability"])
+        self.assertEqual(8,len(history["evidence"])); self.assertEqual(8,self.conn.execute(
+            "SELECT COUNT(*) FROM workspace_album_ai_worker_photo WHERE work_item_uuid=?",(self.item["uuid"],)).fetchone()[0])
+
+
 class TestAIModelConfigurationContract(unittest.TestCase):
     def setUp(self):
         self.conn = _make_db(); self.repo = repo.AIModelConfigurationRepository(_db_factory(self.conn))
@@ -2027,16 +2075,16 @@ class TestAIWorkspaceContainerContract(unittest.TestCase):
     def test_open_close_archive_are_versioned_and_terminal(self):
         item = self.service.create("Album comparison")
         self.assertEqual("album_analysis", item["dataset_type"]); self.assertEqual("Open", item["lifecycle_state"])
-        closed = self.service.close(item["uuid"], item["version"])
+        closed = self.service.close(item["uuid"], item["version"],"No dispatched work","admin-one")
         self.assertEqual("Closed", closed["lifecycle_state"]); self.assertEqual(2, closed["version"])
-        archived = self.service.archive(item["uuid"], closed["version"])
+        archived = self.service.archive(item["uuid"], closed["version"],"Retain completed audit","admin-one")
         self.assertEqual("Archived", archived["lifecycle_state"]); self.assertEqual(3, archived["version"])
-        with self.assertRaises(svc.ServiceConflict): self.service.close(item["uuid"], archived["version"])
+        with self.assertRaises(svc.ServiceConflict): self.service.close(item["uuid"], archived["version"],"Again","admin-one")
 
     def test_stale_transition_and_unknown_dataset_filter_are_rejected(self):
         item = self.service.create("Versioned")
         with self.assertRaisesRegex(svc.ServiceConflict, "changed"):
-            self.service.close(item["uuid"], item["version"] + 1)
+            self.service.close(item["uuid"], item["version"] + 1,"Stale close","admin-one")
         with self.assertRaises(ValueError): self.service.list("active")
 
     def test_title_is_bounded(self):

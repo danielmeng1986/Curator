@@ -738,6 +738,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_ai_workspaces(qs)
             elif re.match(r"^/api/ai-workspaces/[^/]+$", path):
                 self._get_ai_workspace(path.split("/")[-1])
+            elif re.match(r"^/api/ai-workspaces/[^/]+/closure-preflight$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"preflight":self._ai_workspace_service().preflight(path.split("/")[3])})
             elif re.match(r"^/api/ai-workspaces/[^/]+/items$", path):
                 if not self._require_admin_principal(): return
                 workspace_uuid = path.split("/")[3]
@@ -748,6 +751,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif re.match(r"^/api/ai-work-items/[^/]+/evidence-manifest$", path):
                 if not self._require_admin_principal(): return
                 self._send_success(200, {"manifest":self._ai_photo_evidence_service().revalidate(path.split("/")[3])})
+            elif re.match(r"^/api/ai-work-items/[^/]+/evidence-history$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"evidence_history":self._ai_photo_evidence_service().historical(path.split("/")[3])})
             elif re.match(r"^/api/ai-work-items/[^/]+/results$", path):
                 if not self._require_admin_principal(): return
                 self._send_success(200, {"results":self._ai_result_service().get(path.split("/")[3])})
@@ -1317,7 +1323,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 expected = body.get("expected_version")
                 if not isinstance(expected, int): raise ValueError("expected_version is required and must be an integer.")
                 service = self._ai_workspace_service()
-                updated = service.close(workspace_uuid, expected) if action == "close" else service.archive(workspace_uuid, expected)
+                updated = service.close(workspace_uuid,expected,body.get("reason"),self._principal["token_uuid"]) \
+                    if action == "close" else service.archive(workspace_uuid,expected,body.get("reason"),self._principal["token_uuid"])
                 self._send_success(200, {"workspace": updated})
             elif path == "/api/backup":
                 self._post_backup(body)

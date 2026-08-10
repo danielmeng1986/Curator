@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-052` — Status: `Proposed`
+`BT-052` — Status: `Complete`
 
 ## Title
 
@@ -61,3 +61,14 @@ evaluation, configuration, Photo Manifest, failure, or Promotion traceability.
 
 - Retaining hashes/metadata is not the same as retaining image bytes; UI must
   truthfully distinguish available previews from historical unavailable evidence.
+
+## Completion Record
+
+- Added strict closure preflight: every Group must already have an explicit
+  BT-057 release outcome; close never cancels or abandons work implicitly.
+- Added `IndefiniteAudit` retention with Completed/Rejected/Cancelled/Abandoned/
+  Mixed classification, Admin reasons, timestamps, and atomic Operations.
+- Closed and Archived Workspaces reject all active AI workflow mutations while
+  retaining complete Item, attempt, result, review, Manifest, and Promotion data.
+- Added historical evidence availability states that preserve Manifest metadata
+  and conclusions when source images are missing, changed, or unavailable.

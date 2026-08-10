@@ -196,6 +196,19 @@ Success atomically removes the reservation, retains every Batch/Group/Item and
 AI artifact, records closure and Operation evidence, and never changes Album
 Status. `GET /api/v1/work-dispatch/history?album_id=` exposes retained history.
 
+`GET /api/v1/ai-workspaces/{uuid}/closure-preflight` reports every unreleased
+Group or ungrouped Item and the calculated `Completed`, `Rejected`, `Cancelled`,
+`Abandoned`, or `Mixed` outcome. Close requires an exact version and reason and
+never cancels work or releases reservations itself. Archive requires a second
+reason and retains `IndefiniteAudit` evidence. Closed/Archived Workspaces reject
+new Items, evidence creation, result submission, review decisions, retries,
+cancellation, and Promotion.
+
+`GET /api/v1/ai-work-items/{uuid}/evidence-history` is Admin-only and never
+erases or hides Manifest evidence when source files move or change. Each entry
+reports `Available`, `Missing`, `Changed`, or `Unavailable`; degraded content
+does not make the historical AI result or review unreadable.
+
 Admin-only Work Item evidence-manifest create/read endpoints select and expose
 immutable relative metadata by Work Item identity. Clients cannot nominate a
 path. Responses contain opaque evidence UUIDs and relative evidence metadata,

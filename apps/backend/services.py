@@ -1881,6 +1881,9 @@ class AIWorkItemService:
 
     def _admin_transition(self, item_uuid, expected_version, from_states, to_state, op_type):
         current = self.get(item_uuid)
+        workspace=self._workspaces.get(current["workspace_uuid"])
+        if not workspace or workspace["lifecycle_state"]!="Open":
+            raise ServiceConflict("AI_WORKSPACE_READ_ONLY","Closed or Archived Workspaces reject Work Item mutations.")
         if current["version"] != expected_version or current["run_state"] not in from_states:
             raise ServiceConflict("AI_WORK_ITEM_STALE", "The Work Item state or version changed.", {"current":current})
         updated = self._repo.admin_transition(item_uuid, expected_version, from_states, to_state, self._now().isoformat())
@@ -2276,6 +2279,8 @@ class AIPhotoEvidenceManifestService:
         if existing: return self.revalidate(item_uuid)
         item = self._items.get(item_uuid)
         if not item: raise ServiceNotFound("AI Work Item not found.")
+        if self._items.workspace_state(item_uuid)!="Open":
+            raise ServiceConflict("AI_WORKSPACE_READ_ONLY","Closed or Archived Workspaces reject evidence creation.")
         if item["run_state"] not in {"Pending","Failed"}:
             raise ServiceConflict("EVIDENCE_MANIFEST_STATE_INVALID", "Evidence must be selected before Worker processing.")
         sample_count = int(item["configuration_snapshot"]["sample_count"])
@@ -2353,6 +2358,32 @@ class AIPhotoEvidenceManifestService:
         extension = {"image/jpeg":".jpg","image/png":".png","image/webp":".webp"}[evidence["mime_type"]]
         return {"path":path,"size_bytes":evidence["size_bytes"],"mime_type":evidence["mime_type"],
             "sha256":evidence["sha256"],"filename":f"evidence-{evidence_uuid}{extension}"}
+
+    def historical(self,item_uuid):
+        manifest=self._repo.get_by_item(item_uuid)
+        if not manifest: raise ServiceNotFound("Evidence Manifest not found.")
+        item=self._items.get(item_uuid); album=self._albums.get_by_id(item["album_id"]) if item else None
+        root=None; root_state="Available"
+        try: root=self._album_root(album) if album else None
+        except ServiceConflict: root_state="Unavailable"
+        counts={"Available":0,"Missing":0,"Changed":0,"Unavailable":0}; evidence=[]
+        for stored in manifest["evidence"]:
+            state=root_state
+            if root:
+                path=(root/stored["relative_path"]).resolve()
+                try:
+                    path.relative_to(root)
+                    if not path.is_file(): state="Missing"
+                    else:
+                        stat=path.stat()
+                        digest=hashlib.sha256(path.read_bytes()).hexdigest()
+                        state="Available" if stat.st_size==stored["size_bytes"] and digest==stored["sha256"] else "Changed"
+                except (OSError,ValueError): state="Unavailable"
+            counts[state]+=1
+            evidence.append({key:stored[key] for key in ("uuid","ordinal","filename","size_bytes","sha256","mime_type")} | {"availability":state})
+        overall="Available" if counts["Available"]==len(evidence) else "Unavailable" if counts["Unavailable"]==len(evidence) else "Degraded"
+        return {"manifest_uuid":manifest["uuid"],"work_item_uuid":item_uuid,"manifest_version":manifest["manifest_version"],
+            "selected_at":manifest["selected_at"],"availability":overall,"availability_counts":counts,"evidence":evidence}
 
 
 class AIResultSubmissionService:
@@ -2574,8 +2605,9 @@ class AIAlbumNamePromotionService:
 class AIWorkspaceService:
     """Own the Dataset-independent AI Workspace container lifecycle."""
 
-    def __init__(self, workspace_repo, operation_service=None):
+    def __init__(self, workspace_repo, operation_service=None, now_fn=None):
         self._repo, self._operations = workspace_repo, operation_service
+        self._now=now_fn or (lambda:datetime.now(timezone.utc))
 
     def create(self, title: str, created_by_token_uuid: str | None = None) -> dict:
         title = str(title or "").strip()
@@ -2594,7 +2626,7 @@ class AIWorkspaceService:
         return self._repo.list(lifecycle_state)
 
     def get(self, workspace_uuid):
-        item = self._repo.get(workspace_uuid)
+        item = self._repo.get_with_retention(workspace_uuid)
         if not item: raise ServiceNotFound("AI Workspace not found.")
         return item
 
@@ -2614,11 +2646,36 @@ class AIWorkspaceService:
         if operation: self._operations.succeed(operation["uuid"], summary=f"AI Workspace transitioned to {to_state}")
         return updated
 
-    def close(self, workspace_uuid, expected_version):
-        return self._transition(workspace_uuid, expected_version, "Open", "Closed", "ai_workspace_close")
+    def preflight(self,workspace_uuid):
+        result=self._repo.lifecycle_preflight(workspace_uuid)
+        if not result: raise ServiceNotFound("AI Workspace not found.")
+        result["can_close"]=result["workspace"]["lifecycle_state"]=="Open" and not result["blockers"]
+        return result
 
-    def archive(self, workspace_uuid, expected_version):
-        return self._transition(workspace_uuid, expected_version, "Closed", "Archived", "ai_workspace_archive")
+    def close(self, workspace_uuid, expected_version, reason=None, actor=None):
+        reason=str(reason or "").strip()
+        if not reason or len(reason)>1000: raise ValueError("A close reason of at most 1000 characters is required.")
+        preflight=self.preflight(workspace_uuid)
+        if preflight["blockers"]:
+            raise ServiceConflict("AI_WORKSPACE_NOT_CLOSABLE","Release every owning Group before closing Workspace.",
+                {"blockers":preflight["blockers"][:20]})
+        return self._lifecycle(workspace_uuid,expected_version,"Closed",actor,reason,preflight["outcome_classification"])
+
+    def archive(self, workspace_uuid, expected_version, reason=None, actor=None):
+        reason=str(reason or "").strip()
+        if not reason or len(reason)>1000: raise ValueError("An archive reason of at most 1000 characters is required.")
+        current=self.get(workspace_uuid); classification=(current.get("retention") or {}).get("outcome_classification")
+        if not classification: raise ServiceConflict("AI_WORKSPACE_RETENTION_MISSING","Closed Workspace retention evidence is missing.")
+        return self._lifecycle(workspace_uuid,expected_version,"Archived",actor,reason,classification)
+
+    def _lifecycle(self,workspace_uuid,expected_version,target,actor,reason,classification):
+        if not isinstance(expected_version,int): raise ValueError("expected_version is required and must be an integer.")
+        try: return self._repo.lifecycle_transition(workspace_uuid,expected_version,target,actor or "unknown",reason,
+            classification,self._now().isoformat())
+        except repo.PersistenceNotFound as exc: raise ServiceNotFound("AI Workspace not found.") from exc
+        except repo.PersistenceConflict as exc:
+            code=exc.details.get("code","AI_WORKSPACE_STALE")
+            raise ServiceConflict(code,"AI Workspace changed or conflicts with current lifecycle state.",exc.details) from exc
 
 
 class BackupService:

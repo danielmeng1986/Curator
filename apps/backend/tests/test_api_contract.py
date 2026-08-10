@@ -792,12 +792,15 @@ class TestVersionedApiAuthorization(_TestServerBase):
         status, created = self._post("/api/v1/ai-workspaces", {"title": "API Album Analysis"}, admin)
         self.assertEqual(201, status); workspace = created["data"]["workspace"]
         self.assertEqual("Open", workspace["lifecycle_state"]); self.assertEqual("album_analysis", workspace["dataset_type"])
-        status, closed = self._post(f"/api/v1/ai-workspaces/{workspace['uuid']}/close", {"expected_version": 1}, admin)
+        status, preflight = self._get(f"/api/v1/ai-workspaces/{workspace['uuid']}/closure-preflight",admin)
+        self.assertEqual(200,status); self.assertTrue(preflight["data"]["preflight"]["can_close"])
+        status, closed = self._post(f"/api/v1/ai-workspaces/{workspace['uuid']}/close", {"expected_version": 1,"reason":"No dispatched work"}, admin)
         self.assertEqual(200, status); self.assertEqual("Closed", closed["data"]["workspace"]["lifecycle_state"])
-        status, stale = self._post(f"/api/v1/ai-workspaces/{workspace['uuid']}/archive", {"expected_version": 1}, admin)
+        status, stale = self._post(f"/api/v1/ai-workspaces/{workspace['uuid']}/archive", {"expected_version": 1,"reason":"Stale archive"}, admin)
         self.assertEqual(409, status); self.assertEqual("AI_WORKSPACE_STALE", stale["error"]["code"])
-        status, archived = self._post(f"/api/v1/ai-workspaces/{workspace['uuid']}/archive", {"expected_version": 2}, admin)
+        status, archived = self._post(f"/api/v1/ai-workspaces/{workspace['uuid']}/archive", {"expected_version": 2,"reason":"Retain audit history"}, admin)
         self.assertEqual(200, status); self.assertEqual("Archived", archived["data"]["workspace"]["lifecycle_state"])
+        self.assertEqual("IndefiniteAudit",archived["data"]["workspace"]["retention"]["retention_classification"])
         self.assertEqual(0, self._db.execute("SELECT COUNT(*) FROM workspace_album WHERE uuid=?", (workspace["uuid"],)).fetchone()[0])
 
     def test_ai_model_configuration_admin_mutation_writer_discovery_and_disable(self):
@@ -970,6 +973,9 @@ class TestVersionedApiAuthorization(_TestServerBase):
                 self.assertEqual(200,status); self.assertEqual("Closed",released["data"]["closure"]["disposition"])
                 status, history = self._get(f"/api/v1/work-dispatch/history?album_id={album_id}",admin)
                 self.assertEqual(200,status); self.assertEqual("Released",history["data"]["items"][0]["group_state"])
+                (album_dir / manifest["evidence"][0]["relative_path"]).unlink()
+                status, evidence_history = self._get(f"/api/v1/ai-work-items/{item_uuid}/evidence-history",admin)
+                self.assertEqual(200,status); self.assertEqual(1,evidence_history["data"]["evidence_history"]["availability_counts"]["Missing"])
                 status, candidates = self._get("/api/v1/work-dispatch/candidates?worker_kind=album_name_analysis&availability=available",admin)
                 self.assertEqual(200,status); self.assertTrue(any(row["id"]==album_id for row in candidates["data"]))
                 _, redispatch_preview = self._post("/api/v1/work-dispatch/preview",{"worker_kind":"album_name_analysis",

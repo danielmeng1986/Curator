@@ -2032,7 +2032,12 @@ class AIWorkspaceRepository:
             if lifecycle_state:
                 rows = conn.execute("SELECT * FROM ai_workspace WHERE lifecycle_state=? ORDER BY created_at DESC,id DESC", (lifecycle_state,)).fetchall()
             else: rows = conn.execute("SELECT * FROM ai_workspace ORDER BY created_at DESC,id DESC").fetchall()
-        return [self._norm(row) for row in rows]
+            has_retention=conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ai_workspace_retention'").fetchone()
+            retained={row["workspace_uuid"]:dict(row) for row in conn.execute("SELECT * FROM ai_workspace_retention").fetchall()} if has_retention else {}
+        result=[]
+        for row in rows:
+            item=self._norm(row); item["retention"]=retained.get(item["uuid"]); result.append(item)
+        return result
 
     def transition(self, workspace_uuid: str, expected_version: int, from_state: str,
                    to_state: str, operation_uuid: str, at: str) -> dict | None:
@@ -2045,6 +2050,89 @@ class AIWorkspaceRepository:
                 (to_state, at, operation_uuid, workspace_uuid, expected_version, from_state))
             conn.commit(); row = conn.execute("SELECT * FROM ai_workspace WHERE uuid=?", (workspace_uuid,)).fetchone()
         return self._norm(row) if cur.rowcount == 1 else (self._norm(row) if row else None)
+
+    def lifecycle_preflight(self,workspace_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn); WorkDispatchRepository._ensure_schema(conn)
+            workspace=conn.execute("SELECT * FROM ai_workspace WHERE uuid=?",(workspace_uuid,)).fetchone()
+            if not workspace: return None
+            groups=[dict(row) for row in conn.execute("""SELECT g.*,c.disposition FROM work_dispatch_group g
+                JOIN work_dispatch_batch b ON b.uuid=g.batch_uuid
+                LEFT JOIN work_dispatch_group_closure c ON c.group_uuid=g.uuid
+                WHERE b.workspace_uuid=? ORDER BY g.id""",(workspace_uuid,)).fetchall()] \
+                if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_dispatch_group_closure'").fetchone() else \
+                [dict(row) for row in conn.execute("""SELECT g.* FROM work_dispatch_group g JOIN work_dispatch_batch b
+                    ON b.uuid=g.batch_uuid WHERE b.workspace_uuid=? ORDER BY g.id""",(workspace_uuid,)).fetchall()]
+            ungrouped=conn.execute("""SELECT i.uuid,i.run_state FROM workspace_album_ai_worker i
+                WHERE i.workspace_uuid=? AND NOT EXISTS(SELECT 1 FROM work_dispatch_group_item gi WHERE gi.item_uuid=i.uuid)""",
+                (workspace_uuid,)).fetchall() if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_album_ai_worker'").fetchone() else []
+            review_counts={row[0]:row[1] for row in conn.execute("""SELECT r.state,COUNT(*) FROM ai_work_item_review r
+                JOIN workspace_album_ai_worker i ON i.uuid=r.work_item_uuid WHERE i.workspace_uuid=? GROUP BY r.state""",
+                (workspace_uuid,)).fetchall()} if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ai_work_item_review'").fetchone() else {}
+            promotions=conn.execute("""SELECT COUNT(*) FROM workspace_album_name_promotion p
+                JOIN workspace_album_ai_worker i ON i.uuid=p.work_item_uuid
+                WHERE i.workspace_uuid=? AND p.outcome='Promoted'""",(workspace_uuid,)).fetchone()[0] \
+                if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_album_name_promotion'").fetchone() else 0
+        blockers=[]
+        blockers += [{"group_uuid":group["uuid"],"reason":"group_not_released"} for group in groups if group["group_state"]!="Released"]
+        blockers += [{"work_item_uuid":row["uuid"],"reason":"work_item_not_group_closed"} for row in ungrouped]
+        dispositions=[group.get("disposition") for group in groups]
+        if any(value=="Abandoned" for value in dispositions): classification="Abandoned"
+        elif dispositions and all(value=="Cancelled" for value in dispositions): classification="Cancelled"
+        elif review_counts and set(review_counts)=={"Rejected"} and not promotions: classification="Rejected"
+        elif not dispositions or all(value=="Closed" for value in dispositions): classification="Completed"
+        else: classification="Mixed"
+        return {"workspace":self._norm(workspace),"groups":groups,"ungrouped_items":[dict(row) for row in ungrouped],
+            "review_counts":review_counts,"promotion_count":promotions,"blockers":blockers,
+            "outcome_classification":classification,"retention_classification":"IndefiniteAudit"}
+
+    def lifecycle_transition(self,workspace_uuid,expected_version,to_state,actor,reason,classification,now):
+        operation_uuid=str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn); OperationRepository._ensure_schema(conn)
+            conn.execute("""CREATE TABLE IF NOT EXISTS ai_workspace_retention(
+                workspace_uuid TEXT PRIMARY KEY,retention_classification TEXT NOT NULL,
+                outcome_classification TEXT NOT NULL,close_reason TEXT NOT NULL,closed_by_token_uuid TEXT NOT NULL,
+                closed_at TEXT NOT NULL,close_operation_uuid TEXT NOT NULL UNIQUE,archive_reason TEXT,
+                archived_by_token_uuid TEXT,archived_at TEXT,archive_operation_uuid TEXT UNIQUE)""")
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                workspace=conn.execute("SELECT * FROM ai_workspace WHERE uuid=?",(workspace_uuid,)).fetchone()
+                if not workspace: raise PersistenceNotFound()
+                expected_from="Open" if to_state=="Closed" else "Closed"
+                if workspace["version"]!=expected_version:
+                    raise PersistenceConflict({"code":"AI_WORKSPACE_STALE","current_version":workspace["version"],"current_state":workspace["lifecycle_state"]})
+                if workspace["lifecycle_state"]!=expected_from:
+                    raise PersistenceConflict({"code":"AI_WORKSPACE_TRANSITION_INVALID","current_state":workspace["lifecycle_state"]})
+                if to_state=="Closed":
+                    conn.execute("""INSERT INTO ai_workspace_retention(workspace_uuid,retention_classification,
+                        outcome_classification,close_reason,closed_by_token_uuid,closed_at,close_operation_uuid)
+                        VALUES (?,'IndefiniteAudit',?,?,?,?,?)""",(workspace_uuid,classification,reason,actor,now,operation_uuid))
+                    conn.execute("""UPDATE ai_workspace SET lifecycle_state='Closed',closed_at=?,close_operation_uuid=?,version=version+1
+                        WHERE uuid=?""",(now,operation_uuid,workspace_uuid))
+                else:
+                    updated=conn.execute("""UPDATE ai_workspace_retention SET archive_reason=?,archived_by_token_uuid=?,
+                        archived_at=?,archive_operation_uuid=? WHERE workspace_uuid=? AND archive_operation_uuid IS NULL""",
+                        (reason,actor,now,operation_uuid,workspace_uuid))
+                    if updated.rowcount!=1: raise PersistenceConflict({"code":"AI_WORKSPACE_RETENTION_MISSING"})
+                    conn.execute("""UPDATE ai_workspace SET lifecycle_state='Archived',archived_at=?,archive_operation_uuid=?,
+                        version=version+1 WHERE uuid=?""",(now,operation_uuid,workspace_uuid))
+                conn.execute("""INSERT INTO operation(uuid,operation_type,initiator,status,summary,started_at,ended_at,entity_uuid,recovery_context)
+                    VALUES (?,?, 'WebUI','Succeeded',?,?,?,?,?)""",(operation_uuid,
+                    "ai_workspace_close" if to_state=="Closed" else "ai_workspace_archive",
+                    f"AI Workspace {to_state}: {classification}",now,now,workspace_uuid,
+                    json.dumps({"reason":reason,"outcome_classification":classification,"retention":"IndefiniteAudit"},sort_keys=True)))
+                conn.commit()
+            except Exception: conn.rollback(); raise
+        return self.get_with_retention(workspace_uuid)
+
+    def get_with_retention(self,workspace_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn); workspace=conn.execute("SELECT * FROM ai_workspace WHERE uuid=?",(workspace_uuid,)).fetchone()
+            exists=conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ai_workspace_retention'").fetchone()
+            retention=conn.execute("SELECT * FROM ai_workspace_retention WHERE workspace_uuid=?",(workspace_uuid,)).fetchone() if exists else None
+        if not workspace:return None
+        result=self._norm(workspace); result["retention"]=dict(retention) if retention else None; return result
 
 
 class AIModelConfigurationRepository:
@@ -2159,6 +2247,12 @@ class AIWorkItemRepository:
         with self._db() as conn:
             self._ensure_schema(conn); row = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?", (item_uuid,)).fetchone()
         return self._norm(row) if row else None
+
+    def workspace_state(self,item_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn); row=conn.execute("""SELECT w.lifecycle_state FROM workspace_album_ai_worker i
+                JOIN ai_workspace w ON w.uuid=i.workspace_uuid WHERE i.uuid=?""",(item_uuid,)).fetchone()
+        return row[0] if row else None
 
     def list(self, workspace_uuid):
         with self._db() as conn:
@@ -2670,8 +2764,10 @@ class AIResultRepository:
                     if existing["payload_sha256"] == payload_sha256 and existing["submitted_by_token_uuid"] == worker_token_uuid:
                         conn.commit(); result = self._stage(existing); result["idempotent"] = True; return result
                     raise PersistenceConflict({"code":"AI_RESULT_CONFLICTING_REPLAY","stage":stage})
-                item = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?", (item_uuid,)).fetchone()
+                item = conn.execute("""SELECT i.*,w.lifecycle_state AS workspace_state FROM workspace_album_ai_worker i
+                    JOIN ai_workspace w ON w.uuid=i.workspace_uuid WHERE i.uuid=?""", (item_uuid,)).fetchone()
                 if not item: raise PersistenceNotFound()
+                if item["workspace_state"]!="Open": raise PersistenceConflict({"code":"AI_WORKSPACE_READ_ONLY"})
                 if item["run_state"] != "Claimed" or item["claimed_by_token_uuid"] != worker_token_uuid \
                         or not item["lease_expires_at"] or item["lease_expires_at"] <= now:
                     raise PersistenceConflict({"code":"AI_RESULT_CLAIM_INVALID"})
@@ -2794,6 +2890,10 @@ class AIReviewRepository:
             try:
                 review=conn.execute("SELECT * FROM ai_work_item_review WHERE work_item_uuid=?",(item_uuid,)).fetchone()
                 if not review: raise PersistenceNotFound()
+                workspace_state=conn.execute("""SELECT w.lifecycle_state FROM workspace_album_ai_worker i
+                    JOIN ai_workspace w ON w.uuid=i.workspace_uuid WHERE i.uuid=?""",(item_uuid,)).fetchone()
+                if not workspace_state or workspace_state[0]!="Open":
+                    raise PersistenceConflict({"code":"AI_WORKSPACE_READ_ONLY","workspace_state":workspace_state[0] if workspace_state else None})
                 expected_from="ReadyForReview" if to_state=="InReview" else "InReview"
                 if review["version"]!=expected_version:
                     raise PersistenceConflict({"code":"AI_REVIEW_STALE","current_version":review["version"],"current_state":review["state"]})

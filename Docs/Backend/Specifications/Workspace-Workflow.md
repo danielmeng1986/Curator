@@ -154,6 +154,19 @@ Closed and Archived / Retired workspaces are historical reference data, distinct
 
 The storage and retention strategy may evolve by workspace dataset and does not require a specific implementation. Closed and Archived / Retired data may remain in the primary database or move to another suitable storage approach, such as an archive database or compressed storage, provided the architectural goals above continue to be met.
 
+The first AI Workspace policy is `IndefiniteAudit`: no automatic deletion date
+is assigned. Close is a strict preflight and never performs implicit Work Item
+cancellation, abandonment, or Group release. Every owning Group must first be
+released through its explicit BT-057 outcome. Archive records one classification
+(`Completed`, `Rejected`, `Cancelled`, `Abandoned`, or `Mixed`), Admin reason,
+timestamps, and Operations. A future cleanup policy requires a separate protected
+preview/snapshot task.
+
+Photo bytes are not copied into history. Immutable Manifest metadata and hashes
+remain authoritative evidence even when a source file becomes Missing, Changed,
+or Unavailable. Historical reads expose that availability truthfully without
+discarding analysis, recommendations, review, or Promotion evidence.
+
 ## Validation and error handling
 
 - A requested operation not allowed in the current lifecycle state is rejected without modifying the workspace.

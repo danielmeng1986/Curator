@@ -193,3 +193,11 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
             sql=(root/"0012_work_dispatch_group_closure.sql").read_text(); conn.executescript(sql); conn.executescript(sql)
             columns={row[1] for row in conn.execute("PRAGMA table_info(work_dispatch_group_closure)")}
         self.assertTrue({"group_uuid","disposition","operation_uuid","summary_json"}<=columns)
+
+    def test_0013_workspace_retention_schema_is_repeatable(self):
+        root=Path(__file__).parents[1]/"migrations"
+        with sqlite3.connect(":memory:") as conn:
+            conn.execute("CREATE TABLE ai_workspace(uuid TEXT PRIMARY KEY)")
+            sql=(root/"0013_ai_workspace_retention.sql").read_text(); conn.executescript(sql); conn.executescript(sql)
+            columns={row[1] for row in conn.execute("PRAGMA table_info(ai_workspace_retention)")}
+        self.assertTrue({"retention_classification","outcome_classification","archive_reason"}<=columns)
