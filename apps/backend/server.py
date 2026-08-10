@@ -738,6 +738,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_ai_workspaces(qs)
             elif re.match(r"^/api/ai-workspaces/[^/]+$", path):
                 self._get_ai_workspace(path.split("/")[-1])
+            elif re.match(r"^/api/ai-workspaces/[^/]+/overview$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"overview":self._work_dispatch_service().workspace_overview(path.split("/")[3])})
             elif re.match(r"^/api/ai-workspaces/[^/]+/closure-preflight$", path):
                 if not self._require_admin_principal(): return
                 self._send_success(200,{"preflight":self._ai_workspace_service().preflight(path.split("/")[3])})
@@ -760,12 +763,21 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif path == "/api/ai-reviews":
                 if not self._require_admin_principal(): return
                 state=qs.get("state",[None])[0]; workspace_uuid=qs.get("workspace_uuid",[None])[0]
+                album_raw=qs.get("album_id",[None])[0]
                 result=self._ai_review_service().queue(state,workspace_uuid,
-                    int(qs.get("limit",["50"])[0]),int(qs.get("offset",["0"])[0]))
+                    int(qs.get("limit",["50"])[0]),int(qs.get("offset",["0"])[0]),
+                    int(album_raw) if album_raw else None,qs.get("configuration_uuid",[None])[0],
+                    qs.get("group_uuid",[None])[0],qs.get("q",[None])[0])
                 self._send_collection(result["items"],limit=result["limit"],offset=result["offset"],total=result["total"])
             elif re.match(r"^/api/ai-work-items/[^/]+/review$", path):
                 if not self._require_admin_principal(): return
-                self._send_success(200,{"review":self._ai_review_service().detail(path.split("/")[3])})
+                item_uuid=path.split("/")[3]; detail=self._ai_review_service().detail(item_uuid)
+                try: detail["evidence_history"]=self._ai_photo_evidence_service().historical(item_uuid)
+                except svc.ServiceNotFound: detail["evidence_history"]=None
+                self._send_success(200,{"review":detail})
+            elif re.match(r"^/api/ai-work-items/[^/]+/promotion$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"promotion_history":self._ai_promotion_service().history(path.split("/")[3])})
             elif re.match(r"^/api/ai-evidence/[^/]+$", path):
                 evidence_uuid = path.split("/")[3]
                 self._send_success(200,{"evidence":self._ai_photo_evidence_service().metadata(
@@ -780,6 +792,16 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_ai_model_configuration(path.split("/")[-1])
             elif path == "/api/work-dispatch/candidates":
                 self._get_work_dispatch_candidates(qs)
+            elif path == "/api/work-dispatch/worker-kinds":
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"items":self._work_dispatch_service().worker_kinds()})
+            elif path == "/api/work-dispatch/groups":
+                if not self._require_admin_principal(): return
+                album_raw=qs.get("album_id",[None])[0]
+                result=self._work_dispatch_service().groups(qs.get("view",["active"])[0],
+                    qs.get("workspace_uuid",[None])[0],qs.get("worker_kind",[None])[0],
+                    int(album_raw) if album_raw else None,int(qs.get("limit",["50"])[0]),int(qs.get("offset",["0"])[0]))
+                self._send_collection(result["items"],limit=result["limit"],offset=result["offset"],total=result["total"])
             elif re.match(r"^/api/work-dispatch/batches/[^/]+$", path):
                 if not self._require_admin_principal(): return
                 self._send_success(200, self._work_dispatch_service().batch_detail(path.split("/")[-1]))

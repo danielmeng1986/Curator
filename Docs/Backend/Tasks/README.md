@@ -71,6 +71,7 @@ are approved.
 | [BT-055](BT-055-album-dispatch-candidate-preview-contract.md) | Query filtered Album candidates and bind a zero-write dispatch preview. |
 | [BT-056](BT-056-atomic-album-ai-work-dispatch-execution.md) | Atomically reserve Albums and create AI comparison Work Items. |
 | [BT-057](BT-057-work-dispatch-release-redispatch-safety.md) | Safely close Groups, release Albums, and preserve redispatch history. |
+| [BT-058](BT-058-ai-workspace-ui-read-models.md) | Stable Workspace, dispatch, review, and Promotion UI projections. |
 
 BT identifiers record planning order, not mandatory execution order. Dispatch
 is an entry boundary for AI work, so BT-054 through BT-056 precede BT-047 in

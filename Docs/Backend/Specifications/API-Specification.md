@@ -186,6 +186,14 @@ and an explicit reason. Release is rejected while execution, review, rework, or
 Promotion remains active. Read models expose the links needed to move between
 candidate, active-work, history, Workspace review, and Operation detail views.
 
+`GET /api/v1/work-dispatch/worker-kinds` returns the Backend adapter catalog.
+`GET /api/v1/work-dispatch/groups` accepts `view=active|history|all`, optional
+`workspace_uuid`, `worker_kind`, and `album_id`, plus bounded `limit`/`offset`.
+Each row joins stable Album, Workspace, Batch, reservation, Work Item, review,
+Promotion, and closure summaries and includes Backend-calculated permitted
+actions. It is the global Active/History list; clients do not enumerate Albums
+and request Group detail one row at a time.
+
 `GET /api/v1/work-dispatch/groups/{group_uuid}` returns Group-wide obligations,
 blockers, the successful Promotion winner, and permitted actions. Admin-only
 `/release`, `/cancel`, and `/abandon` commands require `expected_version` and a
@@ -203,6 +211,10 @@ never cancels work or releases reservations itself. Archive requires a second
 reason and retains `IndefiniteAudit` evidence. Closed/Archived Workspaces reject
 new Items, evidence creation, result submission, review decisions, retries,
 cancellation, and Promotion.
+
+`GET /api/v1/ai-workspaces/{uuid}/overview` combines the retained Workspace,
+Group/run/review/Promotion counts, closure preflight, and Backend-permitted
+lifecycle actions. This is the Admin Workspace landing projection.
 
 `GET /api/v1/ai-work-items/{uuid}/evidence-history` is Admin-only and never
 erases or hides Manifest evidence when source files move or change. Each entry
@@ -235,7 +247,12 @@ the immutable accepted payloads, runtime metrics, configuration and Manifest
 bindings, submitter identity, Operations, and current result-review state.
 
 `GET /api/v1/ai-reviews` and `/ai-work-items/{uuid}/review` expose the stable
-Admin review queue/detail projection. Admin commands `/review/start` and
+Admin review queue/detail projection. The queue accepts optional `state`,
+`workspace_uuid`, `album_id`, `configuration_uuid`, `group_uuid`, and bounded
+text search, plus `limit`/`offset`. Detail includes the Album and configuration,
+immutable result stages, current and historical evidence availability, decision
+lineage, Promotion attempts, public Operation summaries, linked Issues, and
+Backend-permitted review actions. Admin commands `/review/start` and
 `/review/decision` require `expected_version`. The only transitions are
 `ReadyForReview → InReview → Approved | Rejected | ReworkRequested`. Approval
 freezes one Writer recommendation or validated human revision; Reject/Rework
@@ -251,6 +268,12 @@ single-use and idempotent, atomically records the unique Workspace/Album winner,
 Operation, title change, and `TEMPORARY → NAME_GENERATED` policy; other Statuses
 are retained. Stale and competing previews return structured `409` without an
 Album mutation. Failed materialization retains `PromotionFailed` evidence.
+
+`GET /api/v1/ai-work-items/{uuid}/promotion` is the read-only Promotion-history
+projection. It remains available after release, Workspace close/archive, or
+source-evidence degradation and does not issue or consume a mutation preview.
+All projections are Admin-only and omit claim Tokens, absolute Album paths, and
+sensitive Operation diagnostics.
 
 ## Future extensions
 

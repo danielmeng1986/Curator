@@ -916,6 +916,23 @@ class TestVersionedApiAuthorization(_TestServerBase):
             _, executed = self._post("/api/v1/work-dispatch/execute",{"preview_token":preview["data"]["preview"]["preview_token"]},admin)
             item_uuid = executed["data"]["result"]["groups"][0]["work_item_uuids"][0]
             group_uuid = executed["data"]["result"]["groups"][0]["group_uuid"]
+            workspace_uuid = ws["data"]["workspace"]["uuid"]
+            configuration_uuid = cfg["data"]["configuration"]["uuid"]
+            status, kinds = self._get("/api/v1/work-dispatch/worker-kinds",admin)
+            self.assertEqual(200,status)
+            self.assertEqual("album_name_analysis",kinds["data"]["items"][0]["worker_kind"])
+            status, denied = self._get("/api/v1/work-dispatch/worker-kinds",writer)
+            self.assertEqual(403,status)
+            status, active_groups = self._get(
+                f"/api/v1/work-dispatch/groups?view=active&workspace_uuid={workspace_uuid}&limit=1&offset=0",admin)
+            self.assertEqual(200,status)
+            self.assertEqual(1,active_groups["meta"]["pagination"]["total"])
+            self.assertEqual(group_uuid,active_groups["data"][0]["uuid"])
+            self.assertIn("allowed_actions",active_groups["data"][0])
+            status, overview = self._get(f"/api/v1/ai-workspaces/{workspace_uuid}/overview",admin)
+            self.assertEqual(200,status)
+            self.assertEqual(1,overview["data"]["overview"]["summary"]["total_groups"])
+            self.assertIn("dispatch",overview["data"]["overview"]["allowed_actions"])
             with patch.object(srv,"APP_CONFIG",{**srv.APP_CONFIG,"archive_root":root}):
                 status, denied = self._get(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",writer)
                 self.assertEqual(403,status)
@@ -951,6 +968,12 @@ class TestVersionedApiAuthorization(_TestServerBase):
                 self.assertEqual(200,status); self.assertEqual("ReadyForReview",results["data"]["results"]["state"]["state"])
                 status, queue = self._get("/api/v1/ai-reviews?state=ReadyForReview",admin)
                 self.assertEqual(200,status); self.assertTrue(any(row["work_item_uuid"]==item_uuid for row in queue["data"]))
+                status, filtered_queue = self._get(
+                    f"/api/v1/ai-reviews?album_id={album_id}&configuration_uuid={configuration_uuid}"
+                    f"&group_uuid={group_uuid}&workspace_uuid={workspace_uuid}&q=Manifest&limit=1",admin)
+                self.assertEqual(200,status)
+                self.assertEqual([item_uuid],[row["work_item_uuid"] for row in filtered_queue["data"]])
+                self.assertEqual(1,filtered_queue["meta"]["pagination"]["total"])
                 status, started = self._post(f"/api/v1/ai-work-items/{item_uuid}/review/start",{"expected_version":1},admin)
                 self.assertEqual(200,status); self.assertEqual("InReview",started["data"]["review"]["review"]["state"])
                 status, approved = self._post(f"/api/v1/ai-work-items/{item_uuid}/review/decision",{
@@ -966,6 +989,17 @@ class TestVersionedApiAuthorization(_TestServerBase):
                     "preview_token":promotion_preview["preview_token"],"confirmation":promotion_preview["confirmation"]},admin)
                 self.assertEqual(200,status); self.assertEqual("Promoted",promoted["data"]["promotion"]["outcome"])
                 self.assertEqual("Lakeside Family Walk",self._db.execute("SELECT title FROM album WHERE id=?",(album_id,)).fetchone()[0])
+                status, promotion_history = self._get(f"/api/v1/ai-work-items/{item_uuid}/promotion",admin)
+                self.assertEqual(200,status)
+                self.assertEqual("Promoted",promotion_history["data"]["promotion_history"]["items"][0]["outcome"])
+                status, traceability = self._get(f"/api/v1/ai-work-items/{item_uuid}/review",admin)
+                self.assertEqual(200,status)
+                review_projection = traceability["data"]["review"]
+                self.assertEqual(1,len(review_projection["promotions"]))
+                self.assertTrue(review_projection["operations"])
+                self.assertEqual(8,len(review_projection["evidence_history"]["evidence"]))
+                self.assertNotIn(root,str(review_projection))
+                self.assertNotIn("error_details",str(review_projection))
                 status, group_detail = self._get(f"/api/v1/work-dispatch/groups/{group_uuid}",admin)
                 self.assertEqual(200,status); self.assertIn("release",group_detail["data"]["group"]["allowed_actions"])
                 status, released = self._post(f"/api/v1/work-dispatch/groups/{group_uuid}/release",{
@@ -973,6 +1007,11 @@ class TestVersionedApiAuthorization(_TestServerBase):
                 self.assertEqual(200,status); self.assertEqual("Closed",released["data"]["closure"]["disposition"])
                 status, history = self._get(f"/api/v1/work-dispatch/history?album_id={album_id}",admin)
                 self.assertEqual(200,status); self.assertEqual("Released",history["data"]["items"][0]["group_state"])
+                status, history_groups = self._get(
+                    f"/api/v1/work-dispatch/groups?view=history&album_id={album_id}",admin)
+                self.assertEqual(200,status)
+                self.assertEqual(group_uuid,history_groups["data"][0]["uuid"])
+                self.assertEqual("Closed",history_groups["data"][0]["disposition"])
                 (album_dir / manifest["evidence"][0]["relative_path"]).unlink()
                 status, evidence_history = self._get(f"/api/v1/ai-work-items/{item_uuid}/evidence-history",admin)
                 self.assertEqual(200,status); self.assertEqual(1,evidence_history["data"]["evidence_history"]["availability_counts"]["Missing"])

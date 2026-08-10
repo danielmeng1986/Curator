@@ -181,6 +181,25 @@ changed, oversized, or containment-invalid selected image returns
 - Persistent anomalies or recovery needs create or link Issues under the
   applicable workflow; an Issue does not replace reservation truth.
 
+## Admin UI read projections
+
+The Backend owns the projections used by the dispatch and review consoles:
+
+- the Worker-kind catalog describes supported adapters;
+- the global Group collection provides bounded Active, History, and All views,
+  filterable by Workspace, Worker kind, or Album;
+- the Workspace overview combines lifecycle state, Group/Item/review counts,
+  closure preflight, retention, and permitted actions;
+- the review queue is filterable by Workspace, Album, configuration, Group,
+  review state, and text; and
+- review detail joins immutable results, evidence availability and lineage,
+  decisions, Promotion history, Operations, and Issues.
+
+Clients must use the returned `allowed_actions` and blocker summaries rather
+than reconstructing dispatch, review, release, close, or archive rules. The
+collections are paginated and never expose an absolute Album path, claim Token,
+or sensitive Operation diagnostic.
+
 ## Required error outcomes
 
 - `400 REQUEST_INVALID`: malformed filters, selection, Worker kind, or bounds.

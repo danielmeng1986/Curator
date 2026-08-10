@@ -2134,6 +2134,29 @@ class WorkDispatchService:
         if not result: raise ServiceNotFound("Work Dispatch Batch not found.")
         return result
 
+    def groups(self,view="active",workspace_uuid=None,worker_kind=None,album_id=None,limit=50,offset=0):
+        if view not in {"active","history","all"}: raise ValueError("Group view must be active, history, or all.")
+        if not isinstance(limit,int) or not 1<=limit<=100 or not isinstance(offset,int) or offset<0:
+            raise ValueError("Group pagination is invalid.")
+        if album_id is not None and (not isinstance(album_id,int) or album_id<=0): raise ValueError("album_id is invalid.")
+        rows,total=self._repo.search_groups(view,workspace_uuid,worker_kind,album_id,limit,offset)
+        for row in rows:
+            row["allowed_actions"]=self.group_detail(row["uuid"])["allowed_actions"] if row["group_state"]=="Active" else []
+        return {"items":rows,"total":total,"limit":limit,"offset":offset,"view":view}
+
+    def workspace_overview(self,workspace_uuid):
+        if not self._workspaces: raise RuntimeError("Workspace projection dependency is not configured.")
+        workspace=self._workspaces.get_with_retention(workspace_uuid)
+        if not workspace: raise ServiceNotFound("AI Workspace not found.")
+        preflight=self._workspaces.lifecycle_preflight(workspace_uuid)
+        actions=[]
+        if workspace["lifecycle_state"]=="Open":
+            actions.append("dispatch")
+            if not preflight["blockers"]: actions.append("close")
+        elif workspace["lifecycle_state"]=="Closed": actions.append("archive")
+        return {"workspace":workspace,"summary":self._repo.workspace_summary(workspace_uuid),
+            "closure_preflight":preflight,"allowed_actions":actions}
+
     def create_batch(self, worker_kind, workspace_uuid=None, created_by_token_uuid=None):
         adapter = self._adapters.get(worker_kind)
         return self._repo.create_batch({"worker_kind": adapter.worker_kind,
@@ -2487,10 +2510,12 @@ class AIReviewService:
     def allowed_actions(state):
         return ["start"] if state=="ReadyForReview" else ["approve","reject","request_rework"] if state=="InReview" else []
 
-    def queue(self,state=None,workspace_uuid=None,limit=50,offset=0):
+    def queue(self,state=None,workspace_uuid=None,limit=50,offset=0,album_id=None,configuration_uuid=None,group_uuid=None,q=None):
         if state and state not in self.STATES: raise ValueError("Review state filter is invalid.")
         if not 1<=limit<=100 or offset<0: raise ValueError("Review pagination is invalid.")
-        rows,total=self._repo.queue(state,workspace_uuid,limit,offset)
+        if album_id is not None and (not isinstance(album_id,int) or album_id<=0): raise ValueError("album_id is invalid.")
+        if q is not None and len(str(q))>200: raise ValueError("Review search is too long.")
+        rows,total=self._repo.queue(state,workspace_uuid,limit,offset,album_id,configuration_uuid,group_uuid,str(q).strip() if q else None)
         for row in rows: row["allowed_actions"]=self.allowed_actions(row["state"])
         return {"items":rows,"total":total,"limit":limit,"offset":offset}
 
@@ -2582,6 +2607,12 @@ class AIAlbumNamePromotionService:
             "current":{"title":context["album_title"],"status_id":context["status_id"],"status_name":context["status_name"]},
             "resulting":{"title":context["selected_name"],"status_id":resulting_status_id,"status_name":resulting_status_name},
             "confirmation":context["selected_name"]}
+
+    def history(self,item_uuid):
+        context=self._repo.context(item_uuid)
+        if not context: raise ServiceNotFound("AI Work Item not found.")
+        return {"work_item_uuid":item_uuid,"workspace_uuid":context["workspace_uuid"],"album_id":context["album_id"],
+            "selected_name":context["selected_name"],"items":self._repo.history(item_uuid)}
 
     def execute(self,token,confirmation,actor):
         payload=self._read(token)

@@ -2474,6 +2474,53 @@ class WorkDispatchRepository:
                 "SELECT * FROM work_dispatch_group WHERE album_id=? ORDER BY created_at DESC,id DESC", (album_id,)).fetchall()
         return [dict(row) for row in rows]
 
+    def search_groups(self,view="active",workspace_uuid=None,worker_kind=None,album_id=None,limit=50,offset=0):
+        conditions=[]; params=[]
+        if view=="active": conditions.append("g.group_state='Active'")
+        elif view=="history": conditions.append("g.group_state='Released'")
+        if workspace_uuid: conditions.append("b.workspace_uuid=?"); params.append(workspace_uuid)
+        if worker_kind: conditions.append("g.worker_kind=?"); params.append(worker_kind)
+        if album_id: conditions.append("g.album_id=?"); params.append(album_id)
+        where="WHERE "+" AND ".join(conditions) if conditions else ""
+        with self._db() as conn:
+            self._ensure_schema(conn); AIReviewRepository._ensure_schema(conn); AIAlbumNamePromotionRepository._ensure_schema(conn)
+            conn.execute("""CREATE TABLE IF NOT EXISTS work_dispatch_group_closure(
+                group_uuid TEXT PRIMARY KEY,disposition TEXT,reason TEXT,closed_by_token_uuid TEXT,
+                operation_uuid TEXT,summary_json TEXT,closed_at TEXT)""")
+            query=f"""SELECT g.uuid,g.batch_uuid,g.album_id,g.worker_kind,g.dataset_type,g.schema_version,
+                g.group_state,g.version,g.created_at,g.updated_at,g.released_at,g.release_reason,
+                b.workspace_uuid,b.batch_state,b.created_by_token_uuid,a.uuid album_uuid,a.title album_title,
+                a.status_id,s.name status_name,r.reserved_at,c.disposition,c.operation_uuid closure_operation_uuid,
+                (SELECT COUNT(*) FROM work_dispatch_group_item gi WHERE gi.group_uuid=g.uuid) item_count,
+                (SELECT COUNT(*) FROM work_dispatch_group_item gi JOIN workspace_album_ai_worker i ON i.uuid=gi.item_uuid
+                    WHERE gi.group_uuid=g.uuid AND i.run_state IN ('Pending','Claimed','Failed')) active_item_count,
+                (SELECT COUNT(*) FROM work_dispatch_group_item gi JOIN ai_work_item_review ar ON ar.work_item_uuid=gi.item_uuid
+                    WHERE gi.group_uuid=g.uuid AND ar.state IN ('ReadyForReview','InReview','ReworkRequested')) open_review_count,
+                (SELECT COUNT(*) FROM workspace_album_name_promotion p JOIN work_dispatch_group_item gi ON gi.item_uuid=p.work_item_uuid
+                    WHERE gi.group_uuid=g.uuid AND p.outcome='Promoted') promotion_count
+                FROM work_dispatch_group g JOIN work_dispatch_batch b ON b.uuid=g.batch_uuid
+                JOIN album a ON a.id=g.album_id LEFT JOIN status s ON s.id=a.status_id
+                LEFT JOIN album_work_reservation r ON r.group_uuid=g.uuid
+                LEFT JOIN work_dispatch_group_closure c ON c.group_uuid=g.uuid
+                {where} ORDER BY g.created_at DESC,g.id DESC LIMIT ? OFFSET ?"""
+            rows=conn.execute(query,params+[limit,offset]).fetchall()
+            total=conn.execute(f"""SELECT COUNT(*) FROM work_dispatch_group g JOIN work_dispatch_batch b
+                ON b.uuid=g.batch_uuid {where}""",params).fetchone()[0]
+        return [dict(row) for row in rows],total
+
+    def workspace_summary(self,workspace_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn); AIReviewRepository._ensure_schema(conn); AIAlbumNamePromotionRepository._ensure_schema(conn)
+            group_counts={row[0]:row[1] for row in conn.execute("""SELECT g.group_state,COUNT(*) FROM work_dispatch_group g
+                JOIN work_dispatch_batch b ON b.uuid=g.batch_uuid WHERE b.workspace_uuid=? GROUP BY g.group_state""",(workspace_uuid,)).fetchall()}
+            run_counts={row[0]:row[1] for row in conn.execute("SELECT run_state,COUNT(*) FROM workspace_album_ai_worker WHERE workspace_uuid=? GROUP BY run_state",(workspace_uuid,)).fetchall()}
+            review_counts={row[0]:row[1] for row in conn.execute("""SELECT r.state,COUNT(*) FROM ai_work_item_review r
+                JOIN workspace_album_ai_worker i ON i.uuid=r.work_item_uuid WHERE i.workspace_uuid=? GROUP BY r.state""",(workspace_uuid,)).fetchall()}
+            promotions=conn.execute("""SELECT COUNT(*) FROM workspace_album_name_promotion p JOIN workspace_album_ai_worker i
+                ON i.uuid=p.work_item_uuid WHERE i.workspace_uuid=? AND p.outcome='Promoted'""",(workspace_uuid,)).fetchone()[0]
+        return {"group_counts":group_counts,"run_state_counts":run_counts,"review_state_counts":review_counts,
+            "promotion_count":promotions,"total_groups":sum(group_counts.values()),"total_items":sum(run_counts.values())}
+
     def group_obligations(self,group_uuid):
         with self._db() as conn:
             self._ensure_schema(conn); AIReviewRepository._ensure_schema(conn); AIAlbumNamePromotionRepository._ensure_schema(conn)
@@ -2858,10 +2905,14 @@ class AIReviewRepository:
     @staticmethod
     def _review(row): return dict(row) if row else None
 
-    def queue(self, state=None, workspace_uuid=None, limit=50, offset=0):
+    def queue(self, state=None, workspace_uuid=None, limit=50, offset=0,album_id=None,configuration_uuid=None,group_uuid=None,q=None):
         conditions=[]; params=[]
         if state: conditions.append("r.state=?"); params.append(state)
         if workspace_uuid: conditions.append("i.workspace_uuid=?"); params.append(workspace_uuid)
+        if album_id: conditions.append("i.album_id=?"); params.append(album_id)
+        if configuration_uuid: conditions.append("i.ai_model_configuration_uuid=?"); params.append(configuration_uuid)
+        if group_uuid: conditions.append("gi.group_uuid=?"); params.append(group_uuid)
+        if q: conditions.append("(a.title LIKE ? OR c.name LIKE ?)"); params.extend([f"%{q}%",f"%{q}%"])
         where="WHERE "+" AND ".join(conditions) if conditions else ""
         with self._db() as conn:
             self._ensure_schema(conn)
@@ -2869,9 +2920,12 @@ class AIReviewRepository:
                 a.uuid AS album_uuid,a.title AS album_title,c.name AS configuration_name
                 FROM ai_work_item_review r JOIN workspace_album_ai_worker i ON i.uuid=r.work_item_uuid
                 JOIN album a ON a.id=i.album_id JOIN ai_model_configuration c ON c.uuid=i.ai_model_configuration_uuid
+                LEFT JOIN work_dispatch_group_item gi ON gi.item_uuid=i.uuid
                 {where} ORDER BY r.updated_at DESC,r.work_item_uuid LIMIT ? OFFSET ?""",params+[limit,offset]).fetchall()
             total=conn.execute(f"""SELECT COUNT(*) FROM ai_work_item_review r
-                JOIN workspace_album_ai_worker i ON i.uuid=r.work_item_uuid {where}""",params).fetchone()[0]
+                JOIN workspace_album_ai_worker i ON i.uuid=r.work_item_uuid JOIN album a ON a.id=i.album_id
+                JOIN ai_model_configuration c ON c.uuid=i.ai_model_configuration_uuid
+                LEFT JOIN work_dispatch_group_item gi ON gi.item_uuid=i.uuid {where}""",params).fetchone()[0]
         return [dict(row) for row in rows],total
 
     def detail(self,item_uuid):
@@ -2887,9 +2941,35 @@ class AIReviewRepository:
             decisions=conn.execute("SELECT * FROM ai_work_item_review_decision WHERE work_item_uuid=? ORDER BY id",(item_uuid,)).fetchall()
             group=conn.execute("SELECT group_uuid FROM work_dispatch_group_item WHERE item_uuid=?",(item_uuid,)).fetchone()
             successor=conn.execute("SELECT successor_work_item_uuid FROM ai_work_item_rework WHERE rework_of_work_item_uuid=?",(item_uuid,)).fetchone()
+            promotions=[dict(row) for row in conn.execute("SELECT * FROM workspace_album_name_promotion WHERE work_item_uuid=? ORDER BY id",(item_uuid,)).fetchall()] \
+                if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_album_name_promotion'").fetchone() else []
+            has_operations=conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='operation'"
+            ).fetchone()
+            has_promotions=conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_album_name_promotion'"
+            ).fetchone()
+            promotion_join=(
+                "LEFT JOIN workspace_album_name_promotion p ON p.operation_uuid=o.uuid"
+                if has_promotions else ""
+            )
+            promotion_filter=" OR p.work_item_uuid=?" if has_promotions else ""
+            operation_params=(item_uuid,item_uuid,item_uuid) if has_promotions else (item_uuid,item_uuid)
+            operations=[dict(row) for row in conn.execute(f"""SELECT DISTINCT
+                o.uuid,o.operation_type,o.initiator,o.status,o.summary,o.started_at,o.ended_at,
+                o.entity_uuid,o.batch_uuid,o.issue_uuid,o.error_category,o.error_code,o.repair_state
+                FROM operation o
+                LEFT JOIN ai_work_item_review_decision d ON d.operation_uuid=o.uuid
+                {promotion_join}
+                WHERE o.entity_uuid=? OR d.work_item_uuid=?{promotion_filter} ORDER BY o.id""",
+                operation_params).fetchall()] if has_operations else []
+            issues=[dict(row) for row in conn.execute("""SELECT DISTINCT x.* FROM issue x JOIN issue_link l ON l.issue_uuid=x.uuid
+                WHERE l.target_uuid=? OR l.target_uuid IN (SELECT operation_uuid FROM ai_work_item_review_decision WHERE work_item_uuid=?)""",
+                (item_uuid,item_uuid)).fetchall()] if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='issue_link'").fetchone() else []
         result={"review":dict(review),"item":dict(item),"results":[AIResultRepository._stage(row) for row in stages],
             "manifest":dict(manifest) if manifest else None,"decisions":[dict(row) for row in decisions],
-            "group_uuid":group[0] if group else None,"successor_work_item_uuid":successor[0] if successor else None}
+            "group_uuid":group[0] if group else None,"successor_work_item_uuid":successor[0] if successor else None,
+            "promotions":promotions,"operations":operations,"issues":issues}
         return result
 
     def transition(self,item_uuid,expected_version,to_state,actor,evidence,now):
@@ -2973,6 +3053,12 @@ class AIAlbumNamePromotionRepository:
         result=dict(row) if row else None
         if result: result["promotion"]=dict(winner) if winner else None
         return result
+
+    def history(self,item_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn); rows=conn.execute(
+                "SELECT * FROM workspace_album_name_promotion WHERE work_item_uuid=? ORDER BY id",(item_uuid,)).fetchall()
+        return [dict(row) for row in rows]
 
     def execute(self,payload,actor,now,snapshot_reference=None):
         promotion_uuid,operation_uuid=str(uuid.uuid4()),str(uuid.uuid4())
