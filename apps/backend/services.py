@@ -1931,10 +1931,18 @@ class WorkDispatchAdapterRegistry:
 class WorkDispatchService:
     """Foundation for generic Batches, exclusive Album Groups, and Item links."""
 
-    def __init__(self, dispatch_repo, album_repo, adapter_registry=None, now_fn=None):
+    FILTER_FIELDS = frozenset({"q", "studio_id", "status_id", "model_id", "rating_min", "rating_max",
+        "capture_date_from", "capture_date_to", "publish_date_from", "publish_date_to", "sort"})
+    SORT_FIELDS = frozenset({"title", "studio_name", "publish_date", "rating", "updated_at", "capture_date"})
+    MAX_PREVIEW_ALBUMS = 100
+
+    def __init__(self, dispatch_repo, album_repo, adapter_registry=None, now_fn=None,
+                 workspace_repo=None, configuration_service=None, preview_secret=None):
         self._repo, self._albums = dispatch_repo, album_repo
         self._adapters = adapter_registry or WorkDispatchAdapterRegistry()
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
+        self._workspaces, self._configs = workspace_repo, configuration_service
+        self._preview_secret = preview_secret
 
     def worker_kinds(self):
         return self._adapters.describe()
@@ -1950,6 +1958,155 @@ class WorkDispatchService:
                     "reason": "Album already belongs to an active Work Dispatch Group.",
                     "warnings": result.get("warnings", []), "active_reservation": reservation}
         return result
+
+    def _normalized_filters(self, filters):
+        if filters is None: return {}
+        if not isinstance(filters, dict): raise ValueError("filters must be an object.")
+        unknown = set(filters) - self.FILTER_FIELDS
+        if unknown: raise ValueError(f"Unsupported dispatch filters: {sorted(unknown)}.")
+        result = {key: str(value).strip() for key, value in filters.items() if value not in (None, "")}
+        for key in ("capture_date_from", "capture_date_to", "publish_date_from", "publish_date_to"):
+            if key in result:
+                try: datetime.strptime(result[key], "%Y-%m-%d")
+                except ValueError as exc: raise ValueError(f"{key} must use YYYY-MM-DD format.") from exc
+        for prefix in ("capture_date", "publish_date"):
+            if result.get(f"{prefix}_from") and result.get(f"{prefix}_to") and result[f"{prefix}_from"] > result[f"{prefix}_to"]:
+                raise ValueError(f"{prefix}_from must not be later than {prefix}_to.")
+        if result.get("sort", "updated_at") not in self.SORT_FIELDS:
+            raise ValueError("sort is not supported.")
+        return result
+
+    def candidates(self, worker_kind, filters=None, *, availability="available", limit=50, offset=0):
+        adapter = self._adapters.get(worker_kind); normalized = self._normalized_filters(filters)
+        if not isinstance(limit, int) or not 1 <= limit <= 100 or not isinstance(offset, int) or offset < 0:
+            raise ValueError("Candidate pagination is invalid.")
+        if availability not in {"available", "reserved", "all"}:
+            raise ValueError("availability must be available, reserved, or all.")
+        self._repo.prepare()
+        rows, total = self._albums.search(**normalized, limit=limit, offset=offset,
+            dispatch_availability=availability, include_dispatch=True)
+        for item in rows:
+            base = adapter.eligibility(item)
+            if item["active_reservation"]:
+                item.update({"can_dispatch":False, "eligibility":"ALBUM_ALREADY_RESERVED",
+                    "eligibility_reason":"Album already belongs to an active Work Dispatch Group.",
+                    "warnings":base.get("warnings", [])})
+            else:
+                item.update({"can_dispatch":bool(base["can_dispatch"]), "eligibility":base["eligibility"],
+                    "eligibility_reason":base.get("reason"), "warnings":base.get("warnings", [])})
+        return {"items":rows, "total":total, "limit":limit, "offset":offset,
+            "availability":availability, "filters":normalized, "worker_kind":adapter.worker_kind}
+
+    def _sign_dispatch_preview(self, payload):
+        if not self._preview_secret: raise RuntimeError("Work Dispatch preview signing is not configured.")
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        encoded = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+        signature = hmac.new(self._preview_secret, encoded.encode(), hashlib.sha256).hexdigest()
+        return f"{encoded}.{signature}"
+
+    def read_preview(self, token):
+        if not self._preview_secret or not isinstance(token, str) or "." not in token:
+            raise ServiceConflict("DISPATCH_PREVIEW_INVALID", "The Work Dispatch preview is invalid.")
+        encoded, signature = token.rsplit(".", 1)
+        expected = hmac.new(self._preview_secret, encoded.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            raise ServiceConflict("DISPATCH_PREVIEW_INVALID", "The Work Dispatch preview is invalid.")
+        try:
+            payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+            if datetime.fromisoformat(payload["expires_at"]) <= self._now():
+                raise ServiceConflict("DISPATCH_PREVIEW_EXPIRED", "The Work Dispatch preview has expired.")
+            return payload
+        except ServiceConflict: raise
+        except Exception as exc:
+            raise ServiceConflict("DISPATCH_PREVIEW_INVALID", "The Work Dispatch preview is invalid.") from exc
+
+    def validate_preview_state(self, token, created_by_token_uuid=None):
+        """Verify the signed review still describes current zero-write state."""
+        payload = self.read_preview(token)
+        if created_by_token_uuid is not None and payload.get("created_by_token_uuid") != created_by_token_uuid:
+            raise ServiceConflict("DISPATCH_PREVIEW_INVALID", "The Work Dispatch preview belongs to another Admin.")
+        workspace = self._workspaces.get(payload["workspace"]["uuid"]) if self._workspaces else None
+        if not workspace or workspace["version"] != payload["workspace"]["version"] \
+                or workspace["lifecycle_state"] != payload["workspace"]["lifecycle_state"]:
+            raise ServiceConflict("DISPATCH_PREVIEW_STALE", "Workspace state changed after dispatch preview.")
+        try:
+            configs = [self._configs.get(item["uuid"]) for item in payload["configurations"]]
+        except ServiceNotFound as exc:
+            raise ServiceConflict("DISPATCH_PREVIEW_STALE", "Model configuration changed after dispatch preview.") from exc
+        if [item["version"] for item in configs] != [item["version"] for item in payload["configurations"]]:
+            raise ServiceConflict("DISPATCH_PREVIEW_STALE", "Model configuration changed after dispatch preview.")
+        rows = self._albums.get_batch_state([item["id"] for item in payload["albums"]])
+        current = [{"id":row["id"], "uuid":row["uuid"], "updated_at":row["updated_at"]} for row in rows]
+        if current != payload["albums"]:
+            raise ServiceConflict("DISPATCH_PREVIEW_STALE", "Album state changed after dispatch preview.")
+        conflicts = [item["id"] for item in payload["albums"] if self._repo.active_reservation(item["id"])]
+        if conflicts:
+            raise ServiceConflict("ALBUM_WORK_RESERVATION_CONFLICT",
+                "An Album was reserved after dispatch preview.", {"album_ids":conflicts})
+        return payload
+
+    def preview(self, worker_kind, workspace_uuid, configuration_uuids, *, album_ids=None,
+                filters=None, first_n=None, created_by_token_uuid=None):
+        adapter = self._adapters.get(worker_kind)
+        if not self._workspaces or not self._configs:
+            raise RuntimeError("Work Dispatch preview dependencies are not configured.")
+        workspace = self._workspaces.get(str(workspace_uuid or ""))
+        if not workspace: raise ServiceNotFound("AI Workspace not found.")
+        if workspace["lifecycle_state"] != "Open":
+            raise ServiceConflict("AI_WORKSPACE_NOT_OPEN", "Dispatch preview requires an Open AI Workspace.")
+        if workspace["dataset_type"] != adapter.dataset_type or workspace["schema_version"] != adapter.schema_version:
+            raise ServiceConflict("DISPATCH_DATASET_MISMATCH", "Workspace Dataset does not match the Worker kind.")
+        if not isinstance(configuration_uuids, list) or not configuration_uuids or any(not isinstance(x, str) or not x for x in configuration_uuids):
+            raise ValueError("configuration_uuids must be a non-empty list.")
+        if len(set(configuration_uuids)) != len(configuration_uuids):
+            raise ValueError("configuration_uuids must not contain duplicates.")
+        configurations = [self._configs.get(value) for value in configuration_uuids]
+
+        normalized_filters = self._normalized_filters(filters)
+        if album_ids is not None and first_n is not None:
+            raise ValueError("Choose explicit album_ids or first_n, not both.")
+        if album_ids is not None:
+            if not isinstance(album_ids, list) or not album_ids or any(not isinstance(x, int) for x in album_ids):
+                raise ValueError("album_ids must be a non-empty list of integers.")
+            if len(set(album_ids)) != len(album_ids) or len(album_ids) > self.MAX_PREVIEW_ALBUMS:
+                raise ValueError("album_ids must be unique and contain at most 100 Albums.")
+            states = self._albums.get_batch_state(sorted(album_ids))
+            if len(states) != len(album_ids): raise ValueError("One or more Albums do not exist.")
+            selection = {"mode":"ids", "album_ids":sorted(album_ids)}
+        else:
+            if not isinstance(first_n, int) or not 1 <= first_n <= self.MAX_PREVIEW_ALBUMS:
+                raise ValueError("first_n must be an integer from 1 to 100.")
+            self._repo.prepare()
+            rows, _ = self._albums.search(**normalized_filters, limit=first_n, offset=0,
+                dispatch_availability="available", include_dispatch=True)
+            states = self._albums.get_batch_state([row["id"] for row in rows])
+            selection = {"mode":"first_n", "first_n":first_n, "filters":normalized_filters,
+                "sort":normalized_filters.get("sort", "updated_at")}
+        if not states: raise ValueError("The dispatch selection contains no Albums.")
+
+        items, blocked = [], 0
+        for row in states:
+            result = self.eligibility(worker_kind, row["id"])
+            can_dispatch = bool(result["can_dispatch"]); blocked += int(not can_dispatch)
+            items.append({"album_id":row["id"], "album_uuid":row["uuid"], "title":row["title"],
+                "can_dispatch":can_dispatch, "eligibility":result["eligibility"],
+                "reason":result.get("reason"), "warnings":result.get("warnings", []),
+                "expected_group_count":1, "expected_work_item_count":len(configurations)})
+        now = self._now()
+        payload = {"preview_uuid":str(_uuid_mod.uuid4()), "worker_kind":adapter.worker_kind,
+            "dataset_type":adapter.dataset_type, "schema_version":adapter.schema_version,
+            "workspace":{"uuid":workspace["uuid"], "version":workspace["version"], "lifecycle_state":workspace["lifecycle_state"]},
+            "configurations":[{"uuid":item["uuid"], "version":item["version"]} for item in configurations],
+            "albums":[{"id":row["id"], "uuid":row["uuid"], "updated_at":row["updated_at"]} for row in states],
+            "selection":selection, "created_by_token_uuid":created_by_token_uuid,
+            "issued_at":now.isoformat(), "expires_at":(now + timedelta(minutes=10)).isoformat()}
+        response = {"preview_uuid":payload["preview_uuid"], "expires_at":payload["expires_at"],
+            "worker_kind":adapter.worker_kind, "workspace":workspace,
+            "configurations":configurations, "items":items,
+            "summary":{"albums":len(items), "eligible":len(items)-blocked, "blocked":blocked,
+                "groups":len(items), "work_items":len(items)*len(configurations)}, "selection":selection}
+        if not blocked: response["preview_token"] = self._sign_dispatch_preview(payload)
+        return response
 
     def create_batch(self, worker_kind, workspace_uuid=None, created_by_token_uuid=None):
         adapter = self._adapters.get(worker_kind)

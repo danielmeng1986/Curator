@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-055` — Status: `Proposed`
+`BT-055` — Status: `Complete`
 
 ## Title
 
@@ -59,3 +59,23 @@ select a bounded set, and preview exactly which Groups and Work Items would be c
 
 - “All filtered” always resolves to an explicit bounded server-side set.
 
+## Completion Record
+
+- Extended the Album list read model with dispatch-aware availability, active
+  Reservation context, and retained latest/history summary while reusing the
+  established search, Status, Studio, Model, rating, date, sort, and pagination
+  behavior.
+- Added Admin-only `GET /api/v1/work-dispatch/candidates`; the default
+  `available` view excludes reserved Albums, while `reserved` and `all` explain
+  why an Album cannot be dispatched.
+- Added Admin-only `POST /api/v1/work-dispatch/preview` for explicit unique IDs
+  or normalized first-`N` selection, bounded to 100 Albums. Preview binds the
+  Worker kind, Dataset/schema, Workspace, configurations, Album identities and
+  versions, selection/filter semantics, expiry, and initiating Admin Token.
+- Preview is zero-write: it creates no Batch, Group, Reservation, Work Item, or
+  Operation. A blocked selection receives consequences but no execution Token.
+- Added signed Token verification for tamper, expiry, Admin ownership, Album,
+  Workspace, configuration, and new-Reservation state; BT-056 will consume this
+  validation before atomic execution.
+- Verification: 6 focused Service/API tests passed and the complete Backend
+  regression passed all 712 tests.

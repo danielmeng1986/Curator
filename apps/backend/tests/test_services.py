@@ -1490,6 +1490,89 @@ class TestWorkDispatchFoundationContract(unittest.TestCase):
             self.assertEqual(1, count); self.assertEqual(1, active_groups)
 
 
+class TestWorkDispatchCandidatePreviewContract(unittest.TestCase):
+    def setUp(self):
+        self.conn = _make_db(); self.now = datetime(2026,8,10,tzinfo=timezone.utc)
+        self.conn.execute("INSERT INTO status (name) VALUES ('TEMPORARY')")
+        self.conn.execute("INSERT INTO studio (uuid,name) VALUES ('studio-1','North Studio')")
+        for number, title in enumerate(("North Portrait", "South Landscape"), start=1):
+            self.conn.execute("""INSERT INTO album
+                (uuid,studio_id,status_id,title,rating,capture_date,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?)""", (f"candidate-{number}",1,1,title,number,
+                    f"2026-0{number}-01","2026-01-01",f"2026-01-0{number}"))
+        self.conn.commit()
+        self.dispatch_repo = repo.WorkDispatchRepository(_db_factory(self.conn))
+        self.workspace_repo = repo.AIWorkspaceRepository(_db_factory(self.conn))
+        self.workspace = svc.AIWorkspaceService(self.workspace_repo).create("Dispatch Preview")
+        config_repo = repo.AIModelConfigurationRepository(_db_factory(self.conn))
+        self.config_service = svc.AIModelConfigurationService(config_repo)
+        self.config = self.config_service.create({"name":"Preview Config","model_identifier":"qwen",
+            "model_file":"qwen.gguf","vision_prompt_version":"v1","writer_prompt_version":"w1",
+            "sample_count":8,"context_size":4096,"threads":8,"gpu_layers":40,"max_tokens":800,
+            "temperature":0.2,"image_max_tokens":384})
+        self.service = svc.WorkDispatchService(self.dispatch_repo, repo.AlbumRepository(_db_factory(self.conn)),
+            workspace_repo=self.workspace_repo, configuration_service=self.config_service,
+            preview_secret=b"dispatch-preview-test", now_fn=lambda:self.now)
+
+    def tearDown(self): self.conn.close()
+
+    def test_candidates_reuse_album_filters_and_hide_reserved_by_default(self):
+        filtered = self.service.candidates("album_name_analysis", {"q":"Portrait", "rating_min":"1"})
+        self.assertEqual(1, filtered["total"]); self.assertEqual("North Portrait", filtered["items"][0]["title"])
+        batch = self.service.create_batch("album_name_analysis")
+        self.service.reserve_album(batch["uuid"], filtered["items"][0]["id"])
+        available = self.service.candidates("album_name_analysis")
+        self.assertEqual(["South Landscape"], [item["title"] for item in available["items"]])
+        all_rows = self.service.candidates("album_name_analysis", availability="all")
+        reserved = next(item for item in all_rows["items"] if item["title"] == "North Portrait")
+        self.assertFalse(reserved["can_dispatch"]); self.assertEqual("ALBUM_ALREADY_RESERVED", reserved["eligibility"])
+        self.assertIsNotNone(reserved["active_reservation"])
+
+    def test_preview_binds_versions_and_is_zero_write(self):
+        self.dispatch_repo.prepare()
+        before = {table:self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("work_dispatch_batch","work_dispatch_group","album_work_reservation","operation")}
+        result = self.service.preview("album_name_analysis", self.workspace["uuid"], [self.config["uuid"]],
+            filters={"q":"Portrait","sort":"updated_at"}, first_n=1, created_by_token_uuid="admin-token")
+        payload = self.service.read_preview(result["preview_token"])
+        after = {table:self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in before}
+        self.assertEqual(before, after); self.assertEqual(1, result["summary"]["groups"])
+        self.assertEqual(1, result["summary"]["work_items"])
+        self.assertEqual(self.workspace["version"], payload["workspace"]["version"])
+        self.assertEqual(self.config["version"], payload["configurations"][0]["version"])
+        self.assertEqual("2026-01-01", payload["albums"][0]["updated_at"])
+
+    def test_preview_rejects_tamper_expiry_and_unbounded_selection(self):
+        result = self.service.preview("album_name_analysis", self.workspace["uuid"], [self.config["uuid"]], album_ids=[1])
+        with self.assertRaises(svc.ServiceConflict) as tampered:
+            self.service.read_preview(result["preview_token"] + "x")
+        self.assertEqual("DISPATCH_PREVIEW_INVALID", tampered.exception.code)
+        self.now += timedelta(minutes=11)
+        with self.assertRaises(svc.ServiceConflict) as expired:
+            self.service.read_preview(result["preview_token"])
+        self.assertEqual("DISPATCH_PREVIEW_EXPIRED", expired.exception.code)
+        with self.assertRaises(ValueError):
+            self.service.preview("album_name_analysis", self.workspace["uuid"], [self.config["uuid"]], first_n=101)
+
+    def test_preview_is_bound_to_admin_and_current_album_state(self):
+        result = self.service.preview("album_name_analysis", self.workspace["uuid"], [self.config["uuid"]],
+            album_ids=[1], created_by_token_uuid="admin-one")
+        self.service.validate_preview_state(result["preview_token"], "admin-one")
+        with self.assertRaises(svc.ServiceConflict) as wrong_admin:
+            self.service.validate_preview_state(result["preview_token"], "admin-two")
+        self.assertEqual("DISPATCH_PREVIEW_INVALID", wrong_admin.exception.code)
+        self.conn.execute("UPDATE album SET updated_at='changed' WHERE id=1"); self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict) as stale:
+            self.service.validate_preview_state(result["preview_token"], "admin-one")
+        self.assertEqual("DISPATCH_PREVIEW_STALE", stale.exception.code)
+
+    def test_reserved_explicit_album_is_explained_and_has_no_token(self):
+        batch = self.service.create_batch("album_name_analysis"); self.service.reserve_album(batch["uuid"], 1)
+        result = self.service.preview("album_name_analysis", self.workspace["uuid"], [self.config["uuid"]], album_ids=[1])
+        self.assertEqual(1, result["summary"]["blocked"]); self.assertNotIn("preview_token", result)
+        self.assertEqual("ALBUM_ALREADY_RESERVED", result["items"][0]["eligibility"])
+
+
 class TestAIModelConfigurationContract(unittest.TestCase):
     def setUp(self):
         self.conn = _make_db(); self.repo = repo.AIModelConfigurationRepository(_db_factory(self.conn))

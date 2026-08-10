@@ -589,7 +589,7 @@ def _norm_album_list(row: dict) -> dict:
     """
     raw_names = row.get("model_names") or ""
     model_names = [n for n in raw_names.split(",") if n]
-    return {
+    result = {
         "id": row["id"],
         "uuid": row.get("uuid") or "",
         "title": row.get("title"),
@@ -609,6 +609,20 @@ def _norm_album_list(row: dict) -> dict:
         "status_name": row.get("status_name"),
         "model_names": model_names,
     }
+    if "active_group_uuid" in row:
+        result["active_reservation"] = None if not row.get("active_group_uuid") else {
+            "group_uuid": row["active_group_uuid"],
+            "batch_uuid": row.get("active_batch_uuid"),
+            "worker_kind": row.get("active_worker_kind"),
+            "reserved_at": row.get("reserved_at"),
+        }
+        result["work_summary"] = {
+            "group_count": row.get("work_group_count") or 0,
+            "latest_group_uuid": row.get("latest_group_uuid"),
+            "latest_worker_kind": row.get("latest_worker_kind"),
+            "latest_group_state": row.get("latest_group_state"),
+        }
+    return result
 
 
 def _norm_album_detail(row: dict) -> dict:
@@ -1140,6 +1154,8 @@ class AlbumRepository:
         sort: str = "updated_at",
         limit: int = 50,
         offset: int = 0,
+        dispatch_availability: str = "",
+        include_dispatch: bool = False,
     ) -> tuple[list[dict], int]:
         """Return a filtered, sorted page of albums plus the total count."""
         order_col = self._SORT_MAP.get(sort, "a.updated_at")
@@ -1174,6 +1190,12 @@ class AlbumRepository:
         if rating_max:
             conditions.append("a.rating <= ?")
             params.append(float(rating_max))
+        if dispatch_availability == "available":
+            conditions.append("NOT EXISTS (SELECT 1 FROM album_work_reservation awra WHERE awra.album_id=a.id)")
+        elif dispatch_availability == "reserved":
+            conditions.append("EXISTS (SELECT 1 FROM album_work_reservation awrr WHERE awrr.album_id=a.id)")
+        elif dispatch_availability not in ("", "all"):
+            raise ValueError("dispatch_availability must be available, reserved, or all.")
         for value, column, operator in (
             (capture_date_from, "a.capture_date", ">="),
             (capture_date_to, "a.capture_date", "<="),
@@ -1186,10 +1208,18 @@ class AlbumRepository:
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
+        dispatch_columns = """aw.group_uuid AS active_group_uuid, aw.batch_uuid AS active_batch_uuid,
+                aw.worker_kind AS active_worker_kind, aw.reserved_at,
+                (SELECT COUNT(*) FROM work_dispatch_group wgc WHERE wgc.album_id=a.id) AS work_group_count,
+                (SELECT wgl.uuid FROM work_dispatch_group wgl WHERE wgl.album_id=a.id ORDER BY wgl.created_at DESC,wgl.id DESC LIMIT 1) AS latest_group_uuid,
+                (SELECT wgl.worker_kind FROM work_dispatch_group wgl WHERE wgl.album_id=a.id ORDER BY wgl.created_at DESC,wgl.id DESC LIMIT 1) AS latest_worker_kind,
+                (SELECT wgl.group_state FROM work_dispatch_group wgl WHERE wgl.album_id=a.id ORDER BY wgl.created_at DESC,wgl.id DESC LIMIT 1) AS latest_group_state,""" if include_dispatch else ""
+        dispatch_join = "LEFT JOIN album_work_reservation aw ON aw.album_id=a.id" if include_dispatch else ""
         query = f"""
             SELECT a.id, a.uuid, a.title, a.description, a.scene, a.location,
                 a.capture_date, a.publish_date, a.rating, a.path, a.remark,
                 a.studio_id, a.status_id, a.created_at, a.updated_at,
+                {dispatch_columns}
                 s.name AS studio_name,
                 st.name AS status_name,
                 GROUP_CONCAT(DISTINCT COALESCE(m.display_name, m.primary_name))
@@ -1199,6 +1229,7 @@ class AlbumRepository:
             LEFT JOIN status st ON st.id = a.status_id
             LEFT JOIN album_model am ON am.album_id = a.id
             LEFT JOIN model m ON m.id = am.model_id
+            {dispatch_join}
             {where}
             GROUP BY a.id
             ORDER BY {order_col} DESC
@@ -2233,6 +2264,11 @@ class WorkDispatchRepository:
     @staticmethod
     def _norm(row):
         return dict(row) if row else None
+
+    def prepare(self):
+        """Ensure additive dispatch schema before dispatch-aware Album reads."""
+        with self._db() as conn:
+            self._ensure_schema(conn); conn.commit()
 
     def create_batch(self, fields):
         batch_uuid = str(uuid.uuid4())

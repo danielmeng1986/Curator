@@ -81,6 +81,7 @@ ALBUM_BATCH_PREVIEW_SECRET = secrets.token_bytes(32)
 IMPORT_PREVIEW_SECRET = secrets.token_bytes(32)
 QUARANTINE_PREVIEW_SECRET = secrets.token_bytes(32)
 SNAPSHOT_CLEANUP_PREVIEW_SECRET = secrets.token_bytes(32)
+WORK_DISPATCH_PREVIEW_SECRET = secrets.token_bytes(32)
 RESTORE_EXECUTION_LOCK = threading.Lock()
 
 # ---------------------------------------------------------------------------
@@ -534,7 +535,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         """Return the least privilege required by a versioned API route."""
         if path in {"/api/auth/me", "/api/auth/renewals"}:
             return "read"
-        if path in {"/api/backup", "/api/backup/cleanup", "/api/rollback"} or path.startswith("/api/backups") or path.startswith("/api/auth/") or path.startswith("/api/admin/") or path.startswith("/api/ai-workspaces"):
+        if path in {"/api/backup", "/api/backup/cleanup", "/api/rollback"} or path.startswith("/api/backups") or path.startswith("/api/auth/") or path.startswith("/api/admin/") or path.startswith("/api/ai-workspaces") or path.startswith("/api/work-dispatch"):
             return "admin"
         return "read" if method == "GET" else "write"
 
@@ -733,6 +734,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._get_ai_model_configurations()
             elif re.match(r"^/api/ai-model-configurations/[^/]+$", path):
                 self._get_ai_model_configuration(path.split("/")[-1])
+            elif path == "/api/work-dispatch/candidates":
+                self._get_work_dispatch_candidates(qs)
             elif path == "/api/backups":
                 self._get_backups()
             elif path == "/api/operations":
@@ -928,6 +931,28 @@ class AppHandler(SimpleHTTPRequestHandler):
             repo.AlbumRepository(open_db), self._ai_model_configuration_service(),
             svc.OperationService(repo.OperationRepository(open_db)),
         )
+
+    def _work_dispatch_service(self):
+        return svc.WorkDispatchService(
+            repo.WorkDispatchRepository(open_db), repo.AlbumRepository(open_db),
+            workspace_repo=repo.AIWorkspaceRepository(open_db),
+            configuration_service=self._ai_model_configuration_service(),
+            preview_secret=WORK_DISPATCH_PREVIEW_SECRET,
+        )
+
+    def _get_work_dispatch_candidates(self, qs):
+        if not self._require_admin_principal(): return
+        worker_kind = qs.get("worker_kind", [""])[0].strip()
+        filters = {key: qs.get(key, [""])[0].strip() for key in svc.WorkDispatchService.FILTER_FIELDS
+                   if qs.get(key, [""])[0].strip()}
+        result = self._work_dispatch_service().candidates(worker_kind, filters,
+            availability=qs.get("availability", ["available"])[0].strip(),
+            limit=int(qs.get("limit", ["50"])[0]), offset=int(qs.get("offset", ["0"])[0]))
+        self._send_collection(result["items"], limit=result["limit"], offset=result["offset"],
+            total=result["total"], filters=[{"field":key,"operator":"eq","value":value}
+                for key,value in {**result["filters"],"availability":result["availability"],
+                    "worker_kind":result["worker_kind"]}.items()],
+            sort=[{"field":result["filters"].get("sort","updated_at"),"direction":"desc"}])
 
     def _require_worker_principal(self):
         if self._principal["role"] != "writer":
@@ -1132,6 +1157,14 @@ class AppHandler(SimpleHTTPRequestHandler):
                 if not self._require_admin_principal(): return
                 created = self._ai_workspace_service().create(body.get("title", ""), self._principal.get("token_uuid"))
                 self._send_success(201, {"workspace": created})
+            elif path == "/api/work-dispatch/preview":
+                if not self._require_admin_principal(): return
+                preview = self._work_dispatch_service().preview(
+                    body.get("worker_kind", ""), body.get("workspace_uuid", ""),
+                    body.get("configuration_uuids"), album_ids=body.get("album_ids"),
+                    filters=body.get("filters"), first_n=body.get("first_n"),
+                    created_by_token_uuid=self._principal.get("token_uuid"))
+                self._send_success(200, {"preview":preview})
             elif re.match(r"^/api/ai-workspaces/[^/]+/items$", path):
                 if not self._require_admin_principal(): return
                 workspace_uuid = path.split("/")[3]

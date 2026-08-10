@@ -837,6 +837,39 @@ class TestVersionedApiAuthorization(_TestServerBase):
         status, detail = self._get(f"/api/v1/ai-work-items/{item['uuid']}", admin)
         self.assertEqual(200,status); self.assertEqual(2, len(detail["data"]["item"]["attempts"]))
 
+    def test_work_dispatch_candidates_and_preview_are_admin_only_and_zero_write(self):
+        marker = self._db.execute("SELECT COUNT(*) FROM album").fetchone()[0]
+        self._db.execute("""INSERT INTO album (uuid,title,rating,updated_at,created_at)
+            VALUES (?,?,?,?,?)""", (f"dispatch-preview-{marker}", f"Dispatch Preview {marker}", 5,
+                "2026-08-10", "2026-08-10"))
+        album_id = self._db.execute("SELECT last_insert_rowid()").fetchone()[0]; self._db.commit()
+        writer = self._bearer(self._issue(role="writer")); admin_issue = self._issue(role="admin")
+        admin = self._bearer(admin_issue)
+        status, denied = self._get("/api/v1/work-dispatch/candidates?worker_kind=album_name_analysis", writer)
+        self.assertEqual(403, status); self.assertEqual("AUTHORIZATION_INSUFFICIENT_SCOPE", denied["error"]["code"])
+        status, candidates = self._get(
+            f"/api/v1/work-dispatch/candidates?worker_kind=album_name_analysis&q=Dispatch%20Preview%20{marker}", admin)
+        self.assertEqual(200, status); self.assertTrue(any(item["id"] == album_id for item in candidates["data"]))
+
+        config = {"name":f"Dispatch Preview Config {marker}","model_identifier":"qwen","model_file":"qwen.gguf",
+            "vision_prompt_version":"v1","writer_prompt_version":"w1","sample_count":8,"context_size":4096,
+            "threads":8,"gpu_layers":40,"max_tokens":800,"temperature":0.2,"image_max_tokens":384}
+        _, config_body = self._post("/api/v1/ai-model-configurations", config, admin)
+        _, workspace_body = self._post("/api/v1/ai-workspaces", {"title":f"Dispatch Preview Workspace {marker}"}, admin)
+        before = {table:self._db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("work_dispatch_batch","work_dispatch_group","album_work_reservation","operation")}
+        status, preview_body = self._post("/api/v1/work-dispatch/preview", {
+            "worker_kind":"album_name_analysis", "workspace_uuid":workspace_body["data"]["workspace"]["uuid"],
+            "configuration_uuids":[config_body["data"]["configuration"]["uuid"]], "album_ids":[album_id]}, admin)
+        self.assertEqual(200, status); preview = preview_body["data"]["preview"]
+        self.assertIn("preview_token", preview); self.assertEqual(1, preview["summary"]["work_items"])
+        after = {table:self._db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in before}
+        self.assertEqual(before, after)
+        status, invalid = self._post("/api/v1/work-dispatch/preview", {
+            "worker_kind":"album_name_analysis", "workspace_uuid":workspace_body["data"]["workspace"]["uuid"],
+            "configuration_uuids":[config_body["data"]["configuration"]["uuid"]], "first_n":101}, admin)
+        self.assertEqual(400, status); self.assertEqual("REQUEST_INVALID", invalid["error"]["code"])
+
     def test_current_principal_and_renewal_request_are_token_safe(self):
         issued = self._issue(role="writer")
         headers = self._bearer(issued)
