@@ -17,3 +17,38 @@ Run the browserless client contract check with:
 ```bash
 node apps/web/tests/api_contract_test.mjs
 ```
+
+## Test layers
+
+Install the pinned Node dependencies and the default browser once:
+
+```bash
+npm ci
+npm run playwright:install
+```
+
+Use the fast contract layer during development:
+
+```bash
+npm run test:web:contract
+```
+
+Run the real Chromium smoke gate for each completed UI task:
+
+```bash
+npm run test:web:e2e
+```
+
+Before a release, install all supported browsers and run the cross-browser gate:
+
+```bash
+npm run playwright:install:all
+npm run test:web:e2e:all-browsers
+```
+
+The Playwright runner starts a disposable Backend fixture and never uses live
+Curator data. Successful runs remove their temporary traces, screenshots, and
+videos. Failed runs print the isolated artifact directory. Existing focused
+scripts in `apps/web/tests/*_browser_acceptance.mjs` remain detailed workflow
+gates; Backend and API tests remain authoritative for business rules and error
+contracts.

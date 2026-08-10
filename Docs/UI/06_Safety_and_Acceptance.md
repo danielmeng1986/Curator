@@ -53,3 +53,23 @@ The plan is fulfilled when a local user can:
 
 Future AI Collection Workspace acceptance is controlled separately by
 UI-011A–D and is not satisfied by restoring the historical Workspace UI.
+
+## Automated Test Layers
+
+UI verification uses complementary layers and keeps each rule at the lowest
+layer that can prove it clearly:
+
+1. Backend unit, service, workflow, and API tests remain authoritative for
+   business rules, durable side effects, authorization, and error contracts.
+2. Browserless Web contract tests verify request/response mapping, rendering
+   logic, and interaction rules with fast, focused feedback.
+3. Focused Playwright workflow scripts verify complete feature journeys against
+   disposable Backend resources.
+4. The Playwright runner provides a shared real-browser smoke gate. Chromium is
+   required for completed UI tasks; Chromium, WebKit, and Firefox form the
+   opt-in release gate.
+
+Real-browser tests must use UI-003 fixtures, must not access live Curator data,
+and must retain screenshots, traces, video, console errors, page errors, and
+failed-request evidence only for failed runs. Diagnostic attachments must not
+contain plaintext Tokens, registration secrets, or Bootstrap Codes.

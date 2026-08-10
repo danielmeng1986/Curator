@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 .DS_Store
+node_modules/
 # Local configuration is copied from committed examples and never contains
 # credentials, device tokens, model files, or machine-specific paths in Git.
 /config/*.toml

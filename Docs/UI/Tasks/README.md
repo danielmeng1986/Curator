@@ -59,6 +59,7 @@ snapshot, archive, and output resources.
 | [UI-014](UI-014-repair-and-quarantine-browser-acceptance.md) | Repair, Issue, and Quarantine browser acceptance | Proposed |
 | [UI-015](UI-015-permission-disclosure-browser-acceptance.md) | Role and diagnostic-disclosure acceptance | Proposed |
 | [UI-016](UI-016-establish-ui-workflow-readiness-gate.md) | Complete UI workflow readiness gate | Proposed |
+| [UI-017](UI-017-establish-playwright-browser-acceptance.md) | Reproducible real-browser acceptance infrastructure | Complete |
 
 ## Dependency outline
 
@@ -70,3 +71,7 @@ workflows, and `UI-016` composes them into the final readiness gate.
 For AI Workspace delivery, UI-011A/B precede dispatch implementation UI-011E.
 UI-011F proves the dispatch boundary; UI-011C/D consume the resulting Groups
 and Work Items for review and end-to-end acceptance.
+
+UI-017 formalizes Playwright as the real-browser acceptance layer. It preserves
+the faster Backend, API, and client-contract layers and provides the shared
+runner used by feature and release browser gates.
