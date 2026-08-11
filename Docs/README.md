@@ -32,6 +32,7 @@ recorded only as a product Memo.
 | Web UI | [UI Plan](UI/Curator_Web_UI_Plan.md), [UI Matrix](UI/Workflow-Readiness-Matrix.md), [UI Tasks](UI/Tasks/README.md) | apps.web behavior and browser acceptance |
 | Runtime/project | [Runtime Layout](Project/Runtime-Layout.md), [Project Tasks](Project/Tasks/README.md) | Source/runtime boundaries and MT work |
 | Documentation work | [Documentation Tasks](Tasks/README.md) | DOC/DBDOC maintenance plans and status |
+| Releases | [Release governance and index](Release/README.md) | Version classes, REL tasks, deployment records, and publication evidence |
 | Application manuals | [User Manuals](User-Manual/README.md) | Bilingual Server/Client operating guidance by role |
 | Historical database material | [Database Historical](Database/Historical/Historical-Workspace-Album.md) | Retired models and completed migrations; not active guidance |
 | Future native product | [macOS Native Curator Memo](Project/macOS-Native-Curator-Memo.md) | Non-binding future product thinking |
