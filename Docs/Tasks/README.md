@@ -33,10 +33,18 @@ series rather than silently changing behavior from a documentation task.
 | [DOC-003](DOC-003-reconcile-conceptual-data-model.md) | Conceptual model aligned with implemented and future domains | Complete |
 | [DOC-004](DOC-004-convert-backend-architecture-to-as-built.md) | Backend architecture rewritten as current as-built truth | Complete |
 | [DBDOC-006](DBDOC-006-add-schema-documentation-drift-gate.md) | Automated detection of schema-documentation drift | Complete |
+| [DOC-005](DOC-005-establish-application-user-manual-specification.md) | Application-manual scope, structure, localization, roles, and release contract | Complete |
+| [DOC-006](DOC-006-author-bilingual-backend-server-manual.md) | English/Chinese apps.backend Server operator manual | Proposed |
+| [DOC-007](DOC-007-author-bilingual-web-client-role-manuals.md) | English/Chinese apps.web overview and role manuals | Proposed |
+| [DOC-008](DOC-008-establish-user-manual-release-refresh-gate.md) | Repeatable milestone/Tag manual refresh and parity gate | Proposed |
 
 ## Recommended execution order
 
 `DOC-001 → DBDOC-001 → DBDOC-002 → DBDOC-003 → DBDOC-004 → DBDOC-005 → DOC-002 → DOC-003 → DOC-004 → DBDOC-006`
+
+Application manual sequence:
+
+`DOC-005 → DOC-006 → DOC-007 → DOC-008`
 
 Authority and schema ownership come first. The catalog then supplies the facts
 used by diagrams and workflow maps. Navigation and higher-level architecture
