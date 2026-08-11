@@ -123,7 +123,7 @@ Review affected documentation when any of the following changes:
 | --- | --- | --- |
 | `Backend/Specifications/API-Contract.md` | Approved/current contract | Controls shared API behavior; implementation evidence verifies it. |
 | `UI/Workflow-Readiness-Matrix.md` | Current | Reports implemented UI coverage and gate evidence. |
-| `Database/Copilot_Schema_and_Migration_Instructions.md` | Historical candidate | One-time v0.2 migration guidance; DBDOC-005 will relocate it. |
+| `Database/Historical/v0.2-Album-Path-and-Relation-Migration.md` | Historical | Completed one-time v0.2 migration guidance, retained outside active reading paths. |
 | `Backend/Backend-Architecture.md` | Current but due re-verification | Owns boundaries; DOC-004 will remove stale proposal language. |
 | `Project/macOS-Native-Curator-Memo.md` | Memo | Preserves future product thinking without authorizing implementation. |
 | `Tasks/DOC-001-establish-documentation-authority-and-lifecycle.md` | Task | Bounded documentation-governance delivery record. |
@@ -134,4 +134,3 @@ A documentation task is complete only when its deliverables exist, links
 resolve, examples and diagrams render where applicable, conflicts are either
 resolved or assigned to the correct task series, and its index and completion
 record reflect verified evidence.
-

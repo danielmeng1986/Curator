@@ -69,4 +69,3 @@ and [AI Workspace Acceptance Fixture](../../Backend/Specifications/AI-Workspace-
 - `test_ai_workspace_workflow_acceptance`
 - UI-011D Workspace review browser acceptance
 - BT-043 through BT-053, BT-057, and BT-058
-

@@ -139,3 +139,6 @@ Until BT-059 is complete:
 After BT-059, its canonical bootstrap/migration contract supersedes the
 temporary split-authority rules in this document and this file must be reverified.
 
+Historical field and relationship semantics are preserved in
+[Historical Workspace Album](Historical/Historical-Workspace-Album.md), not in
+the active diagram set.

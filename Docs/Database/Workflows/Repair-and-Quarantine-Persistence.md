@@ -66,4 +66,3 @@ Snapshot Specification.
 - `test_repair_decision_workflow_acceptance`
 - `test_quarantine_workflow_acceptance`
 - UI-014 and UI-015 browser acceptance
-

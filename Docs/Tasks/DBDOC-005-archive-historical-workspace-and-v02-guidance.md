@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DBDOC-005` — Status: `Proposed`
+`DBDOC-005` — Status: `Complete`
 
 ## Goal
 
@@ -56,3 +56,10 @@ out of active database documentation while preserving their historical value.
 - Historical facts must not be rewritten to resemble the new AI Workspace; they
   are different models with different lifecycle rules.
 
+## Completion Record
+
+- Relocated and relabeled the completed v0.2 migration instruction as Historical.
+- Added the retired Workspace Album purpose, relationship translation,
+  materialization checks, retirement evidence, and current replacement map.
+- Removed the historical model from active diagram navigation while retaining
+  explicit provenance links.

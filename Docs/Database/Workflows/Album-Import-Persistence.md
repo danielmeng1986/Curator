@@ -52,4 +52,3 @@ only maps that behavior to persistence.
 - `test_import_workflow_acceptance`
 - UI-013 full Import browser acceptance
 - BT-019, BT-020, BT-026, BT-027, and BT-036
-
