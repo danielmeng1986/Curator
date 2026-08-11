@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DOC-002` — Status: `Proposed`
+`DOC-002` — Status: `Complete`
 
 ## Goal
 
@@ -58,3 +58,10 @@ historical material.
 
 - The entry point should orient and route; excessive detail will make it stale again.
 
+## Completion Record
+
+- Rewrote AI Context around current Backend ownership, apps.web, external Worker,
+  Dispatch, evidence, review, Promotion, and historical boundaries.
+- Rebuilt the documentation index with real current entry points and task-oriented paths.
+- Removed the nonexistent ADR directory from the active reading path and labeled
+  the native application Memo and Historical Workspace correctly.

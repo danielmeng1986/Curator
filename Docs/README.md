@@ -1,207 +1,66 @@
 # Curator Documentation
 
-> **Code implements behavior. Docs preserve intent.**
+> Documentation status: Current
+> Owner: Project documentation
+> Last verified: 2026-08-11
+
+Curator documentation preserves product intent, current architecture,
+behavioral contracts, schema knowledge, delivery tasks, and decision history.
+Start with [AI Context](AI-CONTEXT.md) for task routing and
+[Documentation Governance](Documentation-Governance.md) for authority rules.
+
+## Current system in one paragraph
+
+Curator is a local-first digital asset management and intelligence platform.
+`apps.backend` owns SQLite and all workflow/filesystem mutations; `apps.web` is
+the Album-oriented administrative client; an external AI Worker communicates
+only through authenticated REST and receives controlled Photo evidence. Admins
+dispatch Albums, review AI results, and explicitly promote one approved name.
+The historical `workspace_album` model is archived; the future macOS curator is
+recorded only as a product Memo.
+
+## Documentation map
+
+| Area | Entry point | Authority/purpose |
+| --- | --- | --- |
+| AI Agent orientation | [AI-CONTEXT.md](AI-CONTEXT.md) | Current task routing and non-negotiable boundaries |
+| Governance | [Documentation-Governance.md](Documentation-Governance.md) | Lifecycle, conflict, ownership, and archival rules |
+| Vision/concepts | [01-Vision.md](01-Vision.md), [04-Data-Model.md](04-Data-Model.md), [05-AI.md](05-AI.md) | Product intent; check lifecycle labels before treating concepts as current |
+| Backend | [Backend Architecture](Backend/Backend-Architecture.md), [Specifications](Backend/Specifications/README.md), [Supported Surface](Backend/Supported-Backend-Surface.md) | Current boundaries and approved behavior |
+| Backend delivery | [Backend Tasks](Backend/Tasks/README.md), [Testing Strategy](Backend/Testing-Strategy.md), [Readiness Matrix](Backend/Workflow-Readiness-Matrix.md) | Implementation scope and evidence |
+| Database | [Database Model](Database/Curator_Database_Model.md), [Schema Source](Database/Schema-Source-of-Truth.md), [Schema Catalog](Database/Schema-Catalog.md) | Physical persistence navigation and authority |
+| Web UI | [UI Plan](UI/Curator_Web_UI_Plan.md), [UI Matrix](UI/Workflow-Readiness-Matrix.md), [UI Tasks](UI/Tasks/README.md) | apps.web behavior and browser acceptance |
+| Runtime/project | [Runtime Layout](Project/Runtime-Layout.md), [Project Tasks](Project/Tasks/README.md) | Source/runtime boundaries and MT work |
+| Documentation work | [Documentation Tasks](Tasks/README.md) | DOC/DBDOC maintenance plans and status |
+| Historical database material | [Database Historical](Database/Historical/Historical-Workspace-Album.md) | Retired models and completed migrations; not active guidance |
+| Future native product | [macOS Native Curator Memo](Project/macOS-Native-Curator-Memo.md) | Non-binding future product thinking |
+
+## Reading order by task
+
+1. Read Governance and AI Context.
+2. Read the current Architecture for the affected component.
+3. Read the controlling Specification and supported surface.
+4. For persistence work, read Schema Source, Catalog, the domain diagram, and
+   the relevant persistence workflow.
+5. Read the owning task and its dependencies.
+6. Inspect implementation and tests only after the contract boundary is clear.
+
+## Documentation lifecycle
+
+Documents are classified as `Current`, `Approved`, `Historical`, `Memo`, or
+`Task`. Task execution status is separate. Existing older documents without a
+header must be verified against current authority before use; DOC tasks are
+progressively classifying and updating them.
+
+Code and tests show what currently happens. Specifications state what behavior
+is allowed or required. Declared schema sources define physical persistence.
+Architecture explains boundaries. A mismatch is drift to resolve, not permission
+to silently redefine the system.
+
+## Maintenance rule
+
+When behavior or schema changes, update the governing Specification/schema
+source, affected Current documents, task status, and acceptance evidence in the
+same delivery. Preserve retired guidance under Historical rather than leaving
+it on an active reading path.
 
-Welcome to the Curator Design Book.
-
-This documentation is the long-term knowledge base of the Curator project. It describes **why the system exists, how it is designed, and the principles behind its implementation.**
-
-Unlike source code, these documents are intended to remain stable over time. They preserve architectural decisions, project philosophy, and design intent, allowing both humans and AI assistants to understand the project consistently.
-
----
-
-# What is Curator?
-
-Curator is a **Personal Digital Asset Intelligence Platform**.
-
-Its goal is **not** to become another media player or photo management application.
-
-Instead, Curator provides a structured platform for organizing, validating, enriching, and understanding personal digital assets with the assistance of AI.
-
-Digital assets may include:
-
-- Images
-- Videos
-- Documents
-- Music
-- Game screenshots
-- AI-generated content
-- Other personal collections
-
-The architecture is intentionally designed so that additional asset types can be integrated in the future.
-
----
-
-# Design Philosophy
-
-Several principles guide every design decision within Curator.
-
-## Archive is permanent
-
-The Archive is considered the original source of all assets.
-
-It should never be modified directly.
-
-Every operation should be reproducible from the Archive.
-
----
-
-## Workspace is editable
-
-All editing operations are performed inside the Workspace.
-
-Workspace represents the current working state of the Archive.
-
-Validation, review, AI analysis, and rename planning are all performed here.
-
----
-
-## Database is the source of truth
-
-Metadata should not be inferred repeatedly from filenames.
-
-Instead, Curator stores structured knowledge inside its database.
-
-The database represents the authoritative description of the collection.
-
----
-
-## Human remains the final decision maker
-
-AI is an assistant.
-
-It may suggest:
-
-- tags
-- captions
-- identities
-- relationships
-- similarity
-- rename plans
-
-However, operations that permanently modify user assets require human confirmation.
-
----
-
-## Documentation is part of the system
-
-Documentation is not an afterthought.
-
-It is considered part of the architecture.
-
-Every significant architectural decision should be documented.
-
----
-
-# Documentation Structure
-
-The documentation is organized into several independent chapters.
-
-| File | Purpose |
-|-------|----------|
-| AI-CONTEXT.md | Entry point for AI assistants |
-| Documentation-Governance.md | Document authority, lifecycle, ownership, and conflict rules |
-| 01-Vision.md | Project vision and philosophy |
-| 02-Architecture.md | Overall system architecture |
-| 03-Workflow.md | Data processing workflow |
-| 04-Data-Model.md | Core concepts and data model |
-| 05-AI.md | AI architecture and responsibilities |
-| 06-Roadmap.md | Development roadmap |
-| Project/Runtime-Layout.md | Versioned source, local configuration, and runtime-data boundaries |
-| Project/Tasks/ | Cross-cutting repository migration tasks |
-| Tasks/ | Documentation governance and database-documentation maintenance tasks |
-| ADR/ | Architecture Decision Records |
-
-Each chapter focuses on a single topic.
-
-Whenever possible, implementation details should remain inside the source code, while long-term knowledge belongs inside these documents.
-
----
-
-# Reading Order
-
-For humans:
-
-1. Vision
-2. Architecture
-3. Workflow
-4. Data Model
-5. AI
-6. Roadmap
-
-For AI assistants:
-
-1. AI-CONTEXT.md
-2. Vision
-3. Architecture
-4. Relevant ADR documents
-5. Requested implementation files
-
----
-
-# Architecture Decision Records (ADR)
-
-Architectural decisions are stored separately under the `ADR/` directory.
-
-Each ADR answers four questions:
-
-- What decision was made?
-- Why was it made?
-- What alternatives were considered?
-- What consequences does this decision introduce?
-
-Once accepted, ADRs become part of the project's permanent design history.
-
----
-
-# Updating Documentation
-
-Documentation should evolve together with the project.
-
-General guidelines:
-
-- Keep concepts stable.
-- Separate architecture from implementation.
-- Record important decisions before they are forgotten.
-- Prefer adding new ADRs instead of modifying historical decisions.
-- Avoid documenting temporary implementation details.
-
-The controlling authority, lifecycle labels, review triggers, archival policy,
-and task-routing rules are defined in
-[Documentation Governance](Documentation-Governance.md). In brief: code and
-tests evidence current behavior, Specifications control required behavior,
-declared schema sources control physical persistence, Architecture controls
-system boundaries, and Historical documents or Memos never authorize new work.
-
----
-
-# Scope
-
-This documentation intentionally focuses on long-term design.
-
-It does **not** attempt to replace:
-
-- API documentation
-- Source code comments
-- SQL schema
-- User manuals
-
-Instead, it explains the reasoning behind the system.
-
----
-
-# Audience
-
-This documentation is written for:
-
-- Future maintainers
-- Contributors
-- AI coding assistants
-- The project owner
-- Future versions of Curator
-
----
-
-> Curator is not merely a software project.
-
-> It is an evolving knowledge system for managing personal digital assets over the long term.
