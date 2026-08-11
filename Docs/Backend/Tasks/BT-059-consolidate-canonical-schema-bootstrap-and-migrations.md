@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-059` — Status: `Proposed`
+`BT-059` — Status: `Complete`
 
 ## Goal
 
@@ -61,3 +61,20 @@ order.
 - This task must distinguish adoption of a matching pre-existing object from
   silently accepting an incompatible object with the same name.
 
+## Implementation Decisions
+
+- `0000_base_catalog.sql` is the canonical empty-database starting schema.
+- The runner applies every numbered SQL source in lexical order and records its stem.
+- Matching pre-existing `album.remark` is adopted; active historical Workspace
+  rows require the separate guarded MT-008 workflow before `0002` is recorded.
+- `0014` owns Authentication and operational workflow tables. Repository DDL
+  remains defensive compatibility only.
+- All pending steps execute in one transaction after a verified backup; each
+  step runs integrity and FK verification. A current replay is a no-write/no-backup run.
+
+## Completion Record
+
+- Added canonical base and Authentication/operations migration sources.
+- Replaced the single-purpose runner with ordered empty-build/adoption/replay behavior.
+- Added empty, existing, partial, replay, guarded historical, and rollback tests.
+- Migration, Repository, workflow-readiness, and full Backend regression passed.

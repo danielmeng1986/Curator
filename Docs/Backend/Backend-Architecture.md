@@ -121,11 +121,10 @@ Services do not depend on HTTP request objects or SQLite rows. Controllers do
 not execute SQL. Some current Services and composition remain in large modules;
 this is implementation shape, not permission to cross the dependency boundary.
 
-Repositories currently also contain defensive schema creation/upgrade for
-Authentication and several workflow tables. Versioned AI schema exists in
-migrations, while the base database is assumed. This split authority is
-documented in [Schema Source of Truth](../Database/Schema-Source-of-Truth.md)
-and is owned for consolidation by BT-059.
+Repositories retain defensive schema compatibility checks. The canonical base,
+AI, Authentication and operational schema is owned by ordered migrations; the
+Repository checks must remain structurally compatible and cannot depend on
+access order. See [Schema Source of Truth](../Database/Schema-Source-of-Truth.md).
 
 ## Database and migrations
 
@@ -134,11 +133,11 @@ enable FK behavior and Repository methods own SQL/row translation. Integer IDs
 serve local FK efficiency; UUIDs are stable external/business identities where
 defined by the contract.
 
-The migration runner creates verified pre-write backups and records
-`schema_migration`, but today its default module handles only `0001`; MT-008 has
-a separate guarded archive command and AI migrations are versioned SQL exercised
-by tests. The project must not claim empty-database reconstruction until BT-059
-implements and proves it.
+The migration runner creates verified pre-write backups, builds an empty
+database from `0000`, applies every unrecorded migration through `0014` in order,
+verifies integrity/FKs, and records each step in `schema_migration`. MT-008
+retains a guarded command because active historical Workspace rows require
+business validation rather than generic DDL adoption.
 
 PostgreSQL is future architecture only. Current code should preserve Service
 meaning outside SQL, but no unused cross-engine abstraction is required.
@@ -235,7 +234,7 @@ database or managed production paths.
 
 | Area | Status |
 | --- | --- |
-| Canonical empty-database bootstrap and ordered migration runner | Proposed BT-059 |
+| Canonical empty-database bootstrap and ordered migration runner | Current; BT-059 complete |
 | Digital Asset Trash and irreversible purge | Specification Ready/implementation Blocked: BT-033–035, UI-010E |
 | macOS native Photo curation application | Memo only |
 | PostgreSQL implementation | Future only; no current task |

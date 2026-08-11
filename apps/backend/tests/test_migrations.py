@@ -38,11 +38,15 @@ class AlbumRemarkMigrationTests(unittest.TestCase):
             with sqlite3.connect(database) as conn:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(album)")}
                 row = conn.execute("SELECT id, uuid, title, path, status_id, remark FROM album WHERE id = 7").fetchone()
-                version = conn.execute("SELECT migration_id FROM schema_migration").fetchone()[0]
+                versions = [row[0] for row in conn.execute(
+                    "SELECT migration_id FROM schema_migration ORDER BY migration_id"
+                )]
                 self.assertEqual([], conn.execute("PRAGMA foreign_key_check").fetchall())
             self.assertIn("remark", columns)
             self.assertEqual((7, "album-7", "Existing Album", "A/Existing", 42, None), row)
-            self.assertEqual(MIGRATION_ID, version)
+            self.assertIn(MIGRATION_ID, versions)
+            self.assertEqual("0000_base_catalog", versions[0])
+            self.assertEqual("0014_authentication_and_operations", versions[-1])
 
     def test_rerun_is_a_no_op_without_a_second_backup(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -201,3 +205,63 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
             sql=(root/"0013_ai_workspace_retention.sql").read_text(); conn.executescript(sql); conn.executescript(sql)
             columns={row[1] for row in conn.execute("PRAGMA table_info(ai_workspace_retention)")}
         self.assertTrue({"retention_classification","outcome_classification","archive_reason"}<=columns)
+
+
+class CanonicalOrderedMigrationTests(unittest.TestCase):
+    def test_empty_database_builds_complete_current_schema_in_order(self):
+        expected = {
+            "album", "photo", "device_registration", "operation", "repair_case",
+            "quarantine_item", "ai_workspace", "workspace_album_ai_worker",
+            "work_dispatch_batch", "ai_photo_evidence_manifest",
+            "ai_work_item_review", "workspace_album_name_promotion",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); database = root / "empty.db"
+            result = migrate(database, root / "backups")
+            with sqlite3.connect(database) as conn:
+                tables = {row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )}
+                versions = [row[0] for row in conn.execute(
+                    "SELECT migration_id FROM schema_migration ORDER BY migration_id"
+                )]
+                self.assertEqual([], conn.execute("PRAGMA foreign_key_check").fetchall())
+                self.assertEqual("ok", conn.execute("PRAGMA integrity_check").fetchone()[0])
+            self.assertTrue(expected <= tables)
+            self.assertEqual(15, len(versions))
+            self.assertEqual(tuple(versions), result.applied_migrations)
+            self.assertTrue(result.backup and result.backup.is_file())
+
+    def test_partial_upgrade_applies_only_missing_tail_then_replays_without_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); database = root / "partial.db"
+            migrate(database, root / "backups")
+            with sqlite3.connect(database) as conn:
+                conn.execute("DROP TABLE ai_workspace_retention")
+                conn.execute("DELETE FROM schema_migration WHERE migration_id='0013_ai_workspace_retention'")
+                conn.execute("DROP TABLE admin_bootstrap_code")
+                conn.execute("DELETE FROM schema_migration WHERE migration_id='0014_authentication_and_operations'")
+            resumed = migrate(database, root / "backups")
+            replay = migrate(database, root / "backups")
+            self.assertEqual(
+                ("0013_ai_workspace_retention", "0014_authentication_and_operations"),
+                resumed.applied_migrations,
+            )
+            self.assertFalse(replay.applied); self.assertIsNone(replay.backup)
+            self.assertEqual(2, len(list((root / "backups").glob("*.db"))))
+
+    def test_active_historical_workspace_requires_guarded_mt008_and_rolls_back(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); database = root / "legacy.db"
+            with sqlite3.connect(database) as conn:
+                conn.executescript((Path(__file__).parents[1] / "migrations" / "0000_base_catalog.sql").read_text())
+                conn.execute("INSERT INTO workspace_album(studio_name) VALUES ('legacy')")
+            with self.assertRaisesRegex(Exception, "MT-008"):
+                migrate(database, root / "backups")
+            with sqlite3.connect(database) as conn:
+                self.assertFalse(conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ai_workspace'"
+                ).fetchone())
+                self.assertFalse(conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migration'"
+                ).fetchone())

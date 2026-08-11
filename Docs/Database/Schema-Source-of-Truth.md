@@ -12,30 +12,25 @@ not replace SQL migrations or authorize schema changes.
 
 ## Current conclusion
 
-Curator does **not yet have one self-contained source that can create the full
-current database from an empty file**. The schema is presently split across:
+Curator has one Backend-owned ordered migration path. `0000_base_catalog.sql`
+creates the canonical base catalog from an empty SQLite file; `0001` through
+`0014` upgrade it through historical metadata, AI Workspace/Dispatch, and
+Authentication/operational workflow persistence. The runner records every
+step, verifies integrity/FKs, and is safe to replay.
 
-1. a pre-existing/base catalog schema assumed by the migration runner;
-2. explicit versioned SQL migrations, primarily for AI Workspace and Dispatch;
-3. defensive `CREATE TABLE IF NOT EXISTS` statements owned by Repositories;
-4. test-only base fixtures that approximate the required starting schema.
-
-This is documented truth, not the desired end state. BT-059 owns consolidation
-of a canonical bootstrap and ordered migration execution. Until BT-059 is
-complete, the authority rules below prevent tests or diagrams from being
-mistaken for deployable schema source.
+Repository `CREATE TABLE IF NOT EXISTS` calls remain defensive compatibility
+guards. They are not independent design authority and must remain structurally
+compatible with the migrations. Test fixtures are acceptance inputs only.
 
 ## Authority rules
 
 | Schema category | Current authority | Supporting evidence | Not authoritative |
 | --- | --- | --- | --- |
-| Base asset catalog (`status`, `model`, `studio`, `album`, relationship tables, `photo`) | Existing deployed SQLite schema plus Repository query contract | Repository/service/API disposable fixtures and Database v0.2 docs | Any single test fixture as production bootstrap |
+| Base asset catalog (`status`, `model`, `studio`, `album`, relationship tables, `photo`) | `0000_base_catalog.sql`, evolved by later migrations | Repository/service/API tests and disposable introspection | Test fixtures or a deployed DB copy |
 | Historical `workspace_album` | Existing deployed schema plus MT-008 archival migration | `archive_workspace_album.py`, MT-008 tests and historical docs | Active client/API models |
 | Versioned AI Workspace/Dispatch additions | `apps/backend/migrations/0003`–`0013` SQL | Migration tests and matching Repository contracts | Mermaid diagrams or runtime-created test copies |
-| Authentication | `AuthRepository._ensure_schema` DDL | Authentication service/API tests | Migrations (none currently define these tables) |
-| Import execution claim | `ImportRepository` DDL | Import API/workflow tests | In-memory fixture omissions |
-| Repair, suppression, Issue, Operation | Owning Repository defensive DDL and required-column upgrades | Repository/service/workflow tests | The smaller shared fixture definition by itself |
-| Snapshot/Restore/Quarantine claims and items | Owning Repository defensive DDL | Admin and recovery workflow tests | Snapshot files or operational logs |
+| Authentication | `0014_authentication_and_operations.sql` | Defensive AuthRepository DDL and auth tests | Repository access order |
+| Import/Repair/Issue/Operation/Recovery persistence | `0014_authentication_and_operations.sql` | Defensive Repository DDL and workflow tests | Repository access order |
 | Migration bookkeeping | `migrations/runner.py` definition of `schema_migration` | Migration tests | Migration README prose alone |
 
 For actual behavior, SQLite introspection of a reviewed disposable copy is the
@@ -48,7 +43,7 @@ into versioned schema source.
 
 | Tables | Declared source today | Status |
 | --- | --- | --- |
-| `status`, `model`, `studio`, `album`, `album_model`, `album_relation`, `photo` | Pre-existing base database; shapes repeated in Backend test fixtures and Repository queries | Active; canonical bootstrap missing |
+| `status`, `model`, `studio`, `album`, `album_model`, `album_relation`, `photo` | `0000_base_catalog.sql`, then ordered migrations | Active canonical schema |
 | `workspace_album` | Pre-existing base database plus MT-008 archive migration | Historical/archived |
 | `schema_migration` | `apps/backend/migrations/runner.py` | Active bookkeeping |
 
@@ -97,24 +92,20 @@ compatible until BT-059 removes or narrows the duplication.
 | `issue`, `issue_link` | `IssueRepository` |
 | `operation` | `OperationRepository` |
 
-These are current runtime schema contracts but are not yet represented by
-ordered migration files. BT-059 must preserve their data and compatibility
-when establishing canonical migration ownership.
+These are defined by ordered migration `0014`; matching Repository DDL is a
+defensive compatibility layer.
 
 ## Construction and upgrade behavior today
 
-1. The default runtime expects a configured SQLite database with base catalog tables.
-2. `python3 -m apps.backend.migrations` checks that `album` already exists,
-   creates a verified backup, and applies/adopts only migration `0001`.
-3. MT-008 archival uses its separate guarded command and records migration `0002`.
-4. SQL files `0003`–`0013` are versioned design sources and are exercised by
-   migration tests, but the default runner does not currently iterate them.
-5. Repository initialization creates or upgrades workflow-owned tables as the
-   corresponding repository is used.
-
-Therefore the migrations README statement that ordered migrations are applied
-by the module is broader than current implementation. It must be corrected by
-BT-059, not hidden in documentation.
+1. `python3 -m apps.backend.migrations` creates a missing SQLite file or opens
+   an existing one and determines unrecorded migrations.
+2. Before its first write it creates and verifies a SQLite backup.
+3. It applies unrecorded `0000`–`0014` sources in order in one transaction,
+   checking integrity and foreign keys after each step.
+4. Existing matching `album.remark` is adopted safely. Active historical
+   Workspace rows cause a refusal until the guarded MT-008 command validates
+   and archives them; the generic runner never guesses that business decision.
+5. A current replay performs verification and creates no second backup.
 
 ## Test fixture role
 
@@ -127,8 +118,6 @@ shape is convenient.
 
 ## Rule for future schema changes
 
-Until BT-059 is complete:
-
 - add an approved Backend task and controlling Specification change when behavior changes;
 - add a numbered, rerunnable migration for persistent schema changes;
 - keep any Repository compatibility DDL structurally identical and tested;
@@ -136,8 +125,8 @@ Until BT-059 is complete:
 - test against a disposable database and run migration plus full Backend regression;
 - never use a live Curator database to generate or validate documentation.
 
-After BT-059, its canonical bootstrap/migration contract supersedes the
-temporary split-authority rules in this document and this file must be reverified.
+The machine-readable inventory and drift gate introduced by DBDOC-006 verify
+that this ordered result remains aligned with documentation.
 
 Historical field and relationship semantics are preserved in
 [Historical Workspace Album](Historical/Historical-Workspace-Album.md), not in
