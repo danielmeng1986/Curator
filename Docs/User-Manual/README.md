@@ -18,3 +18,21 @@ exclusion, safety rules, and release refresh process are defined in the
 
 Only supported `apps/` applications are listed. Developer scripts under
 `tools/` are not user-manual applications.
+
+## Milestone and release refresh
+
+At every application milestone and before creating a release Tag:
+
+1. Copy and complete the [Release Refresh Record template](Release-Refresh-Record-Template.md).
+2. Recheck supported entry points, role/navigation changes, high-risk workflows,
+   browser acceptance evidence, known limitations, and English/Chinese content.
+3. Run the read-only documentation gate twice:
+
+   ```bash
+   python3 tools/check_user_manuals.py
+   ```
+
+The gate reads repository documentation and application entry-point files only. It does
+not start the Server, access the catalog database, or execute a user workflow. A failed
+check blocks the documentation refresh until corrected or assigned to the owning BT,
+UI, MT, or DOC task.

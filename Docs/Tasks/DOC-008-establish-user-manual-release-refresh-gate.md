@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DOC-008` — Status: `Proposed`
+`DOC-008` — Status: `Complete`
 
 ## Goal
 
@@ -28,3 +28,8 @@ deterministic application, role, link, and localization parity checks.
 
 - DOC-005 through DOC-007.
 
+## Delivered
+
+- Read-only gate: `python3 tools/check_user_manuals.py`.
+- Acceptance tests: `apps/backend/tests/test_user_manual_documentation.py`.
+- Repeatable record: `Docs/User-Manual/Release-Refresh-Record-Template.md`.
