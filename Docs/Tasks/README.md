@@ -34,7 +34,7 @@ series rather than silently changing behavior from a documentation task.
 | [DOC-004](DOC-004-convert-backend-architecture-to-as-built.md) | Backend architecture rewritten as current as-built truth | Complete |
 | [DBDOC-006](DBDOC-006-add-schema-documentation-drift-gate.md) | Automated detection of schema-documentation drift | Complete |
 | [DOC-005](DOC-005-establish-application-user-manual-specification.md) | Application-manual scope, structure, localization, roles, and release contract | Complete |
-| [DOC-006](DOC-006-author-bilingual-backend-server-manual.md) | English/Chinese apps.backend Server operator manual | Proposed |
+| [DOC-006](DOC-006-author-bilingual-backend-server-manual.md) | English/Chinese apps.backend Server operator manual | Complete |
 | [DOC-007](DOC-007-author-bilingual-web-client-role-manuals.md) | English/Chinese apps.web overview and role manuals | Proposed |
 | [DOC-008](DOC-008-establish-user-manual-release-refresh-gate.md) | Repeatable milestone/Tag manual refresh and parity gate | Proposed |
 

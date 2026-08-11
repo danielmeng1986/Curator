@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DOC-006` — Status: `Proposed`
+`DOC-006` — Status: `Complete`
 
 ## Goal
 
@@ -34,4 +34,3 @@ Publish matched English and Chinese operator manuals for `apps.backend`.
 ## Dependencies
 
 - DOC-005.
-
