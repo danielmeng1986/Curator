@@ -251,4 +251,3 @@ Architecture changes update this document or an accepted ADR before lower-layer
 implementation. Behavioral changes update Specifications. Schema changes update
 the declared schema source, Catalog, diagrams and persistence maps. Implementation
 gaps receive the owning BT/UI/MT task; DOC work does not silently change runtime behavior.
-

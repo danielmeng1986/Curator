@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DBDOC-006` — Status: `Proposed`
+`DBDOC-006` — Status: `Blocked`
 
 ## Goal
 
@@ -57,9 +57,21 @@ the documented Schema Catalog diverge.
 - DOC-001.
 - DBDOC-001 through DBDOC-005.
 - DOC-002 through DOC-004.
+- BT-059 must provide the canonical empty-database bootstrap and ordered
+  migration path before this gate can introspect authoritative current schema.
 
 ## Risks or Notes
 
 - SQLite does not expose every original CHECK expression uniformly. The gate
   must document any intentionally unsupported comparison rather than claim full coverage.
 
+## Blocking Record
+
+- DBDOC-001 verified that no single current path builds the complete database
+  from empty: the default runner applies only `0001`, later migration SQL is not
+  iterated by it, and several active tables are created defensively by Repository use.
+- Building a documentation-only database constructor would create another
+  schema authority and make the proposed drift gate self-validating rather than truthful.
+- BT-059 now owns canonical bootstrap, ordered adoption/migration, and disposable
+  reconstruction. Resume DBDOC-006 after BT-059 passes its migration acceptance.
+- No runtime database, migration, or schema behavior was changed by this blocked task.
