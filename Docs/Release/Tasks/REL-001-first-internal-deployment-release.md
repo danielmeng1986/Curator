@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`REL-001` — Status: `Proposed`
+`REL-001` — Status: `In Progress`
 
 ## Release identity
 

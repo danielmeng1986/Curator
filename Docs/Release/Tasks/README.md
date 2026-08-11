@@ -10,4 +10,4 @@ behavior; discovered gaps are assigned to the owning BT, UI, MT, DOC, or DBDOC s
 
 | Task | Release | Outcome | Status |
 | --- | --- | --- | --- |
-| [REL-001](REL-001-first-internal-deployment-release.md) | `v0.1.0-internal.1` | First source-only internal deployment pre-release | Proposed |
+| [REL-001](REL-001-first-internal-deployment-release.md) | `v0.1.0-internal.1` | First source-only internal deployment pre-release | In Progress |

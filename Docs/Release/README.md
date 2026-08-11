@@ -12,7 +12,7 @@ migration, and documentation implementation tasks.
 
 | Version | Class | Title | Status |
 | --- | --- | --- | --- |
-| `v0.1.0-internal.1` | Internal deployment | Backend and Web Administration Baseline | Planned by REL-001 |
+| `v0.1.0-internal.1` | Internal deployment | [Backend and Web Administration Baseline](v0.1.0-internal.1/Release-Notes.md) | Candidate verified; publication pending |
 
 ## Task index
 
