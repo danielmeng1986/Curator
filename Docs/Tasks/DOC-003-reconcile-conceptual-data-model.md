@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DOC-003` — Status: `Proposed`
+`DOC-003` — Status: `Complete`
 
 ## Goal
 
@@ -59,3 +59,10 @@ separating current capabilities, approved near-term design, and future ideas.
 - Conceptual models should remain storage-independent, but must not contradict
   the capabilities and boundaries of the current system.
 
+## Completion Record
+
+- Reconciled the top-level and Database domain models around Album, Photo,
+  Dispatch, AI evidence/results, review/rework, Promotion, and audit.
+- Added explicit Current, Approved-but-blocked, Historical, and Future boundaries.
+- Removed the retired Workspace as an active concept and prevented future native
+  curation ideas from appearing as implemented contracts.

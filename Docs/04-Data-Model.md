@@ -1,431 +1,135 @@
-# 04 · Data Model
+# Curator Conceptual Data Model
 
-> Conceptual Data Model
+> Documentation status: Current
+> Owner: Project documentation
+> Last verified: 2026-08-11
 
----
+## Purpose and lifecycle labels
 
-# Overview
+This document describes domain meaning independently of SQL. Concepts are
+labeled `Current`, `Approved`, or `Future` so an idea cannot be mistaken for an
+implemented table, API, or UI.
 
-Curator manages digital assets through a structured conceptual model rather than relying solely on filesystem hierarchy.
+## Current core concepts
 
-The data model describes the logical entities of the system and the relationships between them.
+### Album
 
-It intentionally avoids implementation details such as SQL schemas, table structures, or database engines.
+Album is the current digital-asset management unit in apps.web. It represents a
+durable collection with identity, canonical filesystem path, Studio, business
+Status, title, dates, description, rating, remarks, Models, Photos, and related Albums.
 
-The goal is to represent knowledge independently of storage technology.
+Deleting or purging an Album is not ordinary CRUD: its future Trash lifecycle
+must account for contained Photos/files and requires the blocked BT-033–035 and UI-010E work.
 
----
+### Photo
 
-# Design Philosophy
+Photo is a durable file-level asset record belonging to an Album. It supports
+metadata and AI evidence identity, but apps.web intentionally does not provide a
+general “browse Album Photos” management entry point. The Backend can discover
+and transfer selected image evidence without requiring every file interaction
+to become a Photo-management UI.
 
-Curator separates three different layers of information.
+The future native curator may make Photo a direct curation unit; that is not a
+current apps.web contract.
 
-```
-Physical Layer
+### Studio, Model, Status, and Album Relation
 
-Files
-Folders
-Filesystem
+- Studio identifies the publisher/source responsible for Albums.
+- Model identifies a person associated with one or more Albums.
+- Album–Model is explicit many-to-many context with role/remarks.
+- Album Relation represents durable Album-to-Album meaning such as `BELONGS_TO`.
+- Status is Album business classification. It does not represent Dispatch,
+  Worker execution, review, Repair, or Trash state.
 
-↓
+### Operation, Issue, Repair, and recovery evidence
 
-Logical Layer
+Operation is durable cross-workflow audit/recovery history. Issue and Repair
+represent reviewable inconsistency and resolution state. Quarantine isolates
+operational filesystem items safely; it is not Digital Asset Trash. Snapshots
+are Backend-controlled recovery artifacts selected by risk.
 
-Studios
-Albums
-Models
-Assets
+## Current work and AI concepts
 
-↓
+### Work Dispatch
 
-Knowledge Layer
+A Dispatch Batch is one Admin-confirmed Album selection for a Worker kind. Each
+Album gets a Group and one active Reservation. Album is exclusive across all
+Worker kinds while that Reservation exists. A Group may contain several
+adapter-owned Work Items—for example, different model configurations used to
+compare Album-name analysis quality.
 
-Relationships
-Tags
-Annotations
-AI Understanding
-```
+Release removes active ownership but retains Batch, Group, Items, results,
+review, closure, and Operation history. Redispatch creates new identities.
 
-Each layer has a different responsibility.
+### AI Workspace and Dataset Schema
 
-The filesystem stores data.
+AI Workspace is a versioned dataset container, not the historical
+`workspace_album` table. Dataset Schema defines the type/version of items and
+results the Workspace accepts. Workspace closes and archives with indefinite
+audit evidence.
 
-The logical model organizes data.
+### AI Model Configuration
 
-The knowledge model explains data.
+A managed llama.cpp configuration records model identity, prompt versions,
+sampling count, runtime parameters, enabled state, and version. Each Work Item
+stores a configuration snapshot so later configuration edits cannot rewrite
+the meaning of an existing result.
 
----
+### Work Item, attempt, evidence, and result
 
-# Core Entities
+Work Item is one adapter-specific unit of execution against one Album and model
+configuration. Claims create leased Attempts. Backend-selected Photo evidence
+is frozen in a Manifest with ordered file identity, size, modification time,
+hash, and MIME metadata.
 
-The following entities form the conceptual foundation of Curator.
+AI result submission has two immutable stages:
 
----
+1. Vision analyzes selected images and produces structured Album understanding.
+2. Writer uses that analysis to produce several recommended Album names.
 
-## Asset
+Current result state is a projection; immutable stage records preserve evidence.
 
-An Asset is the smallest managed digital object.
+### Review, Rework, and Promotion
 
-Examples include:
+Review state is separate from Worker run state. An Admin may approve, reject,
+or request rework; evaluation/rating belongs to a Work Item result. Rework
+creates a successor Work Item in the same Group, inherits configuration, and
+retains predecessor lineage.
 
-- image
-- video
-- document
-- audio
-- archive
-- future media types
+Approval does not itself mutate Album. Promotion is a separate reviewed action
+that applies one selected name. Multiple configurations may analyze the same
+Album, but only one successful Workspace+Album Promotion can win.
 
-Every Asset represents a single digital file.
+## Historical concept
 
-Assets remain linked to their original location inside the Archive.
+The old `workspace_album` staging model normalized names/paths and materialized
+permanent Albums. It is archived, unavailable to active clients, and not the
+generic parent of current AI Workspace. Its semantics are preserved only in
+[Historical Workspace Album](Database/Historical/Historical-Workspace-Album.md).
 
----
+## Approved but not implemented
 
-## Album
+Digital Asset Trash is approved as the boundary for removing Albums or Photos
+from the active library and eventually purging files. Detailed lifecycle,
+retention, cascade, restore, and purge behavior remains blocked in BT-033–035
+and UI-010E and must not be inferred from Repair Quarantine.
 
-An Album represents a logical collection of Assets.
+## Future concepts
 
-An Album usually corresponds to a photoshoot, event, publication, or curated collection.
+The macOS native curator may provide Apple Photos-like browsing, self-organized
+Albums, Photo-level Trash, and curation experiences over the same Backend-owned
+asset library. Generic Assets beyond Photos, Annotations, embeddings, face
+clusters, similarity, tags, and Rename Plans remain future concepts unless an
+approved Architecture/Specification promotes them.
 
-Albums exist independently of their physical directory names.
+See [macOS Native Curator Memo](Project/macOS-Native-Curator-Memo.md). Memos do
+not authorize implementation.
 
-This allows Curator to preserve knowledge even if folders are renamed.
+## Invariants
 
-Typical information includes:
-
-- title
-- studio
-- participating models
-- creation date
-- metadata
-- AI annotations
-
-Album business Status is independent from work being performed against the
-Album. Dispatching an Album to a Worker does not replace its Status.
-
-## Work Dispatch
-
-A Work Dispatch Batch records one Administrator-confirmed selection of Albums
-for a Worker kind. Each selected Album receives one active Work Reservation and
-one Dispatch Group. The reservation makes Album the exclusive scheduling unit:
-no second Worker kind may work on it concurrently, even when the Workers target
-different metadata.
-
-A Group may contain several Work Items for the same purpose. For example, one
-Album-name-analysis Group may run several model configurations for comparison.
-Work Item execution state and human review state remain separate from Album
-business Status. Closing and releasing a Group preserves its history and makes
-the Album eligible for a later Dispatch.
-
----
-
-## Studio
-
-A Studio represents the organization, publisher, photographer, or source responsible for producing an Album.
-
-Studios are long-lived entities.
-
-Multiple Albums may belong to the same Studio.
-
-Studios provide organizational context.
-
----
-
-## Model
-
-A Model represents a person appearing in one or more Assets.
-
-A Model exists independently from any particular Album.
-
-One Model may appear in many Albums.
-
-One Album may contain multiple Models.
-
-Future versions may support:
-
-- aliases
-- identities
-- face embeddings
-- confidence scores
-
----
-
-## Workspace Item
-
-Workspace Items represent temporary editable information.
-
-They exist only during processing.
-
-Examples include:
-
-- rename candidates
-- validation results
-- temporary metadata
-- review status
-
-Workspace data is intentionally separated from long-term knowledge.
-
----
-
-## Rename Plan
-
-Rename Plan represents an approved filesystem transformation.
-
-It describes intended operations before execution.
-
-Rename Plans are temporary workflow artifacts.
-
-Once executed, they become historical records.
-
----
-
-## Annotation
-
-Annotations store human knowledge.
-
-Examples include:
-
-- notes
-- ratings
-- descriptions
-- comments
-- manual tags
-
-Annotations remain independent from AI-generated metadata.
-
----
-
-## AI Metadata
-
-AI Metadata represents information generated by machine learning.
-
-Examples include:
-
-- image captions
-- detected objects
-- recognized faces
-- semantic tags
-- similarity embeddings
-- confidence values
-
-AI Metadata should remain distinguishable from human-authored information.
-
----
-
-# Relationships
-
-The conceptual relationships are summarized below.
-
-```
-Studio
-
-│
-
-├──────── Album
-
-│              │
-
-│              ├──────── Asset
-
-│              │
-
-│              └──────── Model
-
-│
-
-└──────── Album
-```
-
-General principles:
-
-- One Studio contains many Albums.
-- One Album contains many Assets.
-- One Album may contain multiple Models.
-- One Model may appear in many Albums.
-
-These relationships are logical rather than physical.
-
----
-
-# Knowledge Layer
-
-Above the core entities lies the Knowledge Layer.
-
-Examples include:
-
-- semantic similarity
-- related albums
-- duplicate detection
-- face clusters
-- object recognition
-- recommendations
-- user preferences
-
-Knowledge is generated over time.
-
-It enriches existing entities without replacing them.
-
----
-
-# Identity
-
-Curator distinguishes between identity and filename.
-
-For example:
-
-A folder may be renamed.
-
-The Album remains the same Album.
-
-A Model may have multiple aliases.
-
-The identity remains unchanged.
-
-Stable identifiers should therefore be independent of human-readable names.
-
----
-
-# Metadata
-
-Metadata may originate from several sources.
-
-Examples include:
-
-Filesystem
-
-↓
-
-Imported Metadata
-
-↓
-
-Human Input
-
-↓
-
-AI Analysis
-
-↓
-
-Curated Knowledge
-
-The origin of metadata should remain traceable whenever possible.
-
----
-
-# Lifecycle
-
-Entities evolve through different stages.
-
-```
-Imported
-
-↓
-
-Normalized
-
-↓
-
-Validated
-
-↓
-
-Reviewed
-
-↓
-
-Committed
-
-↓
-
-Knowledge
-
-↓
-
-AI Enriched
-```
-
-The lifecycle applies to information rather than files.
-
----
-
-# Extensibility
-
-The conceptual model is intentionally extensible.
-
-Future entities may include:
-
-- Person
-- Photographer
-- Location
-- Event
-- Collection
-- Project
-- Device
-- Camera
-- Lens
-
-New entities should integrate naturally into the existing model.
-
----
-
-# Design Principles
-
-The conceptual model follows several principles.
-
-## Stable Identity
-
-Objects should have stable identities independent of filenames.
-
----
-
-## Separation of Concerns
-
-Different concepts should remain independent.
-
-Studios are not Albums.
-
-Albums are not Assets.
-
-Assets are not Filesystem Paths.
-
----
-
-## Knowledge First
-
-The database should describe knowledge rather than merely mirror folders.
-
----
-
-## Human and AI Coexistence
-
-Human knowledge and AI-generated knowledge should coexist while remaining distinguishable.
-
----
-
-## Technology Independent
-
-The conceptual model should remain valid regardless of:
-
-- database engine
-- programming language
-- frontend framework
-- AI implementation
-
----
-
-# Summary
-
-Curator models digital assets through a hierarchy of logical entities rather than filesystem structures.
-
-By separating physical storage, logical organization, and accumulated knowledge, the system becomes easier to maintain, extend, and understand over time.
-
-The conceptual data model serves as the foundation upon which all future implementations are built.
-
----
-
-> Files are stored in the Archive.
-
-> Knowledge is stored in the Data Model.
-
-> Understanding emerges from the relationships between them.
+- Backend and database own durable identity and state; clients use APIs.
+- Filesystem location and database metadata must remain explicitly reconcilable.
+- Album business Status is independent of work/review/recovery state.
+- AI evidence and model configuration are bound to the result they produced.
+- Human approval controls permanent AI-recommended business changes.
+- Current projections may change; audit, decisions, results, and released work history remain.

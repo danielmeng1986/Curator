@@ -63,4 +63,3 @@ When behavior or schema changes, update the governing Specification/schema
 source, affected Current documents, task status, and acceptance evidence in the
 same delivery. Preserve retired guidance under Historical rather than leaving
 it on an active reading path.
-

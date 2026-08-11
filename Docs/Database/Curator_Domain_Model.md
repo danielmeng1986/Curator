@@ -1,114 +1,88 @@
-# Curator Domain Model
+# Curator Database Domain Model
+
+> Documentation status: Current
+> Owner: Database
+> Last verified: 2026-08-11
+
+## Current domain relationships
 
 ```mermaid
----
-title: Curator Domain Model v0.2
----
+flowchart LR
+    STUDIO["Studio"] --> ALBUM["Album"]
+    STATUS["Album Status"] --> ALBUM
+    MODEL["Model"] <-->|"Album Model"| ALBUM
+    ALBUM <-->|"Album Relation"| ALBUM
+    ALBUM --> PHOTO["Photo"]
 
-erDiagram
+    ALBUM --> RESERVATION["Active Work Reservation"]
+    BATCH["Dispatch Batch"] --> GROUP["Dispatch Group"]
+    GROUP --> RESERVATION
+    GROUP --> ITEM["AI Work Item(s)"]
 
-    MODEL {
-        UUID uuid
-        string display_name
-        string primary_name
-        string description
-        string country
-        string ethnicity
-        string eye_color
-        string natural_hair_color
-    }
+    WORKSPACE["AI Workspace + Dataset Schema"] --> ITEM
+    CONFIG["AI Model Configuration"] --> ITEM
+    ITEM --> EVIDENCE["Photo Evidence Manifest"]
+    ITEM --> RESULT["Vision + Writer Results"]
+    RESULT --> REVIEW["Admin Review / Rework"]
+    REVIEW --> PROMOTION["One Name Promotion"]
+    PROMOTION --> ALBUM
 
-    STUDIO {
-        UUID uuid
-        string name
-        string website
-        string description
-    }
-
-    STATUS {
-        int id
-        string name
-    }
-
-    ALBUM {
-        UUID uuid
-        string title
-        string description
-        string remark
-        string scene
-        string location
-        datetime capture_date
-        datetime publish_date
-        int rating
-        string path
-    }
-
-    PHOTO {
-        UUID uuid
-        string filename
-        string relative_path
-        datetime capture_time
-        string hash
-        int width
-        int height
-    }
-
-    ALBUM_MODEL {
-        UUID uuid
-        int age_when_shot
-        string role
-        string remarks
-    }
-
-    ALBUM_RELATION {
-        int album_id
-        int related_album_id
-        string relation_type
-        string remarks
-    }
-
-    WORKSPACE_ALBUM {
-        int id
-        string current_path
-        string expected_path
-        string primary_model
-        string studio_name
-        string album_name
-        int belongs_to_album_id
-        int album_id
-    }
-
-    ALBUM ||--|{ PHOTO : contains
-
-    STUDIO ||--o{ ALBUM : publishes
-
-    STATUS ||--o{ ALBUM : status
-
-    MODEL ||--o{ ALBUM_MODEL : appears_in
-
-    ALBUM ||--o{ ALBUM_MODEL : includes
-
-    ALBUM ||--o{ ALBUM_RELATION : source
-
-    ALBUM ||--o{ ALBUM_RELATION : related
-
-    ALBUM ||--o{ WORKSPACE_ALBUM : materialized_as
-
-    WORKSPACE_ALBUM ||--o{ WORKSPACE_ALBUM : belongs_to
+    ITEM --> OPERATION["Operation / Audit"]
+    ALBUM --> ISSUE["Issue / Repair / Recovery"]
+    ISSUE --> OPERATION
 ```
 
-## Domain Rules
+This is a conceptual map. Physical tables, FKs, polymorphic links, claims, and
+indexes are documented in the [Database Model](Curator_Database_Model.md) and
+[Schema Catalog](Schema-Catalog.md).
 
-- `album.path` is the permanent Album’s single canonical filesystem path. The permanent Album has no `current_path` or `expected_path` fields.
-- `album.remark` is the permanent curator business remark. During `workspace_album` promotion it receives the approved Workspace `remark`; review decisions and audit reasons are retained separately and are not stored here.
-- `workspace_album` is temporary and may maintain both `current_path` and `expected_path` while processing is incomplete.
-- `album_relation` represents an Album-to-Album relationship. For `BELONGS_TO`, `album_id` is a separately released part and `related_album_id` is its logical/canonical Album.
-- A default/self relationship is implicit: do not store an `album_relation` row when both sides would be the same Album.
-- `workspace_album.belongs_to_album_id` points to `workspace_album.id`. It must be translated to permanent Album IDs through `workspace_album.album_id` during migration.
-- Album work assignment is represented by Dispatch Batch, Album Work
-  Reservation, Dispatch Group, and adapter-specific Work Item records; it is
-  not represented by `album.status_id`.
-- An Album has at most one active Work Reservation across all Worker kinds. One
-  Group may contain multiple model-configuration Work Items for comparison.
-- Releasing a reservation preserves Batch, Group, Work Item, result, review,
-  attempt, and Operation history.
+## Domain boundaries
+
+| Concept | Current meaning |
+| --- | --- |
+| Album | apps.web management aggregate and Worker scheduling unit |
+| Photo | Album-owned file asset and AI evidence source; not general apps.web browse surface |
+| Album Status | Durable business classification only |
+| Reservation | One active cross-Worker lock for an Album |
+| Dispatch Group | Durable assignment/history container for one Album |
+| AI Work Item | One model-configuration execution unit inside a Group |
+| Manifest | Immutable Backend-selected Photo evidence identity |
+| Result stages | Immutable Vision then Writer outputs with current-state projection |
+| Review | Human decision/evaluation projection plus immutable decision history |
+| Rework | New successor Work Item with preserved lineage/configuration |
+| Promotion | Separate reviewed mutation selecting the one winning Album name |
+| Operation | Durable audit, traceability, error, and recovery context |
+| Historical Workspace Album | Retired materialization model; no active access |
+
+## State separation
+
+An Album can retain one business Status while these independent states change:
+
+- Dispatch Batch/Group/Reservation state;
+- Work Item run/lease/attempt state;
+- Vision/Writer result stage state;
+- Admin review and rework state;
+- Promotion outcome;
+- Issue, Repair, Quarantine, or Restore state.
+
+No client should infer one state from another unless an approved Specification
+defines the transition.
+
+## Evidence and retention
+
+Model configuration snapshot, Manifest, evidence Photo identities, result
+payloads/hashes, Attempts, review decisions, rework lineage, Promotion outcome,
+Group closure, Workspace retention, and Operations preserve why a change was
+recommended and approved. Releasing a Reservation or archiving a Workspace does
+not erase this evidence.
+
+## Lifecycle classification
+
+- **Current:** all concepts in the map above.
+- **Approved but blocked:** Digital Asset Trash and permanent purge.
+- **Historical:** `workspace_album` staging/materialization.
+- **Future/Memo:** native Photo curation, self-organized Albums, generic Asset
+  types, Annotations, embeddings, semantic similarity, and face clusters.
+
+The physical schema must not be extended from a Future concept without an
+approved Architecture/Specification and owning implementation task.

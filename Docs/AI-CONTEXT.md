@@ -101,4 +101,3 @@ owning task. Do not silently choose one and rewrite the other.
 3. Update Current/Approved documentation affected by the change.
 4. Preserve audit, recovery, and historical evidence.
 5. Record unresolved gaps in the correct task series rather than hiding them.
-
