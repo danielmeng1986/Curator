@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DOC-007` — Status: `Proposed`
+`DOC-007` — Status: `Complete`
 
 ## Goal
 
@@ -32,4 +32,3 @@ Writer, and Administrator workflows.
 ## Dependencies
 
 - DOC-005 and DOC-006 for Server handoff links.
-

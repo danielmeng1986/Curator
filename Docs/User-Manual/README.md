@@ -14,7 +14,7 @@ exclusion, safety rules, and release refresh process are defined in the
 | Application | Category | English | 简体中文 |
 | --- | --- | --- | --- |
 | `apps.backend` | Server | [English](en/server/apps-backend.md) | [简体中文](zh-CN/server/apps-backend.md) |
-| `apps.web` | Client | Planned by DOC-007 | 由 DOC-007 编写 |
+| `apps.web` | Client | [English](en/client/apps-web/README.md) | [简体中文](zh-CN/client/apps-web/README.md) |
 
 Only supported `apps/` applications are listed. Developer scripts under
 `tools/` are not user-manual applications.
