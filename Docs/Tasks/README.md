@@ -31,7 +31,7 @@ series rather than silently changing behavior from a documentation task.
 | [DBDOC-005](DBDOC-005-archive-historical-workspace-and-v02-guidance.md) | Historical schema guidance isolated from active truth | Complete |
 | [DOC-002](DOC-002-refresh-ai-agent-context-and-documentation-index.md) | Accurate AI entry point and documentation navigation | Complete |
 | [DOC-003](DOC-003-reconcile-conceptual-data-model.md) | Conceptual model aligned with implemented and future domains | Complete |
-| [DOC-004](DOC-004-convert-backend-architecture-to-as-built.md) | Backend architecture rewritten as current as-built truth | Proposed |
+| [DOC-004](DOC-004-convert-backend-architecture-to-as-built.md) | Backend architecture rewritten as current as-built truth | Complete |
 | [DBDOC-006](DBDOC-006-add-schema-documentation-drift-gate.md) | Automated detection of schema-documentation drift | Proposed |
 
 ## Recommended execution order

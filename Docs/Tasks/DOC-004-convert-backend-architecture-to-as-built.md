@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DOC-004` — Status: `Proposed`
+`DOC-004` — Status: `Complete`
 
 ## Goal
 
@@ -61,3 +61,10 @@ marking remaining targets.
 - Preserve still-valid architectural rationale; this is an as-built update, not
   a reason to erase decision history.
 
+## Completion Record
+
+- Replaced the early proposal/migration plan with a current as-built component map.
+- Documented active runtime, transport, Service, Repository, SQLite, filesystem,
+  recovery, authentication, Dispatch, AI Workspace, and testing boundaries.
+- Preserved valid principles and explicitly classified BT-059, Digital Asset
+  Trash, native curation, PostgreSQL, and storage decoupling as remaining/future work.

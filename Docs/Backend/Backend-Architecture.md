@@ -1,541 +1,254 @@
 # Curator Backend Architecture
 
+> Documentation status: Current
+> Owner: Backend
+> Last verified: 2026-08-11
+
 ## Purpose and scope
 
-This document designs the next generation of the Curator Backend before implementation begins. It is an incremental refactoring target for the existing local Python backend, not a proposal to replace Curator's domain model, UI, SQLite database, or local-first deployment model.
+This is the as-built architecture of the active Curator Backend. It describes
+component ownership and dependency direction. Observable workflow behavior
+belongs to [Backend Specifications](Specifications/README.md); exact supported
+entry points belong to [Supported Backend Surface](Supported-Backend-Surface.md);
+physical persistence belongs to the [Database model](../Database/Curator_Database_Model.md).
 
-Curator Backend owns the database. The current static Web UI, a future Web UI (which may use React, Next.js, or another framework), the AI Worker, CLI tools, and any future client communicate with the Backend through its API; they never open `Curator.db`, issue SQL, or bypass the Service layer. The Backend owns validation, business rules, transaction boundaries, persistence, audit logging, and recovery-oriented operations.
+## Current system boundary
 
-The design deliberately favors a small number of explicit modules over frameworks, dependency-injection containers, generic CRUD engines, or a separate service for every entity. Curator is maintained by one developer, so each abstraction must address a current source of coupling.
+`apps/backend` is the sole authoritative runnable Backend. It owns:
 
-## 1. Architecture Principles
+- SQLite connections, queries, transactions, schema compatibility and migrations;
+- validation, authorization, business rules, workflow state transitions and concurrency;
+- canonical filesystem paths, Import file actions, Repair, Quarantine and Restore;
+- Snapshot creation, cleanup, protected database Restore and recovery evidence;
+- Operation/Issue history and role-sensitive disclosure;
+- static apps.web delivery and authenticated `/api/v1` transport;
+- AI Workspace, Work Dispatch, controlled Photo evidence, result validation,
+  Admin review, rework, Promotion, closure and retention.
 
-These principles are the foundation for all Curator Backend work. They apply to future Specifications and Implementation work unless an Architecture Decision Record explicitly changes them.
+`apps/web`, the Windows AI Worker, CLI clients, and future native clients are
+out-of-process clients. They use REST and never open `Curator.db`, invoke
+Repositories, or call Services in-process.
 
-- **Backend owns the database.** The Backend is the single owner of database access, writes, transactions, persistence rules, and schema evolution.
-- **Clients never access the database directly.** The Web UI, AI Worker, CLI tools, and local tools request Backend operations; they do not open `Curator.db`, run SQL, or bypass validation.
-- **Repository hides persistence.** Repositories are the persistence boundary. They hide database-specific queries, rows, and engine behavior from the application layer.
-- **Services own business rules.** Validation, workflow decisions, transaction boundaries, and multi-resource coordination belong to Services, independent of the client that initiated the work.
-- **Controllers translate HTTP.** HTTP Controllers are adapters: they translate requests to application operations and results to HTTP responses. They do not contain SQL or business workflows.
-- **Repositories translate persistence.** A repository translates application persistence needs to the selected database implementation and translates persisted results back to application records.
-- **Business logic must never depend on SQL.** Services express Curator intent and rules, not tables, SQL syntax, or SQLite connection behavior.
-- **Incremental evolution over large rewrites.** Improve one bounded workflow at a time while preserving working behavior and recovery options.
-- **Local-first architecture.** Curator remains a local application by default. Future clients use Backend boundaries without changing this ownership model.
-- **REST is the external write boundary.** Out-of-process clients use the versioned HTTP REST API. In particular, the Windows AI Worker on the local network always uses this API and never calls the database or Service layer in-process.
-- **Hard integrity and business meaning are complementary.** The database prevents invalid persistent states and race-condition bypasses; Services interpret business meaning, normalize paths, explain errors, and guide repair.
-- **Simplicity over enterprise complexity.** New abstractions must remove an observed coupling, duplication, or testing obstacle. Curator does not adopt patterns simply because they are common in larger systems.
+## Architecture principles
 
-## 2. Architecture Decision Records
+- **Backend owns persistence.** Clients cannot bypass validation or transaction boundaries.
+- **Services own meaning.** Business rules and multi-resource coordination do not live in HTTP or SQL callers.
+- **Repositories own persisted access.** SQL and SQLite row mechanics stay behind Repository methods.
+- **Controllers translate HTTP.** They parse/authenticate requests, call Services, and serialize stable envelopes.
+- **Hard constraints and Service rules cooperate.** SQLite prevents race-safe invalid states; Services explain intent and errors.
+- **REST is the external boundary.** `/api/v1` is the supported client API.
+- **Local-first and recovery-oriented.** SQLite, filesystem truth, Snapshots,
+  explicit previews, confirmation, Operations and Repair remain first-class.
+- **Human-controlled AI.** Workers submit evidence-bound recommendations;
+  only reviewed Promotion changes permanent Album business data.
 
-Important long-lived architectural choices should be documented as Architecture Decision Records (ADRs) in:
+## Current component map
 
-```text
-Docs/
-  Backend/
-    ADR/
+```mermaid
+flowchart TD
+    WEB["apps.web Admin client"]
+    WORKER["Windows AI Worker"]
+    CLI["CLI / maintenance client"]
+    HTTP["apps.backend server + /api/v1 controllers"]
+    AUTH["Authentication / Authorization"]
+    SERVICES["Domain and Workflow Services"]
+    REPOS["Repositories"]
+    SQLITE["SQLite"]
+    FS["Archive / source / quarantine filesystem"]
+    RECOVERY["Snapshot / backup / restore adapters"]
+    LOGS["JSONL operational logs"]
+
+    WEB -->|"authenticated REST"| HTTP
+    WORKER -->|"authenticated REST"| HTTP
+    CLI -->|"authenticated REST or explicit maintenance command"| HTTP
+    HTTP --> AUTH
+    HTTP --> SERVICES
+    SERVICES --> REPOS
+    REPOS --> SQLITE
+    SERVICES --> FS
+    SERVICES --> RECOVERY
+    RECOVERY --> SQLITE
+    SERVICES --> LOGS
 ```
 
-This document defines the overall Backend boundaries and principles. An ADR records a specific decision, its context, alternatives, and consequences after that decision is made. ADRs should be added before implementation when a change affects these boundaries or establishes a durable rule.
+Operational JSONL is secondary diagnostic evidence. Database Operation records
+are the durable workflow history.
 
-Likely ADR topics include Backend database ownership, the Repository pattern, REST as the write entry point for external clients, retaining SQLite as the current implementation, the Workspace lifecycle, risk-based snapshots, repair and canonical-path safety, device-token approval, and the eventual PostgreSQL migration approach. ADRs do not replace this Architecture document; they preserve the reasoning behind important decisions over time.
+## Runtime and transport
 
-## 3. Current Architecture
+The Backend uses Python's standard-library HTTP server and serves static files
+owned by `apps/web`. Configuration selects database and managed filesystem
+roots. The default bind is loopback; LAN exposure for the Worker is explicit and
+must be restricted to the intended host/network.
 
-### Current `server.py` responsibilities
+All normal resources use authenticated `/api/v1`. Shared success/error
+envelopes, filters, pagination, request IDs, role/scopes, and disclosure are
+controlled by API Specifications. The special first-Admin bootstrap is
+loopback-only, one-time, and begins with an explicit terminal-generated Code.
 
-The current implementation is centred on the `apps/backend` Backend package
-and one retired historical module:
+`tools/web_ui/server.py` is only a compatibility launcher delegating to the
+active Backend. `workspace/curator_base_app` is historical, refuses to start,
+and its pre-versioned routes are not supported behavior.
 
-- `apps/backend` is the authoritative Backend package for permanent Albums,
-  Models, Studios, Statuses, Photos, Workspace Albums, direct import, backups,
-  rollback, Services, Repositories, and the authenticated API.
-- `workspace/curator_base_app/server.py` supported the earlier Normalize,
-  Import, and Workspace Album pages.
+## Application/Service layer
 
-The active Backend uses Python's standard-library HTTP server and SQLite
-through its Repository boundary. `tools/web_ui/server.py` is now only a
-compatibility launcher that delegates to `apps/backend`; the static Web Client
-is owned by `apps/web`. The earlier base-app server is
-historical context rather than a workflow-migration requirement.
+Services own use cases rather than tables. Current service responsibilities include:
 
-`workspace/curator_base_app` is retired and its startup module deliberately refuses to run. Its routes and workflows are not migration requirements. Its source remains in the repository only as historical migration reference; it exposes no Backend entry point.
+- permanent Status, Model, Studio, Album, Model relationship, Album relationship and Photo rules;
+- Album search/filter/batch preview and execution;
+- direct Import preview, signed identity, COPY/MOVE/DATABASE_ONLY execution and failure truth;
+- Operation history, Issue review, Repair policy/suppression and verification;
+- Quarantine/item Restore, Snapshot administration and protected database Restore;
+- device registration, first Admin, Token issue/renew/elevate/revoke and last-Admin safety;
+- AI Dataset/Workspace and llama.cpp model-configuration management;
+- Work Dispatch candidate preview, atomic Batch/Group/Reservation/Item creation,
+  closure, release and redispatch;
+- Worker claims/leases/attempts, Photo sampling/Manifest/transfer, two-stage results;
+- Admin review/evaluation/rework, unique Album-name Promotion and retention.
 
-In these modules, one file currently performs all of the following:
+Service transactions are bounded around durable invariants. Filesystem and
+database changes cannot be made one transaction, so workflows specify action
+order, verification, Snapshot policy, truthful partial-failure state, and Repair.
 
-- Starts the HTTP server, serves static files, parses URLs and JSON, routes HTTP verbs, and creates HTTP responses.
-- Loads local configuration and exposes configuration-derived paths.
-- Opens SQLite connections and configures SQLite behavior such as foreign keys and WAL mode.
-- Defines and executes SQL for reads, CRUD operations, filtering, pagination, relationship changes, and workspace batch edits.
-- Validates some request data and enforces rules such as allowed editable fields, duplicate checks, reference checks, and import-path checks.
-- Coordinates multi-table Album, `album_model`, `album_relation`, and Photo operations with transactions.
-- Parses source folder names, computes archive paths, creates or finds Models and Studios, and coordinates database writes with copy/move filesystem operations.
-- Creates, lists, retains, deletes, and restores SQLite snapshots; runs a daily backup thread; writes JSONL change, backup, and rollback logs.
+## Repository layer
 
-### Concerns currently mixed together
+`apps/backend/repositories.py` contains focused Repository classes for catalog,
+authentication, operations/recovery, Dispatch, and AI Workspace domains.
+Repositories translate between application records and SQLite; they expose
+purpose-specific reads and writes rather than unrestricted query execution.
 
-The current source mixes transport, application workflow, persistence, infrastructure, and operational concerns in individual handler methods. For example, an import endpoint can read HTTP input, decide naming/path rules, query and create several entities, commit a transaction, copy files, compensate for a failure, write a log entry, and format an HTTP result. Album edit endpoints similarly combine request parsing, relationship replacement rules, SQL statements, transaction control, and response formatting.
+Services do not depend on HTTP request objects or SQLite rows. Controllers do
+not execute SQL. Some current Services and composition remain in large modules;
+this is implementation shape, not permission to cross the dependency boundary.
 
-This mixing has already produced duplication between the two server modules: configuration loading, connection creation, backup catalog logic, rollback behavior, logging, import parsing, and SQL conventions exist in more than one place. SQL is also distributed across route handlers, which makes the database contract difficult to locate and protect when clients or schema details evolve.
+Repositories currently also contain defensive schema creation/upgrade for
+Authentication and several workflow tables. Versioned AI schema exists in
+migrations, while the base database is assumed. This split authority is
+documented in [Schema Source of Truth](../Database/Schema-Source-of-Truth.md)
+and is owned for consolidation by BT-059.
 
-### Why the current structure will become difficult to maintain
+## Database and migrations
 
-The current design works for a local UI, but the following changes increase the cost of every new feature:
+SQLite is the current and only implemented persistence engine. Connections
+enable FK behavior and Repository methods own SQL/row translation. Integer IDs
+serve local FK efficiency; UUIDs are stable external/business identities where
+defined by the contract.
 
-- Adding another Web UI, the AI Worker, or CLI tools would either duplicate business rules in each client or add more routes to an already broad handler.
-- Rules can become inconsistent because separate endpoints independently decide validation, duplicate behavior, timestamps, logging, and transaction scope.
-- Database changes require finding SQL embedded throughout transport code. Testing a rule requires constructing HTTP requests instead of invoking a focused operation.
-- SQLite-specific details (`sqlite3.Row`, PRAGMA statements, `lastrowid`, backup APIs, and SQL syntax) leak into application behavior, making a future PostgreSQL migration unnecessarily wide.
-- Import combines a database transaction with filesystem work. That cannot be made fully atomic across both resources, so its preparation, execution, compensation, and audit behavior need one explicit owner.
-- Recovery and backup behavior is important operational logic, but it currently competes for space with ordinary HTTP routing and CRUD behavior.
+The migration runner creates verified pre-write backups and records
+`schema_migration`, but today its default module handles only `0001`; MT-008 has
+a separate guarded archive command and AI migrations are versioned SQL exercised
+by tests. The project must not claim empty-database reconstruction until BT-059
+implements and proves it.
 
-None of these findings require a rewrite. They identify boundaries that already exist in behavior but not yet in the code structure.
+PostgreSQL is future architecture only. Current code should preserve Service
+meaning outside SQL, but no unused cross-engine abstraction is required.
 
-## 4. Design Goals
+## Catalog, filesystem, and recovery
 
-1. **Single responsibility.** A module should have one reason to change: HTTP protocol, a use case, persistence mapping, database connection mechanics, or configuration.
-2. **Separation of concerns.** Controllers translate HTTP. Services own workflows and rules. Repositories persist and retrieve. Database code owns engine-specific connections and transactions.
-3. **Database independence.** Upper layers use repository contracts and domain-oriented records, not SQLite connection objects or SQL syntax.
-4. **Multiple clients.** The same Backend use cases support the Web UI, AI Worker, and CLI tools. External clients use the versioned REST API; no client accesses the database directly.
-5. **PostgreSQL readiness.** SQLite remains the current implementation. A later PostgreSQL implementation replaces the database/repository wiring, not controllers or business rules.
-6. **Preserve the current model and workflow.** `model`, `studio`, `album`, `photo`, `album_model`, `album_relation`, `status`, and `workspace_album` retain their current concepts and relationships. This architecture does not redesign them.
-7. **Safe incremental delivery.** Move one use case at a time behind a tested boundary, retaining existing routes and behavior until replacements are verified.
-8. **Appropriate simplicity.** Prefer concrete repositories and small services. Do not introduce microservices, an ORM solely for abstraction, event buses, CQRS infrastructure, or a framework migration unless a real later need justifies it.
+Album stores the canonical managed path. Backend canonicalization detects
+equivalent, conflicting, trailing-space, case, and Unicode path conditions.
+Ordinary clients cannot submit arbitrary managed output paths.
 
-## 5. Proposed Backend Architecture
+Import, Repair, Quarantine and Restore coordinate SQLite with real filesystem
+state. A failed verification creates truthful Operation/Issue/Repair evidence.
+Repair only performs automatic rename for narrowly proven canonicalization-only
+cases; fuzzy similarity is not authoritative evidence.
 
-The Backend is a modular monolith: one local process, one API, one database owner, and clear internal layers. Dependencies point inward:
+Snapshot policy is risk-based. Bulk/destructive/recovery actions use reviewed
+preview, authorization, Snapshot and confirmation rules defined by their
+Specifications. Protected database Restore creates a protective Snapshot,
+invalidates stale session assumptions, and never reports success before the
+restored database is verified.
 
-```text
-Clients (Web UI / AI Worker / CLI)
-        -> REST API adapter
-        -> Domain Service
-        -> Repository
-        -> Database implementation
+Repair Quarantine is operational safety, not Digital Asset Trash. Trash and
+permanent purge remain blocked in BT-033–035 and UI-010E.
 
-Configuration is read at startup and supplied to the layers that need it.
-```
+## Work Dispatch and AI Workspace
 
-Filesystem copying/moving, JSONL audit logs, backup storage, and scheduled work are infrastructure collaborators used by services. They are not extra domain layers. Small interfaces are useful only where alternate implementations or safe test doubles are meaningful, such as filesystem operations and snapshot storage.
+Album business Status does not encode Worker assignment. Work Dispatch uses:
 
-### Controller / API Layer
+- Batch for one Admin-confirmed selection;
+- Group for one Album assignment and retained history;
+- Reservation as the one active Album lock across all Worker kinds;
+- polymorphic Group Item link to adapter-owned Work Items;
+- Closure plus release to retain evidence while making Album eligible again.
 
-Controllers are HTTP adapters, not the application itself. Their responsibility is to:
+The Album AI adapter creates multiple Work Items in one Group when comparing
+model configurations. The Worker receives only leased work and Manifest-bound
+Photo evidence. Vision and Writer payloads are schema-validated and stored as
+immutable stages. Review state is independent from run state. Rework creates a
+successor Item; Promotion separately applies one approved name with race-safe
+uniqueness. Closure/archive retain configurations, evidence, results, decisions,
+Promotion and Operations indefinitely.
 
-- Match a route and HTTP method.
-- Parse and validate transport shape: JSON syntax, required route IDs, query-string types, pagination bounds, and request DTO structure.
-- Call exactly the appropriate service operation.
-- Translate known service outcomes into stable HTTP status codes and response DTOs.
-- Avoid SQL, direct database connections, filesystem mutation, transaction control, and domain decision-making.
+The retired `workspace_album` table is not the parent model for this workflow
+and has no active client route.
 
-Controllers should be organised by API capability rather than one class per SQL table. A Controller may combine service results into an API response, but it must not recreate service rules.
+## Authentication and authorization
 
-REST under `/api/v1` is the shared client adapter for the Web UI, Windows AI Worker, CLI tools, and every future client. The Windows AI Worker always uses that HTTP REST API. If a local command runner is introduced, it is a Backend-operated adapter and does not create a second client persistence path. Every adapter reaches Services; no adapter reaches repositories or SQLite directly.
+Device registration and bearer Tokens represent approved client identity.
+Tokens carry scopes, expire, can be renewed/elevated through Admin review, and
+can be revoked. Plaintext credentials are disclosed only at issuance and are
+stored as one-way hashes. The Backend enforces authorization even when the UI
+hides an action. Final usable Admin Token safety prevents administrative lockout.
 
-### Domain Service Layer
+Role-sensitive API projections prevent Reader/Writer clients from receiving
+Admin recovery or sensitive diagnostic fields. Redaction applies to network
+payloads, rendered UI, artifacts and operational logs.
 
-Services implement Curator use cases and own their business rules. They receive validated command/query objects, coordinate repositories and infrastructure, select transaction boundaries, and return application results independent of HTTP.
+## Request flows
 
-Examples are `AlbumService`, `WorkspaceAlbumService`, `ImportService`, `ModelService`, `StudioService`, `StatusService`, `BackupService`, and `HealthService`. These are not necessarily one-to-one with tables. `ImportService`, for instance, owns preview, duplicate validation, entity reuse/creation, Album and relationship persistence, file movement/copying, repair-state handling after a partial failure, snapshot policy, and the operation record.
-
-Services enforce rules such as:
-
-- Album–Model uniqueness and Album relation validity, including no self-relation.
-- Whether a Status, Studio, Model, or related Album can be deleted because it is referenced.
-- Canonical path calculation and collision checks.
-- Workspace batch-update allow-lists and validation.
-- Import preview/execution consistency, database transaction scope, and filesystem repair handling.
-- Audit/snapshot policy for material write operations.
-
-Services never execute SQL or inspect `sqlite3` objects. They request persistence through repositories and group database changes through a unit-of-work/transaction abstraction supplied by the database layer.
-
-### Workspace Lifecycle
-
-Workspace tables, including the existing `workspace_album` and possible future working datasets such as `workspace_photo` or AI-related workspace records, are temporary project workspaces rather than permanent business entities. They share one generic lifecycle so future workspace tables follow the same ownership and access rules:
-
-- **Active:** full CRUD, AI processing, and user editing are allowed.
-- **Review:** data is read and validated; only controlled modifications needed for review and approval are allowed.
-- **Closed:** the workspace is read-only for business changes and remains available for reference, audit, and migration.
-- **Archived / Retired:** the workspace is long-term historical storage and excluded from normal workflows.
-
-Services enforce lifecycle permissions and transitions; repositories persist the lifecycle state; Controllers only expose the permitted operation. This keeps workspaces disposable and prevents temporary processing data from silently becoming permanent domain data. Exact transition rules belong in a Workspace Lifecycle Specification.
-
-### Work Dispatch Orchestration
-
-Worker scheduling is separate from Album business state and Workspace review
-state. `album.status_id` describes the digital asset; it is never used as a
-queue lock or overwritten merely because work was dispatched.
-
-The Backend reserves an Album as the exclusive scheduling unit. One active
-Album Work Reservation owns one Dispatch Group, Worker kind, and work purpose.
-No second Worker kind, Workspace, or Administrator request may reserve that
-Album until the Group is safely closed and released. Database uniqueness, not
-UI filtering, enforces this invariant.
-
-A Dispatch Batch records one Admin-confirmed selection. Each selected Album
-receives one Group and reservation. Dataset-specific Work Items live beneath
-the Group; therefore an Album-analysis Group may contain several model
-configuration runs for comparison without becoming several competing Album
-assignments. Physical Worker devices claim eligible Work Items later and are
-not the ordinary dispatch target.
-
-Candidate filtering, preview, atomic execution, cancellation, release, and
-redispatch are Service-owned workflows exposed through `/api/v1`. The Web UI
-shows available, active, and historical work but does not infer eligibility or
-loop over single-item creation calls. Exact rules are defined by the
-[Work Dispatch Workflow](Specifications/Work-Dispatch-Workflow.md).
-
-### Future Import Workflows
-
-Future large imports, including photo imports, follow the same layered Backend design and must not grow into standalone scripts that bypass Services or repositories. The architectural workflow is:
+### Ordinary authenticated request
 
 ```text
-Filesystem scan
-  -> metadata extraction
-  -> normalization
-  -> workspace import
-  -> validation / cleaning
-  -> promotion into production tables
-  -> operation logging
-  -> snapshot, when required by risk
+Client → HTTP parse/request ID → authenticate and authorize
+       → Service validation/use case → Repository transaction or read
+       → optional filesystem/recovery adapter → Operation/log update
+       → role-appropriate response envelope
 ```
 
-A future `workspace_photo` may use this pattern just as `workspace_album` does today. The Architecture establishes the stages and ownership; import commands, extraction rules, validation details, and promotion criteria belong in future Specifications.
-
-### API Versioning and Device Access
-
-All external Backend routes use the `/api/v1` prefix. This is the stable API boundary for the Web UI, the Windows AI Worker, CLI tools, and any future out-of-process client. REST is the only supported write entry point for those clients.
-
-Curator does not introduce username/password accounts. It uses device access tokens suitable for explicitly controlled LAN devices. External API calls authenticate with `Authorization: Bearer <token>`. Tokens are stored in the Backend only as hashes; plaintext is shown once at creation and is then stored by the client in protected local configuration.
-
-The `auth_token` table stores token hashes only, never plaintext tokens. Each token has a stable token UUID, token hash, device name, permission scope, creation, expiration and last-used times, and revocation state. Tokens normally have a one-year validity period and support manual revocation and reissuance. Scopes are deliberately small:
-
-- `admin` manages tokens, migrations, restores, backups, and other high-risk administration.
-- `writer` performs authorized data writes but cannot perform administrative operations.
-- `reader` performs read-only queries.
-
-The AI Worker normally receives only a `writer` token. Device tokens use an explicit approval workflow rather than automatic issuance: a device submits a registration request, the request becomes a reviewable Backend event or Issue, and an administrator approves it through the server-side Web UI before a token is issued and stored as a hash. LAN clients cannot self-register, self-approve, or issue tokens. Automatic approval is not part of the current development phase.
-
-New tokens are issued only through this approved server-side workflow, a local administrator command, or a management endpoint bound to loopback. The Backend binds to `127.0.0.1` by default. A LAN bind address is an explicit configuration choice for the Windows AI Worker and should be paired with firewall rules limited to that host. The detailed registration, approval, renewal, and revocation behavior belongs in the Authentication Specification.
-
-### Repository Layer
-
-Repositories are the only application abstraction allowed to access persisted Curator records. They express the queries and mutations the Backend needs in domain terms, translate rows to records, and hide SQL, joins, engine-specific syntax, and result conventions.
-
-#### Repository contracts and implementations
-
-The Repository layer has a lightweight separation between a contract and its implementation:
-
-- A **repository contract** describes the persistence operations a Service needs, in application terms.
-- The **SQLite implementation** fulfils that contract using the current SQLite schema and SQLite-specific mechanics.
-- A future **PostgreSQL implementation** fulfils the same needed contract using PostgreSQL mechanics.
-
-Services depend on repository contracts, not on SQLite or PostgreSQL implementations. This does not require a large abstraction framework or an interface for every small helper. Introduce a contract only where a Service needs a stable persistence boundary or where more than one database implementation will genuinely need to satisfy it.
-
-Repositories should be concrete and focused. A repository can expose purpose-specific methods such as `find_by_id`, `search`, `save`, `delete`, `exists_by_path`, or `replace_models_for_album`; it should not become an unrestricted query executor passed to services or clients.
-
-Read models are Repository result structures prepared for display or API consumption. They are not a requirement to adopt CQRS or a particular Web UI framework. When a real query needs joins, aggregation, filtering, pagination, or statistics, a Repository may return a dedicated read model directly; simple lookup data such as a Status dropdown does not need one.
-
-Likely early candidates are an Album list, Workspace review, Import preview, Repair result view, Studio overview, and Validation dashboard. Examples include an Album list combining Album, Studio, Status, Model count, and Photo count; an Album detail combining the Album, Models, related Albums, and Photos; a Workspace list combining Workspace Album, linked permanent Album, and import state; and an Operations view of recent, failed, and pending-repair operations. Simple CRUD repositories continue to return domain entities. Do not design all read models in advance—add them only when an actual UI or API query needs them.
-
-### Database Layer
-
-The database layer owns connection creation, connection configuration, transactions, migrations, and the selection of the active persistence implementation. SQLite connection details, including WAL and foreign-key PRAGMAs, stay here.
-
-It provides repositories with a scoped session/unit of work and commits or rolls back the service-defined transaction. Services should be able to express “perform these changes atomically” without knowing whether the database engine uses SQLite or PostgreSQL.
-
-This is also the correct home for schema migration execution and database health checks. Snapshot backup and restore have SQLite-specific mechanics; they should sit in a SQLite infrastructure adapter called by `BackupService`, rather than being assumed to be a universal database transaction feature.
-
-### Configuration Layer
-
-Configuration is loaded once at startup into a typed, validated application settings object. It owns defaults and validation for paths, port/bind address, database implementation and location, archive/source roots, default Studio, backup retention, log locations, and future PostgreSQL connection settings.
-
-No request should reload configuration or read a global config dictionary. The composition root creates settings, the database provider, infrastructure adapters, repositories, services, and controllers. Tests can construct the same graph with temporary paths and a test database.
-
-### Operation History, Audit, and Snapshots
-
-Curator uses a lightweight **database-first, JSONL-secondary** audit strategy. Important business and operational actions have a small persistent `operation` table/concept so that reliable history and recovery context belong to the database owned by the Backend. JSONL remains a human-readable operational log for diagnosis, but is never the only source of truth.
-
-An operation records a stable operation UUID, type, initiator (Web UI, AI Worker, or CLI), start and end timestamps, status, related entity UUIDs, summary, error details, repair state, and the recovery context needed for the operation. It records actions that occurred; it is not an authorization table and does not replace device access tokens.
-
-Snapshot policy is based primarily on operation risk, not only on the number of changed rows. Candidates include bulk imports or deletes, bulk filesystem renames, Workspace-to-production promotion, cross-table relationship rebuilds, restores, data migrations, and any other hard-to-reverse operation. Ordinary single-entity CRUD normally creates an Operation record without a snapshot. The Service layer applies this policy; the database-specific snapshot mechanism remains infrastructure. Categories, retention, cleanup, restore steps, and snapshot metadata belong in the Snapshot Specification.
-
-### Filesystem Consistency and Repair
-
-Filesystem repair is a first-class Backend workflow. Filesystem operations cannot share a single atomic transaction with database persistence. If persistence succeeds but a copy, move, or rename fails, the Backend does not automatically delete the database data. Instead, it records the operation as `needs_repair`, including the expected canonical path, completed stages, failure reason, and available repair choices.
-
-Repair work follows a visible lifecycle: `NeedsRepair`, `Repairing`, `PendingVerification`, `Resolved`, `ManualConflict`, or `Ignored`. The exact state-transition rules belong in the Repair Specification, but the lifecycle ensures that unresolved filesystem/database disagreement remains visible and auditable.
-
-Repair is user-selectable and safe. Automatic repairs are limited to deterministic, project-rule-preserving corrections such as removing trailing spaces, collapsing multiple spaces, or normalizing case; they create Operation and audit records and notify the user. Assisted repairs—for example a missing folder, possible fuzzy path match, Studio-name mismatch, or Album rename suggestion—provide a suggestion and require the user to decide. Conflicting folders that cannot be resolved automatically remain Manual Conflicts until the user confirms a resolution.
-
-Depending on the verified state, the Backend can offer to retry the original copy or move; safely rename the real folder to the canonical database path; move a conflicting directory to quarantine before retrying; update the database path to a verified real folder after explicit confirmation; or allow manual repair followed by consistency validation. It must never silently overwrite or delete user data.
-
-The canonical path stored in the database is the intended source of truth. When a real directory differs because of trailing spaces or a comparable naming defect, repair should prefer safely renaming the real directory. After repair, the Backend validates agreement between database and filesystem, at minimum covering canonical paths, directory existence, case conflicts, trailing whitespace, and Unicode-normalization conflicts. File manifests, sizes, and hashes may be added later if a concrete validation need justifies them.
-
-One Service-layer path-normalization policy applies to all path creation, import, comparison, and repair. It trims leading and trailing whitespace from every component, normalizes Unicode, detects case-insensitive collisions, and computes an explicit comparison key. If later imports collide after normalization, Services choose deterministic, readable suffixes such as `Name (2)` and `Name (3)`. Exact canonicalization rules, including separators and duplicate detection, belong in the Canonical Path Rules Specification.
-
-### Identity and Constraint Responsibilities
-
-The database enforces hard integrity constraints: UUID uniqueness, foreign keys, required values, join-table uniqueness, and other invariants that must never be violated. Except for small stable lookup tables such as `status`, which may retain integer IDs, business entities use UUIDs as their unique and externally stable identity. APIs, Services, and future clients must not depend on integer IDs for general business entities.
-
-Services own business semantics: path normalization, case-equivalence rules, collision naming, human-readable errors, and repair guidance. Services compute path uniqueness, while the database persists a `canonical_path_key` with a unique constraint as the final safety net against concurrent writes from the Web UI and AI Worker. This unique constraint provides concurrent-write protection and final consistency protection; it does not replace Service-layer collision detection or business validation. The exact canonicalization rules are intentionally deferred to Specification.
-
-### Filesystem Health and Issues
-
-Curator has a long-term Filesystem Health workflow. Manual or scheduled scans compare the filesystem with the database and detect missing folders, duplicate or orphan directories, unexpected folders, incorrect capitalization, and path mismatches. Scans do not modify data merely because they find a discrepancy.
-
-Detected problems create reviewable Issues. An Issue records the problem and remains open until verification confirms that repair succeeded; it is the shared cross-cutting mechanism for filesystem, validation, import, repair, AI-processing, security, and device-registration concerns. The Issue model, category set, and lifecycle are Specification work. Filesystem Health forms the basis of future Archive Health monitoring.
-
-## 6. Request Flow
-
-For a normal read or write, responsibility flows in one direction:
+### Reviewed mutation
 
 ```text
-Web UI / AI Worker / CLI
-        -> `/api/v1` HTTP adapter
-        -> Domain Service
-        -> Repository
-        -> Database
+Client requests preview → Backend validates current truth, writes nothing
+Client confirms signed preview → Backend authenticates and claims preview
+Service revalidates → transaction/filesystem action/Snapshot as specified
+Backend verifies durable + filesystem outcome → truthful Operation/response
 ```
 
-For an Album update, the Controller parses the route ID and request DTO, then calls `AlbumService.update_album`. The service validates the complete Album change and relationship rules, begins one unit of work, asks repositories to update the Album and replace its permitted relationship sets, commits on success, records the operation where policy requires it, and returns a result. The Controller maps that result to the HTTP response.
-
-For an import, the flow includes two controlled infrastructure collaborators:
+### AI Worker request
 
 ```text
-Client -> `/api/v1` adapter -> ImportService
-                               -> repositories -> database transaction
-                               -> filesystem adapter
-                               -> audit / backup adapters
+Worker Token → claim/lease Work Item → fetch only Manifest evidence
+→ submit Vision → submit Writer → result ready for Admin review
 ```
 
-The Service explicitly owns the order, result reporting, snapshot decision, and repair-state policy because a database and filesystem cannot share one atomic transaction. The Controller must not decide this sequence.
+## Testing and readiness
 
-## 7. Repository Pattern
+Backend tests are layered across unit, Repository, Service, API and disposable
+workflow acceptance. `workflow-readiness` proves representative cross-resource
+behavior; full regression protects the supported surface. Browser acceptance
+complements rather than replaces Backend authority. Tests never use the live
+database or managed production paths.
 
-Repository is the only database access abstraction above the database layer. This makes persistence visible, testable, and replaceable while keeping Curator's real queries close to the entities they concern.
+## Current architectural gaps and approved future direction
 
-Suggested initial repository contracts include:
-
-| Repository | Responsibilities |
+| Area | Status |
 | --- | --- |
-| `AlbumRepository` | Find/search Albums; retrieve Album detail; create/update/delete Albums; persist Album–Model, Album relation, and Photo changes needed by Album workflows; check canonical path and album duplicate conditions. |
-| `WorkspaceAlbumRepository` | List/search/get Workspace Albums; obtain workspace options; apply validated single and batch updates; resolve workspace-to-permanent Album references and Workspace `belongs_to` references. |
-| `ModelRepository` | Find/search/get Models; create/update/delete Models; find an existing Model by supported name matching; list Albums for a Model. |
-| `StudioRepository` | Find/search/get Studios; create/update/delete Studios; find by name; list Albums for a Studio. |
-| `StatusRepository` | List/get/create/update/delete Statuses and report reference counts required for deletion rules. |
-| `OperationRepository` or audit adapter | Persist and query the database-first operation history, including failed and `needs_repair` operations; emit JSONL as supporting diagnostic output. |
+| Canonical empty-database bootstrap and ordered migration runner | Proposed BT-059 |
+| Digital Asset Trash and irreversible purge | Specification Ready/implementation Blocked: BT-033–035, UI-010E |
+| macOS native Photo curation application | Memo only |
+| PostgreSQL implementation | Future only; no current task |
+| Storage/presentation decoupling beyond canonical Album paths | Future product/architecture discussion only |
 
-`AlbumRepository` may internally use SQL across `album`, `album_model`, `album_relation`, and `photo`. The repository boundary is about application ownership, not an artificial insistence on one table per class.
+Future native curation may introduce user-organized collections and Photo-level
+Trash while preserving Backend database ownership. It must receive its own
+Architecture, Specifications and Tasks before affecting current schema or APIs.
 
-Services must never execute SQL directly because otherwise rules become coupled to row shape, SQL dialect, transaction mechanics, and database error behavior. A service should state intent—“replace this Album's Models” or “find a duplicate import target”—and a repository should implement the persistence detail. This also prevents the AI Worker or CLI from becoming an informal second persistence layer.
+## Change rule
 
-## 8. Database Abstraction
+Architecture changes update this document or an accepted ADR before lower-layer
+implementation. Behavioral changes update Specifications. Schema changes update
+the declared schema source, Catalog, diagrams and persistence maps. Implementation
+gaps receive the owning BT/UI/MT task; DOC work does not silently change runtime behavior.
 
-SQLite is the current database implementation and remains the default. The architecture should not hide useful SQLite behavior prematurely; it should confine it to `database/sqlite` and SQLite repository implementations.
-
-The upper layers depend on repository contracts and a small unit-of-work/transaction contract. They do not depend on:
-
-- `sqlite3.Connection`, `sqlite3.Row`, `lastrowid`, or PRAGMA commands.
-- SQLite placeholder, date, upsert, or schema-introspection syntax.
-- A filesystem path to `Curator.db`.
-- The SQLite backup API.
-
-A later PostgreSQL migration follows this sequence:
-
-1. Add PostgreSQL connection/session and transaction support in the database layer.
-2. Implement the same repository contracts with PostgreSQL SQL and row mapping.
-3. Map legacy integer-ID relationships completely to UUID foreign keys and produce a one-time old-ID-to-UUID mapping report for validation, troubleshooting, and rollback.
-4. Select the implementation through configuration and run migration/data-transfer tooling.
-5. Replace SQLite-only snapshot behavior with a PostgreSQL-appropriate backup/restore operational implementation.
-
-Controllers and Services do not change merely because the selected database changes. Some operational behavior will intentionally differ: SQLite file snapshots cannot be treated as the PostgreSQL backup mechanism. That distinction belongs behind `BackupService` and its database-specific adapter.
-
-This is database independence, not database-feature denial. Repository contracts should reflect Curator needs, and only create a cross-engine contract after a concrete second implementation needs it.
-
-## 9. Suggested Project Structure
-
-The final names can follow the existing repository conventions, but the following small structure gives each responsibility a discoverable home:
-
-```text
-backend/
-  app.py                         # Composition root and server startup
-  config.py                      # Settings loading and validation
-  api/
-    router.py
-    controllers/
-      albums.py
-      models.py
-      studios.py
-      workspace.py
-      imports.py
-      operations.py              # backups, rollback, health
-  services/
-    albums.py
-    models.py
-    studios.py
-    workspace_albums.py
-    imports.py
-    backups.py
-  repositories/
-    albums.py                    # Contracts or shared record definitions
-    models.py
-    studios.py
-    workspace_albums.py
-    statuses.py
-  database/
-    unit_of_work.py
-    migrations/
-    sqlite/
-      connection.py
-      album_repository.py
-      model_repository.py
-      studio_repository.py
-      workspace_album_repository.py
-      status_repository.py
-    postgresql/                  # Added only when migration work begins
-  infrastructure/
-    filesystem.py                # copy/move and destination checks
-    audit_log.py
-    backups_sqlite.py
-    scheduler.py
-  contracts/                     # Request/query/result DTOs shared by API and CLI
-  tests/
-    services/
-    repositories/
-    api/
-```
-
-This does not require moving everything at once. The static Web Client now lives
-under `apps/web`; `tools/web_ui/server.py` remains only as a thin launch point
-that imports the Backend composition root and preserves the old local command
-and runtime paths. The earlier base app's entry point has been retired; its
-source remains historical reference only and can be deleted after the
-completed, verified migration.
-
-## 10. Migration Strategy
-
-Migration should be incremental, behavior-preserving, and accompanied by focused tests. Do not start by moving every function or replacing the HTTP server.
-
-1. **Establish a safety baseline.** Document the supported routes and current Web UI behavior; add tests around critical existing flows: Album relationship updates, reference-protected deletes, Workspace batch edits, import preview/execution, backup/rollback, audit history, and filesystem repair. The disabled `workspace/curator_base_app` is historical context, not a migration target.
-2. **Extract configuration and database connection setup.** Introduce one settings object and one SQLite connection/unit-of-work provider. Keep the current route handlers operational, but replace duplicated global loading and `open_db` mechanics with the new provider.
-3. **Extract repositories for reads.** Start with `ModelRepository`, `StudioRepository`, `StatusRepository`, and read-only `AlbumRepository`/`WorkspaceAlbumRepository` queries. Controllers call repositories temporarily only if necessary; then introduce thin query services. This is a low-risk way to verify mapping and pagination boundaries.
-4. **Move one simple write use case at a time.** Implement services and repository writes for Model and Studio create/update/delete, including current reference checks. Retain endpoint shapes while handlers become thin Controllers.
-5. **Migrate Album workflows as a unit.** Move Album create/update/delete plus Models, relations, and Photos into `AlbumService` and `AlbumRepository`. Keep the existing all-or-nothing transaction semantics, then add targeted tests for relation and reference rules.
-6. **Migrate Workspace workflows.** Move Workspace listing, detail, single edits, and batch edits behind `WorkspaceAlbumService` and its repository. Preserve allow-lists, validation, the high-impact snapshot policy, and operation results.
-7. **Migrate import deliberately.** Extract `ImportService` with preview first, then execution. Make its database transaction, file-operation sequence, `needs_repair` state, repair options, snapshot policy, and audit record explicit. This is the highest-risk workflow and should not be mechanically moved.
-8. **Extract operational services.** Move backup cataloging, retention, restore, database-first operation history with JSONL support, and daily scheduling into operational Services and infrastructure adapters. Preserve local-first binding, controlled LAN access, and recovery behavior.
-9. **Consolidate entry points.** Once feature parity is verified, make the new Backend the sole entry point. `workspace/curator_base_app` has no runnable entry point and can be deleted after Migration is complete and verified. Delete either historical `server.py` only after its required behavior has been migrated and tested and the new Backend is the sole entry point.
-10. **Prepare PostgreSQL only when justified.** Add contract tests shared by SQLite repositories first. Introduce PostgreSQL adapters and data migration tooling later, without changing services or API behavior unnecessarily.
-
-At every step, maintain a working application, retain database backups before material changes, and prefer small reviewable commits. Do not run both old and new writers against the same behavior indefinitely; cut a migrated operation over to one service once verified.
-
-## 11. Open Questions
-
-The confirmed workspace, repair, snapshot, path-safety, token, read-model, and filesystem-health decisions are recorded above. The following remain genuine architectural questions:
-
-- What change in deployment scope would require the current trusted-LAN access model to be reconsidered, including stronger network protections?
-- What retention and retirement expectations should govern Closed and Archived Workspaces over the long term?
-- What practical scale, reliability, or integration threshold would justify beginning the future PostgreSQL migration?
-- When should Filesystem Health grow from a manually invoked workflow into scheduled Archive Health monitoring?
-
-## 12. Next Specification Boundaries
-
-The following are no longer Architecture questions. They should be defined in focused Specifications before implementation begins:
-
-- **API Specification:** the `/api/v1` success and error envelopes, conflict and repair responses, operation identifiers, pagination, and metadata.
-- **Canonical Path Rules Specification:** canonical path creation, case, whitespace, Unicode and separator normalization, and duplicate detection.
-- **Snapshot Specification:** risk categories, retention, cleanup, restore procedure, and snapshot metadata.
-- **Repair Specification:** repair strategies for duplicates, missing folders, fuzzy matches, rename suggestions, capitalization fixes, conflicts, confirmations, and repair-state transitions.
-- **Operation Record Specification:** required UUID references, statuses, error codes, summaries, retained diagnostics, and the relationship with JSONL.
-- **Issue Management Specification:** the Issue model, categories, lifecycle, ownership, and use across validation, filesystem health, import, repair, AI processing, security, and device registration.
-- **Authentication Specification:** device registration, administrator approval, token lifecycle, renewal, revocation, and trusted-device management.
-- **PostgreSQL Migration Specification:** migration validation, rollback verification, UUID mapping report, data consistency checks, and migration checkpoints.
-
-These Specifications refine the Architecture without redefining it. They should add behavior, contracts, validation rules, and state transitions only within the boundaries established above.
-
-## 13. Architecture, Specification, and Implementation
-
-Curator development follows this documentation hierarchy:
-
-```text
-Vision
-  ↓
-Architecture
-  ↓
-Specification
-  ↓
-Implementation
-```
-
-Architecture defines enduring responsibilities, boundaries, principles, and the reasons for them. Specifications follow the Architecture: they define the module contracts, rules, and implementation requirements needed for a bounded change. Implementation follows approved Specifications and contains executable code only.
-
-A lower layer must not redefine a concept or decision made by a higher layer. Implementation must not invent new architecture. If implementation exposes the need for a new architectural decision, update this Architecture document or add the appropriate ADR before implementation proceeds.
-
-## 14. Future Architecture Direction: Decouple Storage from Presentation
-
-> **Status: future architectural direction only.** This section preserves a long-term design direction. It is not part of the current roadmap, does not schedule implementation work, and does not change any existing Backend specification.
-
-### Motivation
-
-The current canonical Archive layout intentionally mirrors the user's browsing experience: the physical directory hierarchy is also the presentation hierarchy. For example:
-
-```text
-Studio/
-  Album/
-    Photos/
-```
-
-This design works well because users can browse the Archive directly in Finder. It also couples storage with presentation.
-
-As Curator expands to Archives with different organizational conventions, maintaining one canonical directory structure becomes increasingly difficult. Some Archives contain additional nested folders such as `VIP`, `Plus`, `Bonus`, `Premium`, or `Behind the Scenes`. Their meanings differ between Studios and cannot always be normalized into one directory hierarchy without Archive-specific rules.
-
-### Long-term direction
-
-Curator may eventually evolve toward three independent layers:
-
-- **Storage Layer**
-- **Metadata Layer**
-- **Presentation Layer**
-
-#### Storage Layer
-
-The Storage Layer would be responsible only for durable file storage. Files would use implementation-oriented identifiers—for example, UUID-based object identifiers or content-addressable identifiers—rather than human-readable Album paths. Its layout would be optimized for scalability, consistency, and filesystem performance, not for human navigation.
-
-Physical storage would no longer encode Studio, Album, or other domain concepts.
-
-#### Metadata Layer
-
-SQLite, or a future replacement, would become the source of truth for relationships between Albums, Photos, Models, Studios, Tags, Collections, and future semantic relationships. No user-facing organization would depend on a physical file location.
-
-#### Presentation Layer
-
-All user-visible organization would be generated dynamically from metadata. Independent presentation models could coexist, including:
-
-- Studio view
-- Model view
-- Album view
-- Tag view
-- Collection view
-- Search results
-- Future custom virtual folders
-
-The presentation hierarchy would therefore be independent of physical storage.
-
-### Expected benefits
-
-- Storage would become independent of Archive-specific folder conventions.
-- Multiple Archives with different historical layouts could coexist.
-- Physical file organization would no longer constrain the domain model.
-- Future metadata improvements would automatically improve every presentation view.
-- Storage optimization could evolve without affecting user workflows.
-- The architecture would move closer to the separation of concerns used by mature digital asset management systems, such as Apple Photos.
-
-### Important design principle
-
-This is **not** an attempt to copy Apple Photos. The inspiration is the architectural separation of Storage, Metadata, and Presentation—not a particular implementation. Curator must continue to prioritize openness, portability, and user ownership of data.
-
-### Current status
-
-The current version of Curator will continue using the existing canonical Archive layout because Finder-based browsing remains an important user workflow, the current Backend specifications rely on canonical paths, and introducing a storage abstraction now would significantly increase implementation complexity.
-
-This direction should be reconsidered only after the Mac-native photo browser and the current Backend architecture have reached maturity. Until then, this section is design documentation that preserves the long-term vision rather than a plan for immediate implementation.
