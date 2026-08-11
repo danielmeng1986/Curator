@@ -128,6 +128,10 @@ shape is convenient.
 The machine-readable inventory and drift gate introduced by DBDOC-006 verify
 that this ordered result remains aligned with documentation.
 
+The committed `schema-inventory.json` records tables, columns, FKs, unique and
+explicit indexes, and ordered migrations. SQLite CHECK expression text is an
+explicitly documented exclusion because no stable PRAGMA exposes it separately.
+
 Historical field and relationship semantics are preserved in
 [Historical Workspace Album](Historical/Historical-Workspace-Album.md), not in
 the active diagram set.

@@ -140,3 +140,13 @@ Any persistent schema change must update this catalog, its authoritative source,
 the affected domain diagram and persistence workflow, and the schema drift
 inventory introduced by DBDOC-006. A task may not declare completion merely
 because Repository code can create a missing table lazily.
+
+Run the deterministic documentation gate from the repository root:
+
+```bash
+python3 tools/check_schema_docs.py
+```
+
+After an approved schema and documentation change, review the reported diff and
+regenerate the machine-readable inventory explicitly with `--write`. The gate
+uses a disposable canonical database and never opens the configured runtime DB.

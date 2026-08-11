@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,7 +51,7 @@ def _verify_connection(conn: sqlite3.Connection) -> None:
 
 
 def _verify_database(path: Path) -> None:
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn:
         conn.execute("PRAGMA foreign_keys=ON")
         _verify_connection(conn)
 
@@ -61,7 +62,7 @@ def _create_verified_backup(
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     backup = backup_dir / f"Curator_{stamp}_{migration_id}.db"
-    with sqlite3.connect(database) as source, sqlite3.connect(backup) as destination:
+    with closing(sqlite3.connect(database)) as source, closing(sqlite3.connect(backup)) as destination:
         source.backup(destination)
     _verify_database(backup)
     return backup
@@ -136,7 +137,7 @@ def migrate(
     if not database.exists():
         database.touch()
 
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn:
         recorded = _recorded(conn)
     pending = [source for source in MIGRATION_FILES if source.stem not in recorded]
     if not pending:
@@ -147,7 +148,7 @@ def migrate(
     adopted_remark = False
     applied: list[str] = []
     try:
-        with sqlite3.connect(database) as conn:
+        with closing(sqlite3.connect(database)) as conn, conn:
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(

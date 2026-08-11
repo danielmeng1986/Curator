@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from apps.backend.migrations.runner import MIGRATION_ID, migrate
@@ -13,7 +14,7 @@ from apps.backend.migrations.runner import MIGRATION_ID, migrate
 class AlbumRemarkMigrationTests(unittest.TestCase):
     def _pre_migration_database(self, root: Path) -> Path:
         database = root / "pre-migration.db"
-        with sqlite3.connect(database) as conn:
+        with closing(sqlite3.connect(database)) as conn, conn:
             conn.executescript(
                 """CREATE TABLE album (
                     id INTEGER PRIMARY KEY,
@@ -35,7 +36,7 @@ class AlbumRemarkMigrationTests(unittest.TestCase):
             result = migrate(database, root / "backups")
             self.assertTrue(result.applied)
             self.assertTrue(result.backup and result.backup.is_file())
-            with sqlite3.connect(database) as conn:
+            with closing(sqlite3.connect(database)) as conn, conn:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(album)")}
                 row = conn.execute("SELECT id, uuid, title, path, status_id, remark FROM album WHERE id = 7").fetchone()
                 versions = [row[0] for row in conn.execute(
@@ -63,13 +64,13 @@ class AlbumRemarkMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             database = self._pre_migration_database(root)
-            with sqlite3.connect(database) as conn:
+            with closing(sqlite3.connect(database)) as conn, conn:
                 conn.execute("ALTER TABLE album ADD COLUMN remark TEXT")
                 conn.execute("UPDATE album SET remark = 'kept' WHERE id = 7")
             result = migrate(database, root / "backups")
             self.assertTrue(result.applied)
             self.assertTrue(result.adopted_existing_column)
-            with sqlite3.connect(database) as conn:
+            with closing(sqlite3.connect(database)) as conn, conn:
                 self.assertEqual("kept", conn.execute("SELECT remark FROM album WHERE id = 7").fetchone()[0])
 
 
@@ -78,7 +79,7 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
         sql = (Path(__file__).parents[1] / "migrations" / "0003_ai_workspace_container.sql").read_text()
         with tempfile.TemporaryDirectory() as tmp:
             database = Path(tmp) / "workspace.db"
-            with sqlite3.connect(database) as conn:
+            with closing(sqlite3.connect(database)) as conn, conn:
                 conn.execute("PRAGMA foreign_keys=ON"); conn.executescript(sql); conn.executescript(sql)
                 conn.execute("INSERT INTO ai_dataset_schema VALUES ('album_analysis',1,'Active','{}','2026-08-09')")
                 conn.execute("""INSERT INTO ai_workspace
@@ -90,7 +91,7 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
 
     def test_0004_model_configuration_is_repeatable_and_has_no_host_path_column(self):
         sql = (Path(__file__).parents[1] / "migrations" / "0004_ai_model_configuration.sql").read_text()
-        with sqlite3.connect(":memory:") as conn:
+        with closing(sqlite3.connect(":memory:")) as conn, conn:
             conn.executescript(sql); conn.executescript(sql)
             columns = {row[1] for row in conn.execute("PRAGMA table_info(ai_model_configuration)")}
         self.assertIn("context_size", columns); self.assertIn("model_file", columns)
@@ -98,7 +99,7 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
 
     def test_0005_work_item_attempt_history_is_separate_from_current_state(self):
         root = Path(__file__).parents[1] / "migrations"
-        with sqlite3.connect(":memory:") as conn:
+        with closing(sqlite3.connect(":memory:")) as conn, conn:
             conn.execute("PRAGMA foreign_keys=ON"); conn.execute("CREATE TABLE album(id INTEGER PRIMARY KEY)")
             conn.executescript((root / "0003_ai_workspace_container.sql").read_text())
             conn.executescript((root / "0004_ai_model_configuration.sql").read_text())
@@ -108,7 +109,7 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
 
     def test_0006_dispatch_is_repeatable_and_reservation_is_album_unique(self):
         root = Path(__file__).parents[1] / "migrations"
-        with sqlite3.connect(":memory:") as conn:
+        with closing(sqlite3.connect(":memory:")) as conn, conn:
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("CREATE TABLE album(id INTEGER PRIMARY KEY)")
             sql = (root / "0006_work_dispatch_foundation.sql").read_text()
@@ -130,7 +131,7 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
 
     def test_0007_preview_claim_is_repeatable_and_single_use(self):
         root = Path(__file__).parents[1] / "migrations"
-        with sqlite3.connect(":memory:") as conn:
+        with closing(sqlite3.connect(":memory:")) as conn, conn:
             conn.execute("CREATE TABLE album(id INTEGER PRIMARY KEY)")
             conn.executescript((root / "0006_work_dispatch_foundation.sql").read_text())
             sql = (root / "0007_work_dispatch_execution.sql").read_text()
@@ -144,7 +145,7 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
 
     def test_0008_evidence_manifest_is_repeatable_and_item_unique(self):
         root = Path(__file__).parents[1] / "migrations"
-        with sqlite3.connect(":memory:") as conn:
+        with closing(sqlite3.connect(":memory:")) as conn, conn:
             conn.execute("PRAGMA foreign_keys=ON"); conn.execute("CREATE TABLE album(id INTEGER PRIMARY KEY)")
             for name in ("0003_ai_workspace_container.sql","0004_ai_model_configuration.sql","0005_album_ai_work_item.sql"):
                 conn.executescript((root / name).read_text())
@@ -155,7 +156,7 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
 
     def test_0009_two_stage_results_are_repeatable_and_stage_unique(self):
         root = Path(__file__).parents[1] / "migrations"
-        with sqlite3.connect(":memory:") as conn:
+        with closing(sqlite3.connect(":memory:")) as conn, conn:
             conn.execute("PRAGMA foreign_keys=ON"); conn.execute("CREATE TABLE album(id INTEGER PRIMARY KEY)")
             for name in ("0003_ai_workspace_container.sql","0004_ai_model_configuration.sql",
                          "0005_album_ai_work_item.sql","0008_ai_photo_evidence_manifest.sql"):
@@ -174,7 +175,7 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
 
     def test_0010_review_schema_is_repeatable_and_preserves_rework_lineage(self):
         root=Path(__file__).parents[1]/"migrations"
-        with sqlite3.connect(":memory:") as conn:
+        with closing(sqlite3.connect(":memory:")) as conn, conn:
             conn.execute("CREATE TABLE workspace_album_ai_worker(uuid TEXT PRIMARY KEY)")
             sql=(root/"0010_ai_work_item_review.sql").read_text(); conn.executescript(sql); conn.executescript(sql)
             tables={row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -182,7 +183,7 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
 
     def test_0011_promotion_schema_is_repeatable_and_has_single_winner_index(self):
         root=Path(__file__).parents[1]/"migrations"
-        with sqlite3.connect(":memory:") as conn:
+        with closing(sqlite3.connect(":memory:")) as conn, conn:
             conn.execute("CREATE TABLE ai_workspace(uuid TEXT PRIMARY KEY)")
             conn.execute("CREATE TABLE workspace_album_ai_worker(uuid TEXT PRIMARY KEY)")
             conn.execute("CREATE TABLE album(id INTEGER PRIMARY KEY)")
@@ -192,7 +193,7 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
 
     def test_0012_group_closure_schema_is_repeatable(self):
         root=Path(__file__).parents[1]/"migrations"
-        with sqlite3.connect(":memory:") as conn:
+        with closing(sqlite3.connect(":memory:")) as conn, conn:
             conn.execute("CREATE TABLE work_dispatch_group(uuid TEXT PRIMARY KEY)")
             sql=(root/"0012_work_dispatch_group_closure.sql").read_text(); conn.executescript(sql); conn.executescript(sql)
             columns={row[1] for row in conn.execute("PRAGMA table_info(work_dispatch_group_closure)")}
@@ -200,7 +201,7 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
 
     def test_0013_workspace_retention_schema_is_repeatable(self):
         root=Path(__file__).parents[1]/"migrations"
-        with sqlite3.connect(":memory:") as conn:
+        with closing(sqlite3.connect(":memory:")) as conn, conn:
             conn.execute("CREATE TABLE ai_workspace(uuid TEXT PRIMARY KEY)")
             sql=(root/"0013_ai_workspace_retention.sql").read_text(); conn.executescript(sql); conn.executescript(sql)
             columns={row[1] for row in conn.execute("PRAGMA table_info(ai_workspace_retention)")}
@@ -218,7 +219,7 @@ class CanonicalOrderedMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); database = root / "empty.db"
             result = migrate(database, root / "backups")
-            with sqlite3.connect(database) as conn:
+            with closing(sqlite3.connect(database)) as conn, conn:
                 tables = {row[0] for row in conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 )}
@@ -236,7 +237,7 @@ class CanonicalOrderedMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); database = root / "partial.db"
             migrate(database, root / "backups")
-            with sqlite3.connect(database) as conn:
+            with closing(sqlite3.connect(database)) as conn, conn:
                 conn.execute("DROP TABLE ai_workspace_retention")
                 conn.execute("DELETE FROM schema_migration WHERE migration_id='0013_ai_workspace_retention'")
                 conn.execute("DROP TABLE admin_bootstrap_code")
@@ -253,12 +254,12 @@ class CanonicalOrderedMigrationTests(unittest.TestCase):
     def test_active_historical_workspace_requires_guarded_mt008_and_rolls_back(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); database = root / "legacy.db"
-            with sqlite3.connect(database) as conn:
+            with closing(sqlite3.connect(database)) as conn, conn:
                 conn.executescript((Path(__file__).parents[1] / "migrations" / "0000_base_catalog.sql").read_text())
                 conn.execute("INSERT INTO workspace_album(studio_name) VALUES ('legacy')")
             with self.assertRaisesRegex(Exception, "MT-008"):
                 migrate(database, root / "backups")
-            with sqlite3.connect(database) as conn:
+            with closing(sqlite3.connect(database)) as conn, conn:
                 self.assertFalse(conn.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ai_workspace'"
                 ).fetchone())

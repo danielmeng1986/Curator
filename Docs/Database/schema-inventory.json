@@ -1,0 +1,4172 @@
+{
+  "format_version": 1,
+  "migrations": [
+    "0000_base_catalog",
+    "0001_add_album_remark",
+    "0002_archive_historical_workspace_album",
+    "0003_ai_workspace_container",
+    "0004_ai_model_configuration",
+    "0005_album_ai_work_item",
+    "0006_work_dispatch_foundation",
+    "0007_work_dispatch_execution",
+    "0008_ai_photo_evidence_manifest",
+    "0009_two_stage_ai_results",
+    "0010_ai_work_item_review",
+    "0011_ai_album_name_promotion",
+    "0012_work_dispatch_group_closure",
+    "0013_ai_workspace_retention",
+    "0014_authentication_and_operations"
+  ],
+  "excluded_tables": [
+    "sqlite_sequence"
+  ],
+  "unsupported": [
+    "CHECK expression text is not compared independently; SQLite does not expose it through a stable PRAGMA."
+  ],
+  "tables": {
+    "admin_bootstrap_code": {
+      "columns": [
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "code_hash",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "expires_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "used_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "failed_attempts",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_position": 0
+        },
+        {
+          "name": "locked_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "code_hash"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "ai_dataset_schema": {
+      "columns": [
+        {
+          "name": "dataset_type",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "schema_version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 2
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "definition_json",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "dataset_type",
+            "schema_version"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ]
+    },
+    "ai_model_configuration": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "provider_type",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "model_identifier",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "model_repository",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "model_file",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "vision_prompt_version",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "writer_prompt_version",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "sample_count",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "context_size",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "threads",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "gpu_layers",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "max_tokens",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "temperature",
+          "type": "REAL",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "image_max_tokens",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "additional_parameters_json",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'{}'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "enabled",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_position": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "name"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "ai_photo_evidence_manifest": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "work_item_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "album_id",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "manifest_version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_position": 0
+        },
+        {
+          "name": "sample_count",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "eligible_image_count",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "average_size_bytes",
+          "type": "REAL",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "selection_method",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "discovery_summary_json",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "selected_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "album_id",
+          "table": "album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "work_item_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "ai_promotion_preview_claim": {
+      "columns": [
+        {
+          "name": "preview_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "promotion_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "claimed_by_token_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "claimed_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "preview_uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "promotion_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "ai_work_item_attempt": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "work_item_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "attempt_number",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "worker_token_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "claimed_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "lease_expires_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "error_code",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "error_message",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "work_item_uuid",
+            "attempt_number"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "ai_work_item_result_stage": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "work_item_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "stage",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "schema_version",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "manifest_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "manifest_version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "configuration_snapshot_sha256",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "payload_json",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "payload_sha256",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "runtime_metrics_json",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "operation_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "submitted_by_token_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "submitted_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "manifest_uuid",
+          "table": "ai_photo_evidence_manifest",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "work_item_uuid",
+            "stage"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "ai_work_item_result_state": {
+      "columns": [
+        {
+          "name": "work_item_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'AwaitingVision'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "vision_result_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "writer_result_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "work_item_uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ]
+    },
+    "ai_work_item_review": {
+      "columns": [
+        {
+          "name": "work_item_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'ReadyForReview'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "rating",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "notes",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "selected_name",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "selection_source",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "selected_recommendation",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "reviewer_token_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "review_started_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "decided_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "decision_reason",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_position": 0
+        },
+        {
+          "name": "latest_operation_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "work_item_uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        },
+        {
+          "name": "idx_ai_work_item_review_queue",
+          "columns": [
+            "state",
+            "updated_at"
+          ],
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        }
+      ]
+    },
+    "ai_work_item_review_decision": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "work_item_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "from_state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "to_state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "evidence_json",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "reviewer_token_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "operation_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "ai_work_item_rework": {
+      "columns": [
+        {
+          "name": "rework_of_work_item_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "successor_work_item_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "requested_by_token_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "rework_of_work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "successor_work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "rework_of_work_item_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "successor_work_item_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "ai_workspace": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "dataset_type",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "schema_version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "lifecycle_state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'Open'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_by_token_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_position": 0
+        },
+        {
+          "name": "close_operation_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "archive_operation_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "dataset_type",
+          "table": "ai_dataset_schema",
+          "to": "dataset_type",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "schema_version",
+          "table": "ai_dataset_schema",
+          "to": "schema_version",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": "idx_ai_workspace_queue",
+          "columns": [
+            "lifecycle_state",
+            "created_at"
+          ],
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        }
+      ]
+    },
+    "ai_workspace_retention": {
+      "columns": [
+        {
+          "name": "workspace_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "retention_classification",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'IndefiniteAudit'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "outcome_classification",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "close_reason",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "closed_by_token_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "close_operation_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "archive_reason",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "archived_by_token_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "archive_operation_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "workspace_uuid",
+          "table": "ai_workspace",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "workspace_uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "archive_operation_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "close_operation_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "album": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "studio_id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "status_id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "scene",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "location",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "capture_date",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "publish_date",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "rating",
+          "type": "REAL",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "remark",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "status_id",
+          "table": "status",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "studio_id",
+          "table": "studio",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "album_model": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "album_id",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "model_id",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "age_when_shot",
+          "type": "REAL",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "remarks",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "album_id",
+          "table": "album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "model_id",
+          "table": "model",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "album_id",
+            "model_id"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "album_relation": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "album_id",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "related_album_id",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "relation_type",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "remarks",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "album_id",
+          "table": "album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "related_album_id",
+          "table": "album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "album_id",
+            "related_album_id",
+            "relation_type"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": "idx_album_relation_album_id",
+          "columns": [
+            "album_id"
+          ],
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        },
+        {
+          "name": "idx_album_relation_related_album_id",
+          "columns": [
+            "related_album_id"
+          ],
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        }
+      ]
+    },
+    "album_work_reservation": {
+      "columns": [
+        {
+          "name": "album_id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "group_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "batch_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "worker_kind",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "reserved_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "album_id",
+          "table": "album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "batch_uuid",
+          "table": "work_dispatch_batch",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "group_uuid",
+          "table": "work_dispatch_group",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "group_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "auth_token": {
+      "columns": [
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "token_hash",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "registration_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "device_name",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "scopes",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "expires_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "last_used_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "revoked_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "replaced_by_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "registration_uuid",
+          "table": "device_registration",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "token_hash"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "device_registration": {
+      "columns": [
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "device_name",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "device_identity",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "requested_role",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "requested_scopes",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "approved_role",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "approved_scopes",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "trusted",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "approved_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "rejected_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "device_identity"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "import_preview_claim": {
+      "columns": [
+        {
+          "name": "preview_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "claimed_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "preview_uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ]
+    },
+    "issue": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "category",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "affected_operation",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "suggested_resolution",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'Open'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "source_workflow",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "priority",
+          "type": "TEXT",
+          "not_null": false,
+          "default": "'Normal'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "due_date",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "resolution_verification",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "resolved_by",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "resolved_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "issue_link": {
+      "columns": [
+        {
+          "name": "issue_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "relationship",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "target_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "issue_uuid",
+            "relationship",
+            "target_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "model": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "display_name",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "primary_name",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "country",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "ethnicity",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "eye_color",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "natural_hair_color",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "operation": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "operation_type",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "initiator",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'Pending'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "summary",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "entity_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "import_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "batch_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "repair_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "related_operation_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "parent_operation_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "issue_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "error_category",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "error_code",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "error_details",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "repair_state",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "recovery_context",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": []
+    },
+    "photo": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "album_id",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "filename",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "relative_path",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "hash",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "width",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "height",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "capture_time",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "album_id",
+          "table": "album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "quarantine_item": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "original_path",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "quarantine_path",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "repair_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "operation_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "inventory",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "expires_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "hold",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_position": 0
+        },
+        {
+          "name": "restored_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "restore_operation_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "restore_destination",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "quarantine_preview_claim": {
+      "columns": [
+        {
+          "name": "preview_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "claimed_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "preview_uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ]
+    },
+    "repair_case": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "operation_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "album_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "expected_path",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'NeedsRepair'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "category",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'Assisted'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "confirmation",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "failure_reason",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "verification_result",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "repair_suppression": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "fingerprint",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "scope_path",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "creator",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "expires_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "revoked_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "revoked_by",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "restore_preview_claim": {
+      "columns": [
+        {
+          "name": "preview_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "claimed_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "preview_uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ]
+    },
+    "schema_migration": {
+      "columns": [
+        {
+          "name": "migration_id",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "applied_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "migration_id"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ]
+    },
+    "snapshot_cleanup_preview_claim": {
+      "columns": [
+        {
+          "name": "preview_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "claimed_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "preview_uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ]
+    },
+    "status": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": []
+    },
+    "studio": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "website",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "media_scope",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "token_renewal_request": {
+      "columns": [
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "registration_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "previous_token_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "requested_role",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "requested_scopes",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "approved_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "rejected_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "previous_token_uuid",
+          "table": "auth_token",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "registration_uuid",
+          "table": "device_registration",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        }
+      ]
+    },
+    "work_dispatch_batch": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "worker_kind",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "dataset_type",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "schema_version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "workspace_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "batch_state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'Active'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_by_token_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "work_dispatch_group": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "batch_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "album_id",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "worker_kind",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "dataset_type",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "schema_version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "group_state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'Active'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "released_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "released_by_token_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "release_reason",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "album_id",
+          "table": "album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "batch_uuid",
+          "table": "work_dispatch_batch",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": "idx_work_dispatch_group_album_history",
+          "columns": [
+            "album_id",
+            "created_at",
+            "id"
+          ],
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        }
+      ]
+    },
+    "work_dispatch_group_closure": {
+      "columns": [
+        {
+          "name": "group_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "disposition",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "closed_by_token_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "operation_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "summary_json",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "group_uuid",
+          "table": "work_dispatch_group",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "group_uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "operation_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "work_dispatch_group_item": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "group_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "item_kind",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "item_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "configuration_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "group_uuid",
+          "table": "work_dispatch_group",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "group_uuid",
+            "item_kind",
+            "item_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "item_kind",
+            "item_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": "idx_work_dispatch_group_item_group",
+          "columns": [
+            "group_uuid",
+            "created_at",
+            "id"
+          ],
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        }
+      ]
+    },
+    "work_dispatch_preview_claim": {
+      "columns": [
+        {
+          "name": "preview_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "batch_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "claimed_by_token_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "claimed_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "batch_uuid",
+          "table": "work_dispatch_batch",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "preview_uuid"
+          ],
+          "unique": true,
+          "origin": "pk",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "batch_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "workspace_album": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "status_id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "studio_name",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "album_name",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "primary_model",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "additional_models",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "remark",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "current_path",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "expected_path",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "ai_result",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "belongs_to_album_id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "album_id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "lifecycle_state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'active'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "archive_classification",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "archive_reason",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "archive_operation_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "album_id",
+          "table": "album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "belongs_to_album_id",
+          "table": "workspace_album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "status_id",
+          "table": "status",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": []
+    },
+    "workspace_album_ai_worker": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "workspace_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "album_id",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "ai_model_configuration_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "configuration_snapshot_json",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "run_state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'Pending'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "attempt_count",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_position": 0
+        },
+        {
+          "name": "claimed_by_token_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "lease_expires_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "last_error",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "ai_model_configuration_uuid",
+          "table": "ai_model_configuration",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "album_id",
+          "table": "album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "workspace_uuid",
+          "table": "ai_workspace",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": "idx_ai_work_item_queue",
+          "columns": [
+            "run_state",
+            "created_at",
+            "id"
+          ],
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        }
+      ]
+    },
+    "workspace_album_ai_worker_photo": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "manifest_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "work_item_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "album_id",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "ordinal",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "relative_path",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "filename",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "size_bytes",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "modified_time_ns",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "sha256",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "mime_type",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "album_id",
+          "table": "album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "manifest_uuid",
+          "table": "ai_photo_evidence_manifest",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "manifest_uuid",
+            "ordinal"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "manifest_uuid",
+            "relative_path"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "workspace_album_name_promotion": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "preview_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "workspace_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "work_item_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "album_id",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "selected_name",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "prior_title",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "prior_status_id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "resulting_status_id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "promoted_by_token_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "operation_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "snapshot_reference",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "promoted_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "album_id",
+          "table": "album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "workspace_uuid",
+          "table": "ai_workspace",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "preview_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": "uq_ai_promotion_work_item_winner",
+          "columns": [
+            "work_item_uuid"
+          ],
+          "unique": true,
+          "origin": "c",
+          "partial": true
+        },
+        {
+          "name": "uq_ai_promotion_workspace_album_winner",
+          "columns": [
+            "workspace_uuid",
+            "album_id"
+          ],
+          "unique": true,
+          "origin": "c",
+          "partial": true
+        }
+      ]
+    }
+  }
+}

@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`DBDOC-006` — Status: `Blocked`
+`DBDOC-006` — Status: `Complete`
 
 ## Goal
 
@@ -75,3 +75,12 @@ the documented Schema Catalog diverge.
 - BT-059 now owns canonical bootstrap, ordered adoption/migration, and disposable
   reconstruction. Resume DBDOC-006 after BT-059 passes its migration acceptance.
 - No runtime database, migration, or schema behavior was changed by this blocked task.
+
+## Completion Record
+
+- BT-059 supplied the canonical disposable empty-database build and ordered migrations.
+- Added a committed machine-readable inventory plus `tools/check_schema_docs.py`.
+- The gate compares tables, columns, FKs, unique/explicit indexes, migration
+  order, and Schema Catalog table coverage; SQLite CHECK text is explicitly excluded.
+- Added clean, added-table, changed-column, changed-FK, and changed-index acceptance tests.
+- The gate passed twice, followed by Backend workflow-readiness and full regression.
