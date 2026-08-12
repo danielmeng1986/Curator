@@ -165,7 +165,7 @@ The Backend recognizes only these policy categories:
 
 Every exception MUST be declared by its route-specific specification, including whether it is local-only and whether authentication is waived. Until a route is so declared, it is a normal bearer-token-protected route.
 
-The Authentication Specification declares exactly these current loopback-only
+The Authentication Specification declares these authentication-management
 exceptions outside `/api/v1`:
 
 | Route | Unauthenticated purpose and constraint |
@@ -175,9 +175,11 @@ exceptions outside `/api/v1`:
 | `GET /api/auth/bootstrap/status` | Disclose only whether first Admin initialization is complete and whether a current Code is available. |
 | `POST /api/auth/bootstrap/complete` | Consume a console-created, short-lived, single-use Code to establish the first Admin exactly once. |
 
-All three reject non-loopback clients. Registration approval and every later
-authentication-management action use bearer-protected `/api/v1` routes with
-Admin scope. In particular, there is no unauthenticated loopback approval route.
+Bootstrap status/completion reject non-loopback clients. Proof-protected device
+registration and enrollment status may be used from a trusted LAN only when the
+operator explicitly binds the Backend to a LAN interface. Registration approval
+and every later authentication-management action use bearer-protected `/api/v1`
+routes with Admin scope. There is no unauthenticated approval route.
 
 Authenticated Admin routes under `/api/v1/auth/admin/registration-proof` expose
 safe state and generate/rotate/disable the managed Registration Proof. Generate

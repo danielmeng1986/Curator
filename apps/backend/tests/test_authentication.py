@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import repositories as repo
+import server as srv
 import services as svc
 
 
@@ -145,6 +146,17 @@ class AuthenticationLifecycleTests(unittest.TestCase):
                 requested_scopes=["read"], registration_proof=replacement,
             )
         self.assertEqual("reader", self.auth.authenticate(token)["role"])
+
+
+class BackendNetworkStartupTests(unittest.TestCase):
+    def test_lan_address_discovery_keeps_only_private_non_loopback_ipv4(self):
+        self.assertEqual(
+            ["10.0.0.4", "192.168.1.25"],
+            srv.discover_lan_ipv4_addresses([
+                "127.0.0.1", "192.168.1.25", "10.0.0.4", "169.254.2.3",
+                "8.8.8.8", "0.0.0.0", "not-an-address", "192.168.1.25",
+            ]),
+        )
 
 
 class AdministratorBootstrapTests(unittest.TestCase):

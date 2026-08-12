@@ -35,7 +35,9 @@ Curator Backend 负责目录数据库、文件变更工作流、认证、审计�
 默认运行位置为 `var/data/Curator.db`、`var/backups/` 与 `var/logs/`。部署时可用
 `CURATOR_DATABASE_PATH`、`CURATOR_RUNTIME_DIR`、`CURATOR_BACKUP_DIR` 和
 `CURATOR_LOG_DIR` 覆盖；`CURATOR_CONFIG_PATH` 指定其他配置文件，
-`CURATOR_STATIC_DIR` 指定 Web 客户端文件；`CURATOR_PORT` 可修改默认回环端口 `8788`。
+`CURATOR_STATIC_DIR` 指定 Web 客户端文件；`CURATOR_PORT` 可修改默认端口 `8788`。
+默认仅监听 `127.0.0.1`。仅在受信任局域网及已配置主机防火墙时，才用
+`CURATOR_HOST=0.0.0.0` 显式启用 LAN 访问。
 
 路径和配置可能泄露私人资产布局。Token 与凭据必须通过受保护的本机配置提供，
 绝不能提交，或粘贴到日志、截图和支持报告中。
@@ -60,6 +62,15 @@ python3 -m apps.backend.migrations
 ```bash
 python3 -m apps.backend
 ```
+
+需要让另一台局域网主机使用时：
+
+```bash
+CURATOR_HOST=0.0.0.0 python3 -m apps.backend
+```
+
+启动输出会同时列出 **Local URL** 和检测到的 **LAN URL**。应使用显示的私有 IPv4
+地址（例如 `http://192.168.x.x:8788`），不要在其他主机使用 `127.0.0.1`。
 
 启动成功后会显示回环 URL、数据库路径和备份目录。在同一主机打开显示的 URL
 （通常为 `http://127.0.0.1:8788`），确认 Curator 客户端可以加载。使用终端中断
@@ -91,8 +102,9 @@ Code 过期或已使用时应重新生成。首位管理员存在后 Bootstrap �
 <!-- manual-section: security -->
 ## 7. 认证与网络安全
 
-受支持的服务器绑定 `127.0.0.1`；应保持仅回环访问。不要公开该端口、添加未经审核
-的反向代理，或为了局域网访问削弱认证。每台设备使用经批准且受角色限制的 Token。
+默认服务器绑定 `127.0.0.1`。LAN 绑定必须显式启用，并由主机防火墙限制在受信任私有
+网络；绝不能把端口公开到 Internet、添加未经审核的反向代理或削弱认证。首位管理员
+Bootstrap 仍只允许 Backend 本机。每台设备使用经批准且受角色限制的 Token。
 非必要时授予 Reader 或 Writer；遗失的 Token 应尽快撤销；绝不能撤销最后一个可用管理员 Token。
 
 <!-- manual-section: recovery -->

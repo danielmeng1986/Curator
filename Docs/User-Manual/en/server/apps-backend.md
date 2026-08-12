@@ -37,7 +37,8 @@ Default runtime locations are `var/data/Curator.db`, `var/backups/`, and `var/lo
 Deployments may override them with `CURATOR_DATABASE_PATH`, `CURATOR_RUNTIME_DIR`,
 `CURATOR_BACKUP_DIR`, and `CURATOR_LOG_DIR`. `CURATOR_CONFIG_PATH` selects a different
 configuration file; `CURATOR_STATIC_DIR` selects the Web Client files; `CURATOR_PORT`
-changes the loopback port from `8788`.
+changes the default port from `8788`. The default listener is `127.0.0.1`. Set
+`CURATOR_HOST=0.0.0.0` only for an explicitly approved trusted-LAN deployment with a host firewall.
 
 Paths and configuration may disclose private asset layout. Tokens and credentials must
 be supplied through protected local configuration and must never be committed or pasted
@@ -64,6 +65,15 @@ Start the application:
 ```bash
 python3 -m apps.backend
 ```
+
+To serve another trusted LAN host:
+
+```bash
+CURATOR_HOST=0.0.0.0 python3 -m apps.backend
+```
+
+Startup prints both **Local URL** and detected **LAN URL** values. On another host use
+the displayed private IPv4 URL (for example `http://192.168.x.x:8788`), never `127.0.0.1`.
 
 Successful startup prints the loopback URL, database path, and backup directory. Open
 the printed URL (normally `http://127.0.0.1:8788`) on the same host and verify that the
@@ -99,8 +109,10 @@ recovery mechanism.
 <!-- manual-section: security -->
 ## 7. Authentication and network safety
 
-The supported Server binds to `127.0.0.1`; keep it loopback-only. Do not publish the
-port, add an unreviewed reverse proxy, or weaken authentication to obtain LAN access.
+The Server binds to `127.0.0.1` by default. LAN binding must be explicit and restricted
+to a trusted private network by the host firewall. Never publish the port to the Internet,
+add an unreviewed reverse proxy, or weaken authentication. First-Administrator Bootstrap
+remains Backend-host-only.
 Every device uses an approved role-limited Token. Grant Reader or Writer unless Admin
 capabilities are necessary, revoke lost Tokens promptly, and never revoke the final
 usable Administrator Token.

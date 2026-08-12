@@ -49,7 +49,7 @@ A registration request MUST contain only the information needed to identify the 
 | `candidate_token_hash` | Optional hash of a high-entropy Device Token generated and retained by the requesting Client. |
 | `enrollment_proof` | Independent high-entropy capability used only by the requesting Client to read its registration decision. |
 
-The registration proof establishes that the request may be considered; it does not grant access by itself. LAN clients cannot self-register, self-approve, or issue tokens. Automatic approval is not part of the current phase. A local administrator command or loopback-only management endpoint MAY perform the approved administrative action.
+The registration proof establishes that the request may be considered; it does not grant access by itself. A trusted-LAN Client may submit a proof-protected request when the operator explicitly enables LAN binding, but it cannot self-approve or issue an active token. Automatic approval is not part of the current phase. Only an authenticated Administrator performs the approval action.
 
 After the first Administrator exists, authenticated Admin management MAY generate,
 rotate, or disable the active Registration Proof. Rotation atomically invalidates

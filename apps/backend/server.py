@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import hashlib
+import ipaddress
 import os
 import re
 import shutil
@@ -633,9 +634,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 
     def _handle_auth_management_post(self, path: str, body: dict) -> None:
         """Loopback-only registration request and first bootstrap boundary."""
-        if self.client_address[0] not in {"127.0.0.1", "::1"}:
-            self._send_error(403, "AUTHORIZATION_LOOPBACK_REQUIRED", "Authentication management is available only on loopback.")
-            return
+        # Registration and proof-protected enrollment status may be requested
+        # from a trusted LAN when the operator explicitly binds the Backend to
+        # a LAN interface. First-Admin bootstrap remains loopback-only below.
         auth = svc.AuthenticationService(
             repo.AuthRepository(open_db), registration_secret=AUTH_REGISTRATION_SECRET,
             operation_service=svc.OperationService(repo.OperationRepository(open_db)),
@@ -655,6 +656,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                     path.split("/")[4], body.get("enrollment_proof", ""),
                 )})
             elif path == "/api/auth/bootstrap/complete":
+                if self.client_address[0] not in {"127.0.0.1", "::1"}:
+                    self._send_error(403, "AUTHORIZATION_LOOPBACK_REQUIRED", "Administrator bootstrap is available only on loopback.")
+                    return
                 issued = auth.complete_bootstrap_with_code(
                     code=body.get("code", ""),
                     device_name=body.get("device_name", ""),
@@ -1950,6 +1954,36 @@ class AppHandler(SimpleHTTPRequestHandler):
 # main
 # ---------------------------------------------------------------------------
 
+def discover_lan_ipv4_addresses(candidates: list[str] | None = None) -> list[str]:
+    """Return stable private IPv4 addresses suitable for startup guidance."""
+    discovered = set(candidates or [])
+    if candidates is None:
+        try:
+            discovered.update(
+                item[4][0] for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
+            )
+        except OSError:
+            pass
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("192.0.2.1", 80))
+            discovered.add(probe.getsockname()[0])
+        except OSError:
+            pass
+        finally:
+            probe.close()
+    result = []
+    for value in discovered:
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError:
+            continue
+        if (address.version == 4 and address.is_private and not address.is_loopback
+                and not address.is_link_local and not address.is_unspecified
+                and not address.is_multicast and not address.is_reserved):
+            result.append(str(address))
+    return sorted(set(result), key=lambda value: tuple(int(part) for part in value.split(".")))
+
 def main():
     if "--check" in sys.argv:
         print(f"Config: {CONFIG_PATH}")
@@ -1966,7 +2000,7 @@ def main():
     if not STATIC_DIR.exists():
         raise FileNotFoundError(f"Static directory not found: {STATIC_DIR}")
 
-    host = "127.0.0.1"
+    host = os.environ.get("CURATOR_HOST", "127.0.0.1").strip() or "127.0.0.1"
     port = int(os.environ.get("CURATOR_PORT", "8788"))
 
     backup_thread = threading.Thread(
@@ -1999,7 +2033,23 @@ def main():
     cleanup_expired_snapshots(RETENTION_DAYS)
 
     server = ThreadingHTTPServer((host, port), AppHandler)
-    print(f"Curator Backend running at http://{host}:{port}")
+    print(f"Curator Backend listening on http://{host}:{port}")
+    print(f"Local URL: http://127.0.0.1:{port}")
+    if host not in {"127.0.0.1", "::1", "localhost"}:
+        addresses = discover_lan_ipv4_addresses()
+        addresses = discover_lan_ipv4_addresses([*addresses, host])
+        if addresses:
+            print("LAN URL" + ("s" if len(addresses) != 1 else "") + ":")
+            for address in addresses:
+                print(f"  http://{address}:{port}")
+        else:
+            print("LAN URL: unavailable (no private IPv4 address detected)")
+    else:
+        addresses = discover_lan_ipv4_addresses()
+        if addresses:
+            print("LAN access disabled (set CURATOR_HOST=0.0.0.0 to enable):")
+            for address in addresses:
+                print(f"  http://{address}:{port}")
     print(f"Database: {DATABASE_PATH}")
     print(f"Backups: {BACKUP_DIR}")
 
