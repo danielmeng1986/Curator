@@ -4,6 +4,10 @@
 
 The UI follows Curator’s reviewable, traceable, and reversible workflow principles.
 
+The controlling [UI Specification](Specification.md) applies to every workflow,
+including discoverability, visible state, interruption recovery, delayed action,
+browser persistence, and upgrade/cache behavior.
+
 - Validate required values, dates, numeric values, duplicate relationships, foreign-key existence, and path conflicts before enabling Save or Import.
 - Use inline field validation plus a page-level summary for blocked operations.
 - Preview every multi-record change and import; do not apply bulk operations directly from a selected grid.
@@ -50,6 +54,10 @@ The plan is fulfilled when a local user can:
    Imports, Issues, Repairs, Snapshots, authentication events, and affected entities; and
 10. use Admin-only authentication and recovery capabilities only after their
     controlling UI tasks and Backend contracts are Ready.
+
+Every non-terminal workflow must additionally remain recoverable through its
+applicable interruption boundaries. A transient dialog is never the sole resume
+entry, and one uninterrupted manual happy path is not sufficient acceptance.
 
 Future AI Collection Workspace acceptance is controlled separately by
 UI-011A–D and is not satisfied by restoring the historical Workspace UI.

@@ -7,6 +7,11 @@ outcomes. A Backend workflow can be Ready while its UI is Not Implemented; the
 browser layer verifies client integration and does not repeat every Service
 rule.
 
+The [Curator Web UI Specification](Specification.md) controls readiness. Each
+row must cover the applicable discoverability, state, modal-close, navigation,
+refresh, browser-restart, Backend-restart, delayed-action, retry, cancellation,
+and upgrade/cache boundaries—not only its uninterrupted happy path.
+
 | Classification | Meaning |
 | --- | --- |
 | Ready | The named UI outcome exists and has isolated browser evidence. |
@@ -23,7 +28,7 @@ zero-side-effect assertion. The final gate is owned by UI-016.
 | Backend workflow evidence | Business/UI outcome | UI route and role | Happy-path browser owner | Required rejection/failure evidence | Classification / gap |
 | --- | --- | --- | --- | --- | --- |
 | BT-024 authenticated API workflow; `TestAuthenticatedApiWorkflow` | Connect an approved device and enter protected UI safely. | Connection dialog; Reader/Writer/Admin | UI-004C, UI-015 | Missing, invalid, expired, revoked, and insufficient-scope Token makes no business mutation. | Ready — role-isolated browser and direct-request evidence covers the complete credential-state matrix, reconnection, visibility, Backend enforcement, and zero business side effects. |
-| Authentication registration/approval services and tests | Establish the first Admin, then review registrations, renewals, elevation, and revocation. | First-run bootstrap; `/admin/devices`; Admin | UI-004A/B, UI-010A/D | Wrong/expired/replayed bootstrap, self-approval, last-Admin revocation, and unauthorized management preserve auth state. | Ready — UI-010D proves the Admin workflows and UI-015 proves direct-route enforcement plus network-payload credential redaction. |
+| Authentication registration/approval services and tests | Establish the first Admin; request Reader/Writer access; resume delayed approval; then review renewals, elevation, and revocation. | Persistent connection/status entry; first-run bootstrap; `/admin/devices`; requesting browser and Admin | UI-004A/B, UI-010A/D, UI-019–022 | Wrong/expired/replayed bootstrap, lost browser-local material, self-approval, last-Admin revocation, and unauthorized management preserve auth state. | Ready — multi-browser evidence covers UI-only request/approval, closed-dialog and refresh recovery, older saved-state compatibility, current-client cache delivery, automatic connection, role isolation, and credential redaction. |
 | Entity repository/service/API regression | Manage permanent Albums, Models, Studios, Statuses, Photos, and relationships. | `/albums`, `/models`, `/studios`, `/statuses`; Reader/Writer | UI-005, UI-012 | Validation, duplicate/self relation, reference-protected delete, and Reader writes preserve prior state. | Ready — complete disposable browser evidence covers visible and durable outcomes. |
 | BT-019 Import COPY, MOVE, database-only, preview; `test_import_workflow_acceptance` | Review zero-write preview and execute the selected filesystem/database mode with truthful results. | `/import/albums`; Writer | UI-006, UI-013 | Invalid/collision/stale/cancelled/repeated requests have no unintended mutation; partial failure matches durable/filesystem outcome. | Ready — complete disposable browser evidence covers all execution modes, reviewed Preview identity, collisions, cancellation, replay, mixed NeedsRepair outcomes, filesystem truth, Snapshots, and Operations. |
 | BT-020 failed Import to verified Repair; `test_import_workflow_acceptance` | See `NeedsRepair`, follow its Issue/Repair, make an allowed decision, and verify completion. | Import result → `/issues/:uuid`; Writer/Admin | UI-006–008, UI-014 | Client cannot force unsafe policy; invalid/stale/repeated decisions preserve state. | Ready — disposable browser evidence follows failed Import Operation links, exercises review decisions, and proves verified Repair state and history. |

@@ -64,6 +64,7 @@ snapshot, archive, and output resources.
 | [UI-019](UI-019-request-device-access.md) | Reader/Writer access request and automatic connection | Complete |
 | [UI-020](UI-020-manage-registration-proof.md) | Admin Registration Proof lifecycle UI | Complete |
 | [UI-021](UI-021-device-enrollment-browser-acceptance.md) | Multi-browser device enrollment acceptance | Complete |
+| [UI-022](UI-022-establish-ui-workflow-specification.md) | Controlling workflow, interruption, recovery, and upgrade specification | Complete |
 
 ## Dependency outline
 
@@ -79,3 +80,8 @@ and Work Items for review and end-to-end acceptance.
 UI-017 formalizes Playwright as the real-browser acceptance layer. It preserves
 the faster Backend, API, and client-contract layers and provides the shared
 runner used by feature and release browser gates.
+
+UI-022 makes the UI Specification controlling for all subsequent feature and
+acceptance work. New or materially changed workflows must define their complete
+state, interruption, persistence, recovery, and upgrade behavior before they
+can be classified Ready.

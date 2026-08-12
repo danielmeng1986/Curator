@@ -4,6 +4,7 @@ This is the index for the modular UI requirements of the local Curator web appli
 
 | Module | Contents |
 | --- | --- |
+| [UI Specification](Specification.md) | Controlling requirements for discoverable, stateful, interruption-safe, secure, and testable user workflows. |
 | [01 — Foundation and Navigation](01_Foundation_and_Navigation.md) | Purpose, local-only constraints, route structure, visual language, and reusable UI patterns. |
 | [02 — Data Interaction Rules](02_Data_Interaction_Rules.md) | System fields, foreign-key display, validation, deletion, editable fields, and Album–Model relationship rules. |
 | [03 — Entity Management](03_Entity_Management.md) | Albums, including Models / Additional Models and logical/release links, plus Models, Studios, Statuses, and Photos. |
@@ -15,4 +16,6 @@ This is the index for the modular UI requirements of the local Curator web appli
 
 ## Reading Order
 
-Read modules 01 and 02 first. Modules 03–05 define the page-specific behavior, while module 06 defines requirements that apply across the application.
+Read the UI Specification first, then modules 01 and 02. Modules 03–05 define
+page-specific behavior, while module 06 defines safety and acceptance
+requirements across the application.
