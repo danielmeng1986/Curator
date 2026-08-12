@@ -199,6 +199,7 @@ function openConnectionSettings() {
     </div>
     <p style="font-size:.8rem;color:var(--ink-soft)">A replacement is validated before the current connection changes.</p>
     <div class="modal-footer">
+      ${!principal ? '<button class="btn btn-secondary" id="connectionRequestAccess">Request device access</button>' : ''}
       ${principal && !renewal ? '<button class="btn btn-secondary" id="connectionRenew">Request renewal</button>' : ''}
       ${connection.hasToken ? '<button class="btn btn-danger" id="connectionDisconnect">Disconnect</button>' : ''}
       <button class="btn btn-secondary" id="connectionCancel">Close</button>
@@ -206,6 +207,7 @@ function openConnectionSettings() {
     </div>
   `);
   document.getElementById('connectionCancel').onclick = closeModal;
+  document.getElementById('connectionRequestAccess')?.addEventListener('click', openDeviceAccessRequest);
   document.getElementById('connectionDisconnect')?.addEventListener('click', () => {
     api.clearToken();
     window.curatorPrincipal = null;
@@ -244,6 +246,50 @@ function openConnectionSettings() {
     void checkBootstrap();
     void checkHealth();
     route();
+  };
+}
+
+function openDeviceAccessRequest() {
+  const pending = api.getPendingEnrollment();
+  if (pending) { showPendingEnrollment(); return; }
+  showModal(`
+    <h3 class="modal-title">Request device access</h3>
+    <p>An Administrator must approve this browser profile. The Registration Proof permits a request; it is not a Device Token.</p>
+    <div class="form-field"><label for="accessDeviceName">Device name</label><input id="accessDeviceName" value="${esc(navigator.userAgent.includes('Chrome') ? 'Chrome Writer' : 'Web Browser')}" autocomplete="off"></div>
+    <div class="form-field"><label for="accessRole">Requested role</label><select id="accessRole"><option value="writer">Writer</option><option value="reader">Reader</option></select></div>
+    <div class="form-field"><label for="accessProof">Registration Proof</label><input id="accessProof" type="password" autocomplete="off"></div>
+    <div class="modal-footer"><button class="btn btn-secondary" id="accessCancel">Cancel</button><button class="btn btn-primary" id="accessSubmit">Request access</button></div>`);
+  document.getElementById('accessCancel').onclick = closeModal;
+  document.getElementById('accessSubmit').onclick = async event => {
+    const proofInput = document.getElementById('accessProof');
+    const result = await ui.runAction('request-device-access', () => api.requestDeviceAccess({
+      deviceName: document.getElementById('accessDeviceName').value.trim(),
+      role: document.getElementById('accessRole').value, registrationProof: proofInput.value,
+    }), { trigger: event.currentTarget, context: 'request device access' });
+    proofInput.value = '';
+    if (result.ok) showPendingEnrollment();
+  };
+}
+
+function showPendingEnrollment() {
+  const pending = api.getPendingEnrollment();
+  if (!pending) { openDeviceAccessRequest(); return; }
+  showModal(`<h3 class="modal-title">Waiting for Administrator approval</h3>
+    <p><strong>${esc(pending.deviceName)}</strong> requested <span class="chip">${esc(pending.role)}</span>.</p>
+    <p id="enrollmentStatus">Pending approval. You may close this window and return later in this browser profile.</p>
+    <div class="modal-footer"><button class="btn btn-secondary" id="enrollmentClose">Close</button><button class="btn btn-primary" id="enrollmentCheck">Check status</button></div>`);
+  document.getElementById('enrollmentClose').onclick = closeModal;
+  document.getElementById('enrollmentCheck').onclick = async event => {
+    const result = await ui.runAction('check-enrollment', () => api.enrollmentStatus(), { trigger: event.currentTarget, context: 'check enrollment status' });
+    if (!result.ok) return;
+    if (result.value.status === 'Approved') {
+      window.curatorPrincipal = result.value.principal; closeModal();
+      const connectionButton = document.getElementById('connectionBtn');
+      connectionButton.textContent = `${result.value.principal.device_name} · ${result.value.principal.role}`;
+      ui.applyPermissions(document, result.value.principal);
+      toast(`Device approved and connected as ${result.value.principal.role}.`, 'ok');
+      void checkHealth(); route();
+    } else document.getElementById('enrollmentStatus').textContent = `Registration status: ${result.value.status}`;
   };
 }
 

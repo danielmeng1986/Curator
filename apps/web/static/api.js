@@ -7,6 +7,7 @@
   const TOKEN_KEY = 'curator.web.deviceToken';
   const BACKEND_URL_KEY = 'curator.web.backendUrl';
   const DEVICE_IDENTITY_KEY = 'curator.web.deviceIdentity';
+  const ENROLLMENT_KEY = 'curator.web.pendingEnrollment';
   const initialConfig = window.CURATOR_WEB_CONFIG || {};
 
   class CuratorApiError extends Error {
@@ -95,6 +96,53 @@
     return payload.data.principal;
   }
 
+  function randomCredential(byteLength = 32) {
+    const bytes = new Uint8Array(byteLength);
+    window.crypto.getRandomValues(bytes);
+    return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  async function sha256Hex(value) {
+    const digest = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+    return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function requestDeviceAccess({ deviceName, role, registrationProof }) {
+    if (!['reader', 'writer'].includes(role)) throw new CuratorApiError('REQUEST_INVALID_ROLE', 'Only Reader or Writer access may be requested.');
+    const token = randomCredential(32), enrollmentProof = randomCredential(32);
+    const scopes = role === 'writer' ? ['read', 'write'] : ['read'];
+    const data = await publicAuthFetch('/api/auth/registrations', { method: 'POST', body: JSON.stringify({
+      device_name: deviceName, device_identity: deviceIdentity(), requested_role: role,
+      requested_scopes: scopes, registration_proof: registrationProof,
+      candidate_token_hash: await sha256Hex(token), enrollment_proof: enrollmentProof,
+    }) });
+    const pending = { registrationUuid: data.registration.uuid, enrollmentProof, token, role, deviceName };
+    try { window.localStorage.setItem(ENROLLMENT_KEY, JSON.stringify(pending)); }
+    catch { throw new CuratorApiError('LOCAL_CONFIGURATION_UNAVAILABLE', 'This browser cannot save the pending enrollment.'); }
+    return data.registration;
+  }
+
+  function pendingEnrollment() {
+    try { return JSON.parse(window.localStorage.getItem(ENROLLMENT_KEY) || 'null'); } catch { return null; }
+  }
+
+  async function enrollmentStatus() {
+    const pending = pendingEnrollment();
+    if (!pending) return null;
+    const data = await publicAuthFetch(`/api/auth/registrations/${encodeURIComponent(pending.registrationUuid)}/status`, {
+      method: 'POST', body: JSON.stringify({ enrollment_proof: pending.enrollmentProof }),
+    });
+    if (data.registration.status === 'Approved') {
+      const principal = await validateConnection({ backendUrl: backendUrl(), token: pending.token });
+      try {
+        window.localStorage.setItem(TOKEN_KEY, pending.token);
+        window.localStorage.removeItem(ENROLLMENT_KEY);
+      } catch { throw new CuratorApiError('LOCAL_CONFIGURATION_UNAVAILABLE', 'This browser cannot save the approved Token.'); }
+      return { ...data.registration, principal };
+    }
+    return data.registration;
+  }
+
   function legacyReadModel(path, data, meta) {
     if (!Array.isArray(data)) return data;
     const route = path.split('?')[0];
@@ -174,6 +222,9 @@
     validateConnection,
     bootstrapStatus: () => publicAuthFetch('/api/auth/bootstrap/status'),
     completeBootstrap: (body) => publicAuthFetch('/api/auth/bootstrap/complete', { method: 'POST', body: JSON.stringify(body) }),
+    requestDeviceAccess,
+    getPendingEnrollment: pendingEnrollment,
+    enrollmentStatus,
     configure: ({ backendUrl: nextBackendUrl, token }) => {
       try {
         if (nextBackendUrl !== undefined) window.localStorage.setItem(BACKEND_URL_KEY, nextBackendUrl.trim());

@@ -20,6 +20,12 @@ export const UI_READINESS_SUITES = Object.freeze([
     command: process.execPath, args: ['apps/web/tests/admin_workflows_browser_acceptance.mjs'], timeoutMs: 180_000,
   },
   {
+    id: 'device-enrollment', task: 'UI-019/UI-020/UI-021',
+    specification: 'Authentication; UI Safety and Acceptance',
+    backendEvidence: 'BT-060/BT-061 authentication and API regression',
+    command: process.execPath, args: ['apps/web/tests/device_enrollment_browser_acceptance.mjs'], timeoutMs: 120_000,
+  },
+  {
     id: 'permanent-entities', task: 'UI-005/UI-012/UI-018',
     specification: 'Permanent entity and Album relationship contracts',
     backendEvidence: 'Entity repository/service/API regression',

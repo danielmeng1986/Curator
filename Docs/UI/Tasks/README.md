@@ -61,6 +61,9 @@ snapshot, archive, and output resources.
 | [UI-016](UI-016-establish-ui-workflow-readiness-gate.md) | Complete UI workflow readiness gate | Complete |
 | [UI-017](UI-017-establish-playwright-browser-acceptance.md) | Reproducible real-browser acceptance infrastructure | Complete |
 | [UI-018](UI-018-prevent-stale-album-list-refresh-after-navigation.md) | Stable Album detail after list navigation | Complete |
+| [UI-019](UI-019-request-device-access.md) | Reader/Writer access request and automatic connection | Complete |
+| [UI-020](UI-020-manage-registration-proof.md) | Admin Registration Proof lifecycle UI | Complete |
+| [UI-021](UI-021-device-enrollment-browser-acceptance.md) | Multi-browser device enrollment acceptance | Complete |
 
 ## Dependency outline
 
