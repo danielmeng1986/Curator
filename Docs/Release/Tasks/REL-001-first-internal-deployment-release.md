@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`REL-001` — Status: `In Progress`
+`REL-001` — Status: `Complete`
 
 ## Release identity
 
@@ -68,3 +68,18 @@ initialization, Album administration, recovery, and AI management workflows.
 Deploy the published source archive/Tag on another controlled host. Record environment,
 time-to-first-start, migration/bootstrap outcome, workflow smoke results, and every
 manual or portability gap as new owning tasks. Do not amend or move the released Tag.
+
+## Completion evidence
+
+- Candidate gates passed on 2026-08-12: 764 Backend tests, 5 Web contract
+  tests, 10 UI readiness suites, default Chromium Playwright smoke, schema
+  documentation, and two user-manual gate runs.
+- Annotated Tag `v0.1.0-internal.1` resolves to
+  `aa545fb255b0885ff4d15f4d5577780722603598` locally and remotely.
+- `main` and the Tag were pushed without history rewriting.
+- GitHub Release was published publicly as a non-Draft Pre-release:
+  <https://github.com/danielmeng1986/Curator/releases/tag/v0.1.0-internal.1>.
+- GitHub supplies public source-code ZIP and tar.gz archives; no local/runtime
+  artifact was uploaded.
+- This completion record is intentionally a post-Tag commit. The immutable
+  release Tag remains on the verified candidate and is not moved.

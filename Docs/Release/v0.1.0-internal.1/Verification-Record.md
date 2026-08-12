@@ -1,6 +1,6 @@
 # v0.1.0-internal.1 Verification Record
 
-> Status: Candidate Verified  
+> Status: Published and Verified
 > Verification date: 2026-08-12  
 > Release class: Internal deployment Pre-release
 
@@ -10,7 +10,7 @@
 - Preparation baseline: `93a35b857b1efb2bc9455b4c5953cd0c997c4c1f`
 - Application/release-governance candidate: `93a35b857b1efb2bc9455b4c5953cd0c997c4c1f`
 - Tag target: the release-record commit containing this file; verified through the annotated Tag
-- Tag: `v0.1.0-internal.1` (annotated; pending)
+- Tag: `v0.1.0-internal.1` (annotated and published)
 - Remote: `https://github.com/danielmeng1986/Curator.git`
 - Prior published milestone Tag: `milestone-backend-web-foundation-2026-08-08`
 
@@ -42,11 +42,11 @@
 - [x] GitHub authentication and repository remote were confirmed.
 - [x] Local and GitHub Release/Tag names were unoccupied before preparation.
 - [x] Release documents and User Manual refresh record are complete.
-- [ ] Worktree is clean after the final release commit.
-- [ ] Annotated local Tag resolves to the final release commit.
-- [ ] `main` and Tag are pushed without rewriting history.
-- [ ] GitHub Release exists and is marked Pre-release.
-- [ ] Remote Tag target matches the verified local Tag target.
+- [x] Worktree was clean after the final release candidate commit.
+- [x] Annotated local Tag resolves to `aa545fb255b0885ff4d15f4d5577780722603598`.
+- [x] `main` and Tag were pushed without rewriting history.
+- [x] GitHub Release exists, is public/non-Draft, and is marked Pre-release.
+- [x] Remote Tag target matches the verified local Tag target.
 
 ## Known limitations accepted
 
@@ -65,5 +65,7 @@ catalog database or production asset path was used.
 
 ## Decision
 
-Candidate passes all pre-Tag gates. Publication checks remain pending until the
-annotated Tag and GitHub Pre-release are created and independently resolved.
+Pass. The candidate passed all pre-Tag gates and the public GitHub Pre-release
+was independently resolved at
+<https://github.com/danielmeng1986/Curator/releases/tag/v0.1.0-internal.1>.
+The next acceptance activity is the documented second-host deployment trial.

@@ -12,7 +12,7 @@ migration, and documentation implementation tasks.
 
 | Version | Class | Title | Status |
 | --- | --- | --- | --- |
-| `v0.1.0-internal.1` | Internal deployment | [Backend and Web Administration Baseline](v0.1.0-internal.1/Release-Notes.md) | Candidate verified; publication pending |
+| `v0.1.0-internal.1` | Internal deployment | [Backend and Web Administration Baseline](v0.1.0-internal.1/Release-Notes.md) | [Published Pre-release](https://github.com/danielmeng1986/Curator/releases/tag/v0.1.0-internal.1) |
 
 ## Task index
 
