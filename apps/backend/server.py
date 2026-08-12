@@ -445,6 +445,13 @@ class AppHandler(SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # suppress console log noise
 
+    def end_headers(self):
+        # The Web client carries local authentication/enrollment state. Never
+        # let a browser keep an older UI script after a Backend upgrade.
+        if not urlparse(self.path).path.startswith("/api/"):
+            self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def _read_json_body(self) -> dict:
         content_length = int(self.headers.get("Content-Length", "0"))
         if content_length <= 0:

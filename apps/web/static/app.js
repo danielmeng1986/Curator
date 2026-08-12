@@ -324,25 +324,33 @@ async function refreshPrincipal() {
   }
 }
 
+function refreshConnectionButton() {
+  const button = document.getElementById('connectionBtn');
+  if (api.getPendingEnrollment() && !window.curatorPrincipal) {
+    button.textContent = 'Check registration status';
+    button.classList.add('btn-accent');
+    button.classList.remove('btn-secondary');
+    return;
+  }
+  button.textContent = window.curatorPrincipal
+    ? `${window.curatorPrincipal.device_name} · ${window.curatorPrincipal.role}`
+    : 'Connect';
+  button.classList.remove('btn-accent');
+  button.classList.add('btn-secondary');
+}
+
 async function checkBootstrap() {
+  // Local enrollment recovery must not depend on a network round trip. This
+  // also restores requests saved by a previous Web build immediately.
+  refreshConnectionButton();
   try {
     const data = await api.bootstrapStatus();
     window.curatorBootstrapState = data.bootstrap;
     const button = document.getElementById('connectionBtn');
-    if (api.getPendingEnrollment() && !window.curatorPrincipal) {
-      button.textContent = 'Check registration status';
-      button.classList.add('btn-accent');
-      button.classList.remove('btn-secondary');
-    } else if (!data.bootstrap.initialized && !api.getConnection().hasToken) {
+    if (!api.getPendingEnrollment() && !data.bootstrap.initialized && !api.getConnection().hasToken) {
       button.textContent = 'Initialize administrator';
       button.classList.add('btn-accent');
       button.classList.remove('btn-secondary');
-    } else {
-      button.textContent = window.curatorPrincipal
-        ? `${window.curatorPrincipal.device_name} · ${window.curatorPrincipal.role}`
-        : 'Connect';
-      button.classList.remove('btn-accent');
-      button.classList.add('btn-secondary');
     }
   } catch {
     window.curatorBootstrapState = null;
@@ -420,6 +428,7 @@ document.getElementById('globalSearch').addEventListener('keydown', e => {
 window.addEventListener('hashchange', route);
 window.addEventListener('load', () => {
   document.getElementById('connectionBtn').onclick = openConnectionSettings;
+  refreshConnectionButton();
   void checkBootstrap();
   void refreshPrincipal().then(route);
   checkHealth();

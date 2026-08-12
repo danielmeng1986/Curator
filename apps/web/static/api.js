@@ -123,7 +123,20 @@
   }
 
   function pendingEnrollment() {
-    try { return JSON.parse(window.localStorage.getItem(ENROLLMENT_KEY) || 'null'); } catch { return null; }
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(ENROLLMENT_KEY) || 'null');
+      if (!saved || typeof saved !== 'object') return null;
+      // Accept both the current browser shape and early snake_case builds so
+      // an enrollment already approved by an Administrator remains recoverable.
+      const pending = {
+        registrationUuid: saved.registrationUuid || saved.registration_uuid,
+        enrollmentProof: saved.enrollmentProof || saved.enrollment_proof,
+        token: saved.token,
+        role: saved.role || saved.requested_role,
+        deviceName: saved.deviceName || saved.device_name,
+      };
+      return pending.registrationUuid && pending.enrollmentProof && pending.token ? pending : null;
+    } catch { return null; }
   }
 
   async function enrollmentStatus() {

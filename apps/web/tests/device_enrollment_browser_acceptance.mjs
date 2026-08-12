@@ -35,6 +35,18 @@ try {
   await requester.getByRole('button', { name: 'Request access' }).click();
   await requester.getByRole('heading', { name: 'Waiting for Administrator approval' }).waitFor();
   await requester.getByRole('button', { name: 'Close' }).click();
+  await requester.evaluate(() => {
+    const key = 'curator.web.pendingEnrollment';
+    const saved = JSON.parse(localStorage.getItem(key));
+    localStorage.setItem(key, JSON.stringify({
+      registration_uuid: saved.registrationUuid,
+      enrollment_proof: saved.enrollmentProof,
+      token: saved.token,
+      requested_role: saved.role,
+      device_name: saved.deviceName,
+    }));
+  });
+  await requester.reload();
   await requester.getByRole('button', { name: 'Check registration status' }).waitFor();
 
   await admin.reload(); await admin.getByText('Chrome Writer').waitFor();
