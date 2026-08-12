@@ -1991,6 +1991,19 @@ def discover_lan_ipv4_addresses(candidates: list[str] | None = None) -> list[str
             result.append(str(address))
     return sorted(set(result), key=lambda value: tuple(int(part) for part in value.split(".")))
 
+
+def serve_until_stopped(server: ThreadingHTTPServer, backup_thread: threading.Thread) -> None:
+    """Serve until interrupted, then release resources without a traceback."""
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopping Curator Backend...")
+    finally:
+        STOP_EVENT.set()
+        server.server_close()
+        backup_thread.join(timeout=3)
+    print("Curator Backend stopped.")
+
 def main():
     if "--check" in sys.argv:
         print(f"Config: {CONFIG_PATH}")
@@ -2060,11 +2073,7 @@ def main():
     print(f"Database: {DATABASE_PATH}")
     print(f"Backups: {BACKUP_DIR}")
 
-    try:
-        server.serve_forever()
-    finally:
-        STOP_EVENT.set()
-        backup_thread.join(timeout=3)
+    serve_until_stopped(server, backup_thread)
 
 
 if __name__ == "__main__":

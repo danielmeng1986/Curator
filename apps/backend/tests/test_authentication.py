@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -157,6 +158,35 @@ class BackendNetworkStartupTests(unittest.TestCase):
                 "8.8.8.8", "0.0.0.0", "not-an-address", "192.168.1.25",
             ]),
         )
+
+    def test_keyboard_interrupt_closes_server_without_escaping(self):
+        class InterruptedServer:
+            closed = False
+
+            def serve_forever(self):
+                raise KeyboardInterrupt
+
+            def server_close(self):
+                self.closed = True
+
+        class BackupThread:
+            joined_with = None
+
+            def join(self, timeout=None):
+                self.joined_with = timeout
+
+        server = InterruptedServer()
+        backup_thread = BackupThread()
+        srv.STOP_EVENT.clear()
+
+        with patch("builtins.print") as output:
+            srv.serve_until_stopped(server, backup_thread)
+
+        self.assertTrue(server.closed)
+        self.assertTrue(srv.STOP_EVENT.is_set())
+        self.assertEqual(3, backup_thread.joined_with)
+        output.assert_any_call("\nStopping Curator Backend...")
+        output.assert_any_call("Curator Backend stopped.")
 
 
 class AdministratorBootstrapTests(unittest.TestCase):
