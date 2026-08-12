@@ -15,7 +15,8 @@
     "0011_ai_album_name_promotion",
     "0012_work_dispatch_group_closure",
     "0013_ai_workspace_retention",
-    "0014_authentication_and_operations"
+    "0014_authentication_and_operations",
+    "0015_ui_device_enrollment"
   ],
   "excluded_tables": [
     "sqlite_sequence"
@@ -1901,6 +1902,34 @@
           "not_null": false,
           "default": null,
           "primary_key_position": 0
+        },
+        {
+          "name": "candidate_token_hash",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "enrollment_proof_hash",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "enrollment_expires_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "cancelled_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
         }
       ],
       "foreign_keys": [],
@@ -2605,6 +2634,54 @@
           "partial": false
         }
       ]
+    },
+    "registration_proof_state": {
+      "columns": [
+        {
+          "name": "singleton",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "proof_hash",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "rotated_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "disabled_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "last_used_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": []
     },
     "repair_case": {
       "columns": [

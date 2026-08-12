@@ -73,6 +73,8 @@ are approved.
 | [BT-057](BT-057-work-dispatch-release-redispatch-safety.md) | Safely close Groups, release Albums, and preserve redispatch history. |
 | [BT-058](BT-058-ai-workspace-ui-read-models.md) | Stable Workspace, dispatch, review, and Promotion UI projections. |
 | [BT-059](BT-059-consolidate-canonical-schema-bootstrap-and-migrations.md) | Consolidate the canonical empty-database bootstrap and ordered migration path. |
+| [BT-060](BT-060-managed-registration-proof-lifecycle.md) | Admin-managed hash-only Registration Proof lifecycle. |
+| [BT-061](BT-061-client-owned-device-token-enrollment.md) | Client-owned Device Token activation after Admin approval. |
 
 BT identifiers record planning order, not mandatory execution order. Dispatch
 is an entry boundary for AI work, so BT-054 through BT-056 precede BT-047 in

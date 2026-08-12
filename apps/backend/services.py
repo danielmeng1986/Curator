@@ -150,6 +150,7 @@ AUTH_ROLE_SCOPES: dict[str, frozenset[str]] = {
 AUTH_DEFAULT_TOKEN_VALIDITY = timedelta(days=365)
 AUTH_BOOTSTRAP_CODE_VALIDITY = timedelta(minutes=10)
 AUTH_BOOTSTRAP_MAX_ATTEMPTS = 5
+AUTH_ENROLLMENT_VALIDITY = timedelta(hours=24)
 
 
 class AuthenticationService:
@@ -206,6 +207,8 @@ class AuthenticationService:
         requested_role: str,
         requested_scopes: list[str] | None,
         registration_proof: str,
+        candidate_token_hash: str | None = None,
+        enrollment_proof: str | None = None,
     ) -> dict:
         """Record a reviewable registration request; this never grants access."""
         if not all(isinstance(value, str) and value.strip() for value in (device_name, device_identity, registration_proof)):
@@ -214,17 +217,30 @@ class AuthenticationService:
         # rejects non-ASCII string inputs, but an invalid registration proof
         # must be a normal authentication failure rather than an unhandled
         # transport error.
-        proof_matches = bool(self._registration_secret) and hmac.compare_digest(
-            registration_proof.encode("utf-8"),
-            self._registration_secret.encode("utf-8"),
+        managed = self._repo.get_registration_proof_state(include_hash=True)
+        proof_hash = self._hash_token(registration_proof)
+        managed_matches = bool(managed and managed["active"]) and hmac.compare_digest(proof_hash, managed["proof_hash"])
+        fallback_matches = bool(self._registration_secret) and hmac.compare_digest(
+            registration_proof.encode("utf-8"), self._registration_secret.encode("utf-8"),
         )
+        proof_matches = managed_matches or fallback_matches
         if not proof_matches:
             raise AuthenticationFailure("AUTHENTICATION_INVALID_REGISTRATION_PROOF", "The registration proof is invalid.")
+        if managed_matches:
+            self._repo.touch_registration_proof()
+        if candidate_token_hash is not None or enrollment_proof is not None:
+            if not isinstance(candidate_token_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", candidate_token_hash):
+                raise ValueError("A SHA-256 candidate token hash is required for browser enrollment.")
+            if not isinstance(enrollment_proof, str) or len(enrollment_proof) < 32:
+                raise ValueError("A high-entropy enrollment proof is required for browser enrollment.")
         role, scopes = self._validate_role_and_scopes(requested_role, requested_scopes)
         try:
             registration = self._repo.create_registration({
                 "device_name": device_name.strip(), "device_identity": device_identity.strip(),
                 "requested_role": role, "requested_scopes": scopes,
+                "candidate_token_hash": candidate_token_hash,
+                "enrollment_proof_hash": self._hash_token(enrollment_proof) if enrollment_proof else None,
+                "enrollment_expires_at": (self._now_utc() + AUTH_ENROLLMENT_VALIDITY).isoformat() if enrollment_proof else None,
             })
             issue = None
             if self._issues is not None:
@@ -238,6 +254,8 @@ class AuthenticationService:
             operation = self._record_operation("device_registration", registration["uuid"], "Device registration requested.", issue["uuid"] if issue else None)
             if issue is not None and operation is not None:
                 self._issues.link(issue["uuid"], "triggering_operation", operation["uuid"])
+            registration.pop("candidate_token_hash", None)
+            registration.pop("enrollment_proof_hash", None)
             return registration
         except repo.PersistenceConflict as exc:
             raise ServiceConflict("BUSINESS_CONFLICT", "A registration already exists for this device identity.", exc.details)
@@ -406,7 +424,17 @@ class AuthenticationService:
         registration = self._repo.approve_registration(registration_uuid, role, scopes, trusted)
         if registration is None:
             raise ServiceNotFound("Registration request not found.")
-        issued = self._issue_token(registration, scopes, validity)
+        if registration.get("candidate_token_hash"):
+            now = self._now_utc(); lifetime = validity or AUTH_DEFAULT_TOKEN_VALIDITY
+            token = self._repo.activate_candidate_token(registration, {
+                "uuid": str(_uuid_mod.uuid4()), "registration_uuid": registration["uuid"],
+                "device_name": registration["device_name"], "scopes": scopes,
+                "created_at": now.isoformat(), "expires_at": (now + lifetime).isoformat(),
+            })
+            token.pop("token_hash", None)
+            issued = {"token_record": token, "client_owned": True}
+        else:
+            issued = self._issue_token(registration, scopes, validity)
         self._record_operation("device_token_issuance", registration["uuid"], "Approved device token issued.")
         return issued
 
@@ -418,6 +446,33 @@ class AuthenticationService:
             raise ServiceConflict("BUSINESS_CONFLICT", "The registration request is no longer awaiting approval.")
         self._repo.reject_registration(registration_uuid)
         self._record_operation("device_registration_rejection", registration_uuid, "Device registration rejected.")
+
+    def enrollment_status(self, registration_uuid: str, enrollment_proof: str) -> dict:
+        if not isinstance(enrollment_proof, str) or not enrollment_proof:
+            raise AuthenticationFailure("AUTHENTICATION_ENROLLMENT_PROOF_REQUIRED", "Enrollment proof is required.")
+        registration = self._repo.registration_status(registration_uuid, self._hash_token(enrollment_proof))
+        if registration is None:
+            raise AuthenticationFailure("AUTHENTICATION_INVALID_ENROLLMENT_PROOF", "Enrollment request is invalid.")
+        expires = registration.get("enrollment_expires_at")
+        status = registration["status"]
+        if expires and datetime.fromisoformat(expires) <= self._now_utc() and status == "PendingApproval":
+            status = "Expired"
+        return {"uuid": registration["uuid"], "status": status,
+                "approved_role": registration.get("approved_role"),
+                "approved_scopes": registration.get("approved_scopes", [])}
+
+    def generate_registration_proof(self) -> dict:
+        plaintext = secrets.token_urlsafe(32)
+        state = self._repo.set_registration_proof(self._hash_token(plaintext))
+        self._record_operation("registration_proof_rotation", "registration-proof", "Registration Proof generated or rotated.")
+        return {"registration_proof": plaintext, "state": state}
+
+    def disable_registration_proof(self) -> dict:
+        state = self._repo.disable_registration_proof()
+        if state is None:
+            raise ServiceNotFound("Registration Proof is not configured.")
+        self._record_operation("registration_proof_disablement", "registration-proof", "Registration Proof disabled.")
+        return {"state": state}
 
     def _issue_token(self, registration: dict, scopes: list[str], validity: timedelta | None) -> dict:
         if registration["status"] != "Approved" or not registration["trusted"]:
@@ -525,7 +580,8 @@ class AuthenticationService:
 
     def admin_read_model(self) -> dict:
         return {"registrations": self._repo.list_registrations(), "tokens": self._repo.list_tokens(),
-                "renewals": self._repo.list_renewals()}
+                "renewals": self._repo.list_renewals(),
+                "registration_proof": self._repo.get_registration_proof_state()}
 
 
 # ---------------------------------------------------------------------------

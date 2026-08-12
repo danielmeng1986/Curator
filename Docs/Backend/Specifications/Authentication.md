@@ -30,7 +30,7 @@ stateDiagram-v2
 1. A device requests registration.
 2. The Backend creates a reviewable event or Issue.
 3. An administrator approves or rejects through the server-side Web UI.
-4. Approval permits one-time token issuance; the hash is persisted and the plaintext is shown once.
+4. For browser enrollment, approval activates a Client-generated Token hash; only the requesting Client retains plaintext. Legacy/operator issuance may still show plaintext once.
 5. The client stores the token locally and uses it on subsequent requests.
 
 ### Registration request policy
@@ -45,9 +45,26 @@ A registration request MUST contain only the information needed to identify the 
 | `device_id` or `device_fingerprint` | A stable unique identifier used to distinguish the device. `device_name` alone MUST NOT be used as device identity. |
 | `requested_role` | The requested role: `reader`, `writer`, or `admin`. |
 | `requested_scopes` | Optional requested permissions within the requested role. |
-| `registration_proof` | A simple administrator-issued registration secret or one-time registration code. |
+| `registration_proof` | An Administrator-generated registration secret. Backend persists only its hash and reveals newly generated plaintext once. |
+| `candidate_token_hash` | Optional hash of a high-entropy Device Token generated and retained by the requesting Client. |
+| `enrollment_proof` | Independent high-entropy capability used only by the requesting Client to read its registration decision. |
 
 The registration proof establishes that the request may be considered; it does not grant access by itself. LAN clients cannot self-register, self-approve, or issue tokens. Automatic approval is not part of the current phase. A local administrator command or loopback-only management endpoint MAY perform the approved administrative action.
+
+After the first Administrator exists, authenticated Admin management MAY generate,
+rotate, or disable the active Registration Proof. Rotation atomically invalidates
+the previous proof and never changes existing approved Device Tokens. Plaintext is
+returned only by the successful generate/rotate response; later reads expose safe
+metadata only. Environment-provided registration secrets remain an operator fallback
+during migration, but a managed active proof is the normal interactive workflow.
+
+For browser enrollment, the requesting Client generates the Device Token locally and
+submits only its hash. It also generates an independent enrollment proof whose hash is
+persisted. Before approval the candidate Token cannot authenticate. Approval atomically
+activates its hash with no Token plaintext in the Admin response. A decision-status read
+requires the enrollment proof and reveals only that request's Pending, Approved,
+Rejected, Expired, or Cancelled state. Registration UUID or device identity alone is
+never an enrollment capability.
 
 Certificates, PKI, mutual TLS, and hardware-backed device identities are intentionally outside the current phase.
 

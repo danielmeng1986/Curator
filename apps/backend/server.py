@@ -646,8 +646,14 @@ class AppHandler(SimpleHTTPRequestHandler):
                     device_name=body.get("device_name", ""), device_identity=body.get("device_identity", ""),
                     requested_role=body.get("requested_role", ""), requested_scopes=body.get("requested_scopes"),
                     registration_proof=body.get("registration_proof", ""),
+                    candidate_token_hash=body.get("candidate_token_hash"),
+                    enrollment_proof=body.get("enrollment_proof"),
                 )
                 self._send_success(201, {"registration": registration})
+            elif re.match(r"^/api/auth/registrations/[^/]+/status$", path):
+                self._send_success(200, {"registration": auth.enrollment_status(
+                    path.split("/")[4], body.get("enrollment_proof", ""),
+                )})
             elif path == "/api/auth/bootstrap/complete":
                 issued = auth.complete_bootstrap_with_code(
                     code=body.get("code", ""),
@@ -1385,6 +1391,12 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._post_auth_renewal_decision(path, body)
             elif re.match(r"^/api/auth/admin/tokens/[^/]+/revoke$", path):
                 self._post_auth_token_revoke(path)
+            elif path in {"/api/auth/admin/registration-proof/generate", "/api/auth/admin/registration-proof/rotate"}:
+                if not self._require_admin_principal(): return
+                self._send_success(200, self._auth_admin_service().generate_registration_proof())
+            elif path == "/api/auth/admin/registration-proof/disable":
+                if not self._require_admin_principal(): return
+                self._send_success(200, self._auth_admin_service().disable_registration_proof())
             elif re.match(r"^/api/issues/[^/]+/decisions$", path):
                 self._post_issue_decision(path.split("/")[3], body)
             elif re.match(r"^/api/repairs/[^/]+/decisions$", path):

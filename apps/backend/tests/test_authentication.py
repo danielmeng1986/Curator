@@ -103,6 +103,49 @@ class AuthenticationLifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(svc.ServiceConflict, "already pending"):
             self.auth.request_renewal(issued["token"], device_identity="ai-worker-001")
 
+    def test_managed_proof_and_client_owned_token_enrollment(self):
+        issued_proof = self.auth.generate_registration_proof()
+        candidate = "client-owned-token"
+        enrollment_proof = "enrollment-proof-with-more-than-32-characters"
+        registration = self.auth.request_registration(
+            device_name="Chrome Writer", device_identity="chrome-writer",
+            requested_role="writer", requested_scopes=["read", "write"],
+            registration_proof=issued_proof["registration_proof"],
+            candidate_token_hash=self.auth._hash_token(candidate),
+            enrollment_proof=enrollment_proof,
+        )
+        with self.assertRaises(svc.AuthenticationFailure):
+            self.auth.authenticate(candidate)
+        approved = self.auth.approve_registration(registration["uuid"])
+        self.assertTrue(approved["client_owned"])
+        self.assertNotIn("token", approved)
+        self.assertEqual("writer", self.auth.authenticate(candidate, "write")["role"])
+        status = self.auth.enrollment_status(registration["uuid"], enrollment_proof)
+        self.assertEqual("Approved", status["status"])
+        with self.assertRaises(svc.AuthenticationFailure):
+            self.auth.enrollment_status(registration["uuid"], "wrong-proof")
+
+    def test_rotating_or_disabling_managed_proof_does_not_revoke_tokens(self):
+        initial = self.auth.generate_registration_proof()["registration_proof"]
+        registration = self.auth.request_registration(
+            device_name="Reader", device_identity="managed-reader", requested_role="reader",
+            requested_scopes=["read"], registration_proof=initial,
+        )
+        token = self.auth.approve_registration(registration["uuid"])["token"]
+        replacement = self.auth.generate_registration_proof()["registration_proof"]
+        with self.assertRaises(svc.AuthenticationFailure):
+            self.auth.request_registration(
+                device_name="Old proof", device_identity="old-proof", requested_role="reader",
+                requested_scopes=["read"], registration_proof=initial,
+            )
+        self.auth.disable_registration_proof()
+        with self.assertRaises(svc.AuthenticationFailure):
+            self.auth.request_registration(
+                device_name="Disabled", device_identity="disabled-proof", requested_role="reader",
+                requested_scopes=["read"], registration_proof=replacement,
+            )
+        self.assertEqual("reader", self.auth.authenticate(token)["role"])
+
 
 class AdministratorBootstrapTests(unittest.TestCase):
     def setUp(self):

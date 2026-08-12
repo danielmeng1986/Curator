@@ -113,8 +113,25 @@ class AuthRepository:
                 failed_attempts INTEGER NOT NULL DEFAULT 0,
                 locked_at TEXT
             );
+            CREATE TABLE IF NOT EXISTS registration_proof_state (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                proof_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                rotated_at TEXT,
+                disabled_at TEXT,
+                last_used_at TEXT
+            );
             """
         )
+        registration_columns = {row[1] for row in conn.execute("PRAGMA table_info(device_registration)")}
+        for name, declaration in {
+            "candidate_token_hash": "TEXT",
+            "enrollment_proof_hash": "TEXT",
+            "enrollment_expires_at": "TEXT",
+            "cancelled_at": "TEXT",
+        }.items():
+            if name not in registration_columns:
+                conn.execute(f'ALTER TABLE device_registration ADD COLUMN "{name}" {declaration}')
         conn.commit()
 
     @staticmethod
@@ -146,10 +163,13 @@ class AuthRepository:
                 conn.execute(
                     """INSERT INTO device_registration
                     (uuid, device_name, device_identity, requested_role,
-                     requested_scopes, status, trusted, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, 'PendingApproval', 0, ?, ?)""",
+                     requested_scopes, status, trusted, created_at, updated_at,
+                     candidate_token_hash, enrollment_proof_hash, enrollment_expires_at)
+                    VALUES (?, ?, ?, ?, ?, 'PendingApproval', 0, ?, ?, ?, ?, ?)""",
                     (registration_uuid, fields["device_name"], fields["device_identity"],
-                     fields["requested_role"], json.dumps(fields["requested_scopes"]), now, now),
+                     fields["requested_role"], json.dumps(fields["requested_scopes"]), now, now,
+                     fields.get("candidate_token_hash"), fields.get("enrollment_proof_hash"),
+                     fields.get("enrollment_expires_at")),
                 )
                 conn.commit()
             except Exception as exc:
@@ -175,7 +195,11 @@ class AuthRepository:
         with self._db() as conn:
             self._ensure_schema(conn)
             rows = conn.execute("SELECT * FROM device_registration ORDER BY created_at DESC").fetchall()
-        return [self._registration(dict(row)) for row in rows]
+        result = [self._registration(dict(row)) for row in rows]
+        for item in result:
+            item.pop("candidate_token_hash", None)
+            item.pop("enrollment_proof_hash", None)
+        return result
 
     def list_tokens(self) -> list[dict]:
         with self._db() as conn:
@@ -204,6 +228,64 @@ class AuthRepository:
             conn.commit()
             row = conn.execute("SELECT * FROM device_registration WHERE uuid = ?", (registration_uuid,)).fetchone()
         return self._registration(dict(row)) if row else None
+
+    def activate_candidate_token(self, registration: dict, fields: dict) -> dict:
+        """Persist an already-hashed Client Token after registration approval."""
+        return self.create_token({**fields, "token_hash": registration["candidate_token_hash"]})
+
+    def registration_status(self, registration_uuid: str, enrollment_proof_hash: str) -> dict | None:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                "SELECT * FROM device_registration WHERE uuid = ? AND enrollment_proof_hash = ?",
+                (registration_uuid, enrollment_proof_hash),
+            ).fetchone()
+        return self._registration(dict(row)) if row else None
+
+    def get_registration_proof_state(self, *, include_hash: bool = False) -> dict | None:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute("SELECT * FROM registration_proof_state WHERE singleton = 1").fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        if not include_hash:
+            result.pop("proof_hash", None)
+        result["active"] = result["disabled_at"] is None
+        return result
+
+    def set_registration_proof(self, proof_hash: str) -> dict:
+        now = _utc_now_iso()
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute("SELECT 1 FROM registration_proof_state WHERE singleton = 1").fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE registration_proof_state SET proof_hash=?, rotated_at=?, disabled_at=NULL WHERE singleton=1",
+                    (proof_hash, now),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO registration_proof_state(singleton,proof_hash,created_at) VALUES(1,?,?)",
+                    (proof_hash, now),
+                )
+            conn.commit()
+        return self.get_registration_proof_state()
+
+    def disable_registration_proof(self) -> dict | None:
+        now = _utc_now_iso()
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute("UPDATE registration_proof_state SET disabled_at=? WHERE singleton=1 AND disabled_at IS NULL", (now,))
+            conn.commit()
+        return self.get_registration_proof_state()
+
+    def touch_registration_proof(self) -> None:
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute("UPDATE registration_proof_state SET last_used_at=? WHERE singleton=1", (_utc_now_iso(),))
+            conn.commit()
 
     def reject_registration(self, registration_uuid: str) -> dict | None:
         now = _utc_now_iso()

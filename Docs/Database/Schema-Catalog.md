@@ -52,10 +52,11 @@ a retired import/review model; the latter is the active AI Work Item table.
 
 | Table | Role and lifecycle | Identity / important fields | Relationships and constraints | Source / contract |
 | --- | --- | --- | --- | --- |
-| `device_registration` | Current registration request/device identity | UUID PK; device name/identity, requested/approved role/scopes, status | identity/role transition constraints are Service-owned | `AuthRepository`; Authentication Specification |
+| `device_registration` | Current registration request/device identity and pending browser enrollment | UUID PK; device name/identity, requested/approved role/scopes, status, candidate Token hash, enrollment-proof hash/expiry | identity/role transition constraints and hash activation are Service-owned; never stores candidate Token plaintext | `AuthRepository`; Authentication Specification |
 | `auth_token` | Current credential metadata; secret stored only as hash | UUID PK; registration UUID, token hash, scopes, expiry/revocation | FK → registration; active Admin safety is Service rule | `AuthRepository`; BT-040 |
 | `token_renewal_request` | Current approval workflow/history | UUID PK; previous Token/registration, requested role/scopes, status and timestamps | FK → registration and previous Token; open-renewal behavior enforced by Service | `AuthRepository`; Authentication Specification |
 | `admin_bootstrap_code` | One-time bootstrap credential state | UUID PK; code hash, expiry, use/lock state, failed attempts | only one current usable code by service policy; never stores plaintext | `AuthRepository`; UI-004A/B |
+| `registration_proof_state` | Singleton managed Registration Proof state | fixed singleton PK; proof hash, create/rotate/disable/last-use timestamps | only hash is persisted; Admin generation/rotation reveals plaintext once | `AuthRepository`; Authentication Specification |
 
 ## Import, Operations, Repair, and Recovery
 

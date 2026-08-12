@@ -171,12 +171,18 @@ exceptions outside `/api/v1`:
 | Route | Unauthenticated purpose and constraint |
 | --- | --- |
 | `POST /api/auth/registrations` | Submit a registration bearing the configured registration proof; it creates Pending Approval only and never issues a Token. |
+| `POST /api/auth/registrations/{uuid}/status` | With the independent enrollment proof in the JSON body, read only that request's decision state; never returns Token or secret material. |
 | `GET /api/auth/bootstrap/status` | Disclose only whether first Admin initialization is complete and whether a current Code is available. |
 | `POST /api/auth/bootstrap/complete` | Consume a console-created, short-lived, single-use Code to establish the first Admin exactly once. |
 
 All three reject non-loopback clients. Registration approval and every later
 authentication-management action use bearer-protected `/api/v1` routes with
 Admin scope. In particular, there is no unauthenticated loopback approval route.
+
+Authenticated Admin routes under `/api/v1/auth/admin/registration-proof` expose
+safe state and generate/rotate/disable the managed Registration Proof. Generate
+and rotate return plaintext once. Registration approval activates a submitted
+client Token hash when present; its response contains metadata only.
 
 ## Confirmation-required and repair-required outcomes
 
