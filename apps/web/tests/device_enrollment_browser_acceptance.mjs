@@ -34,11 +34,14 @@ try {
   await requester.getByLabel('Registration Proof').fill(proof);
   await requester.getByRole('button', { name: 'Request access' }).click();
   await requester.getByRole('heading', { name: 'Waiting for Administrator approval' }).waitFor();
+  await requester.getByRole('button', { name: 'Close' }).click();
+  await requester.getByRole('button', { name: 'Check registration status' }).waitFor();
 
   await admin.reload(); await admin.getByText('Chrome Writer').waitFor();
   await admin.getByRole('row').filter({ hasText: 'Chrome Writer' }).getByRole('button', { name: 'Approve' }).click();
   await admin.getByText('Device approved. The requesting browser can now connect.').waitFor();
 
+  await requester.getByRole('button', { name: 'Check registration status' }).click();
   await requester.getByRole('button', { name: 'Check status' }).click();
   await requester.getByText('Device approved and connected as writer.').waitFor();
   await requester.getByRole('button', { name: /Chrome Writer · writer/ }).waitFor();

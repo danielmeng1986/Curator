@@ -176,6 +176,10 @@ function openConnectionSettings() {
     openAdministratorBootstrap();
     return;
   }
+  if (!window.curatorPrincipal && api.getPendingEnrollment()) {
+    showPendingEnrollment();
+    return;
+  }
   const connection = api.getConnection();
   const principal = window.curatorPrincipal;
   const expiry = principal?.expires_at ? new Date(principal.expires_at).toLocaleString() : 'Unknown';
@@ -274,6 +278,10 @@ function openDeviceAccessRequest() {
 function showPendingEnrollment() {
   const pending = api.getPendingEnrollment();
   if (!pending) { openDeviceAccessRequest(); return; }
+  const connectionButton = document.getElementById('connectionBtn');
+  connectionButton.textContent = 'Check registration status';
+  connectionButton.classList.add('btn-accent');
+  connectionButton.classList.remove('btn-secondary');
   showModal(`<h3 class="modal-title">Waiting for Administrator approval</h3>
     <p><strong>${esc(pending.deviceName)}</strong> requested <span class="chip">${esc(pending.role)}</span>.</p>
     <p id="enrollmentStatus">Pending approval. You may close this window and return later in this browser profile.</p>
@@ -284,8 +292,9 @@ function showPendingEnrollment() {
     if (!result.ok) return;
     if (result.value.status === 'Approved') {
       window.curatorPrincipal = result.value.principal; closeModal();
-      const connectionButton = document.getElementById('connectionBtn');
       connectionButton.textContent = `${result.value.principal.device_name} · ${result.value.principal.role}`;
+      connectionButton.classList.remove('btn-accent');
+      connectionButton.classList.add('btn-secondary');
       ui.applyPermissions(document, result.value.principal);
       toast(`Device approved and connected as ${result.value.principal.role}.`, 'ok');
       void checkHealth(); route();
@@ -320,7 +329,11 @@ async function checkBootstrap() {
     const data = await api.bootstrapStatus();
     window.curatorBootstrapState = data.bootstrap;
     const button = document.getElementById('connectionBtn');
-    if (!data.bootstrap.initialized && !api.getConnection().hasToken) {
+    if (api.getPendingEnrollment() && !window.curatorPrincipal) {
+      button.textContent = 'Check registration status';
+      button.classList.add('btn-accent');
+      button.classList.remove('btn-secondary');
+    } else if (!data.bootstrap.initialized && !api.getConnection().hasToken) {
       button.textContent = 'Initialize administrator';
       button.classList.add('btn-accent');
       button.classList.remove('btn-secondary');

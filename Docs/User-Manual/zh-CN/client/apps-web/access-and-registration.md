@@ -31,7 +31,8 @@ python3 -m apps.backend auth create-bootstrap-code
 1. 打开 **Connect → Request device access**。
 2. 输入易识别的设备名，选择 Reader 或 Writer，并输入 Registration Proof。
 3. 选择 **Request access**。浏览器会在本地生成并安全保留候选 Device Token 和 enrollment capability。
-4. 保持 Pending，或关闭窗口后在同一浏览器配置中返回。
+4. 保持 Pending，或关闭窗口后在同一浏览器配置中返回。关闭后，页面顶栏会固定显示
+   **Check registration status**；随时点击它即可重新打开等待状态。
 
 整个过程不需要终端、开发者工具、UUID 复制、JSON 或 `curl`。
 
@@ -43,7 +44,9 @@ python3 -m apps.backend auth create-bootstrap-code
 <!-- manual-section: connection -->
 ## 6. 完成连接
 
-回到申请浏览器，选择 **Check status**。批准后会校验本地 Token 并自动连接；拒绝或过期绝不会激活 Token。申请期间不要清除站点数据或更换浏览器配置。
+回到申请浏览器，点击顶栏的 **Check registration status**，再选择 **Check status**。
+批准后会校验本地 Token 并自动连接；拒绝或过期绝不会激活 Token。申请期间不要清除
+站点数据或更换浏览器配置。
 
 <!-- manual-section: lifecycle -->
 ## 7. 续期、撤销与遗失

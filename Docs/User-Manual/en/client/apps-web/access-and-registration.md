@@ -31,7 +31,7 @@ In the new browser profile:
 1. Open **Connect → Request device access**.
 2. Enter a recognizable device name, select Reader or Writer, and enter the Registration Proof.
 3. Choose **Request access**. The browser generates and safely retains its candidate Device Token and enrollment capability locally.
-4. Leave the request Pending or close the window and return later in the same browser profile.
+4. Leave the request Pending or close the window and return later in the same browser profile. After closing, the top bar keeps a **Check registration status** button that restores the pending view.
 
 No terminal, developer console, UUID copying, JSON, or `curl` is required.
 
@@ -43,7 +43,7 @@ Required role: Administrator. In **Pending registrations**, verify the full devi
 <!-- manual-section: connection -->
 ## 6. Complete connection
 
-Return to the requesting browser and choose **Check status**. Approval validates the locally held Token and connects automatically. Rejection or expiry never activates it. Do not clear site storage or switch browser profiles while enrollment is pending.
+Return to the requesting browser, choose **Check registration status** in the top bar, then **Check status**. Approval validates the locally held Token and connects automatically. Rejection or expiry never activates it. Do not clear site storage or switch browser profiles while enrollment is pending.
 
 <!-- manual-section: lifecycle -->
 ## 7. Renewal, revocation, and loss
