@@ -128,6 +128,14 @@ Each Client application overview contains:
 6. role-manual links;
 7. safety and troubleshooting.
 
+When multiple roles share one authentication lifecycle, keep the complete
+bootstrap, Registration Proof, device request, approval, connection, renewal,
+revocation, and loss workflow in one `access-and-registration.md` manual. Role
+manuals link to it and retain only role-specific prerequisites and capabilities.
+The shared manual must distinguish Bootstrap Code, Registration Proof, Device
+Token, and browser-profile identity; state where plaintext exists; and document
+one-time disclosure, stable browser identity, least privilege, and recovery.
+
 Each role manual contains:
 
 1. role purpose and prerequisites;
@@ -235,4 +243,3 @@ A manual release passes only when:
 - Database operator instructions must follow DBDOC/BT schema authority.
 - A release documentation refresh may update manuals without reopening this
   Specification unless the manual contract itself changes.
-

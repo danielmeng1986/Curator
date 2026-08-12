@@ -7,6 +7,7 @@
 
 Writer 维护 Album 级目录数据，执行经审核的 Import 与获准的 Issue/Repair 决策。
 按[客户端概览](README.md)使用获准 Writer Token 连接。Writer 没有恢复或授权管理权。
+新浏览器使用完全基于 UI 的[访问与设备注册](access-and-registration.md)流程。
 
 <!-- manual-section: entities -->
 ## 2. Albums 与永久实体

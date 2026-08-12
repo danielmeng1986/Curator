@@ -30,6 +30,8 @@ exists. Full Server instructions are in the [Backend manual](../../server/apps-b
 <!-- manual-section: authentication -->
 ## 3. Devices and Tokens
 
+Generate/rotate/disable Registration Proof and approve UI-only Reader/Writer enrollment as described in [Access and Device Registration](access-and-registration.md).
+
 In **Administrator Center → Devices and Tokens**:
 
 1. Verify a pending registration's device identity and requested role/scopes.

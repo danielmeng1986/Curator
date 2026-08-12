@@ -29,6 +29,8 @@ Administrator 在 Writer 能力上增加认证、恢复、Quarantine 与 AI 工�
 <!-- manual-section: authentication -->
 ## 3. Devices and Tokens
 
+按[访问与设备注册](access-and-registration.md)生成/轮换/停用 Registration Proof，并审批完全通过 UI 提交的 Reader/Writer 申请。
+
 在 **Administrator Center → Devices and Tokens**：
 
 1. 核对待处理注册的设备身份以及申请角色/scopes。

@@ -13,6 +13,7 @@ LOCALES = ("en", "zh-CN")
 EXPECTED = {
     "server/apps-backend.md": ROOT / "apps" / "backend" / "__main__.py",
     "client/apps-web/README.md": ROOT / "apps" / "web" / "static" / "index.html",
+    "client/apps-web/access-and-registration.md": ROOT / "apps" / "web" / "static" / "index.html",
     "client/apps-web/reader.md": ROOT / "apps" / "web" / "static" / "index.html",
     "client/apps-web/writer.md": ROOT / "apps" / "web" / "static" / "index.html",
     "client/apps-web/administrator.md": ROOT / "apps" / "web" / "static" / "index.html",
@@ -25,6 +26,10 @@ REQUIRED_SECTIONS = {
     },
     "client/apps-web/README.md": {
         "purpose", "connect", "navigation", "roles", "feedback", "safety", "checklist",
+    },
+    "client/apps-web/access-and-registration.md": {
+        "concepts", "bootstrap", "proof", "request", "approval", "connection",
+        "lifecycle", "troubleshooting", "checklist",
     },
     "client/apps-web/reader.md": {
         "purpose", "login", "workflows", "denials", "security", "troubleshooting",

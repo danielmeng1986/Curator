@@ -14,6 +14,8 @@ browsing/deletion surface here. Digital Asset Trash is not yet available, and
 <!-- manual-section: connect -->
 ## 2. Open and connect
 
+For a new Reader or Writer browser, first follow [Access and Device Registration](access-and-registration.md). The normal workflow is entirely in the Web UI.
+
 1. Ask the Server operator for the loopback URL and ensure Backend is running.
 2. Open the URL in the browser profile assigned to this device.
 3. Open connection settings, enter an **Approved device Token**, then select
@@ -50,7 +52,7 @@ review, and Promotion separate from Album status.
 | Quarantine, AI Dispatch/review/Promotion | No | No | Yes |
 
 Hidden navigation is not proof of authorization; Backend enforces every request.
-See [Reader](reader.md), [Writer](writer.md), or [Administrator](administrator.md).
+See [Access and Device Registration](access-and-registration.md), [Reader](reader.md), [Writer](writer.md), or [Administrator](administrator.md).
 
 <!-- manual-section: feedback -->
 ## 5. Feedback, cancellation, and retry

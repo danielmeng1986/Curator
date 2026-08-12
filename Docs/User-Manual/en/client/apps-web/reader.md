@@ -7,6 +7,7 @@
 
 Reader is for catalog and operational review without mutation. Obtain an approved
 Reader Token for this device and read the [Client overview](README.md) first.
+For a new browser, use the UI-only [Access and Device Registration](access-and-registration.md) workflow.
 
 <!-- manual-section: login -->
 ## 2. First connection

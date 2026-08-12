@@ -13,6 +13,8 @@ Curator Web 是以 Album 为单位的数字资产管理客户端，用于目录�
 <!-- manual-section: connect -->
 ## 2. 打开与连接
 
+新的 Reader 或 Writer 浏览器应先阅读[访问与设备注册](access-and-registration.md)。正常流程全部在 Web UI 中完成。
+
 1. 向服务器运维人员获取回环 URL，并确认 Backend 正在运行。
 2. 使用分配给本设备的浏览器配置打开该 URL。
 3. 打开连接设置，输入 **Approved device Token**，选择 **Validate and connect**。
@@ -44,7 +46,7 @@ Promotion 与 Album status 分离。
 | Token 管理与恢复操作 | 否 | 否 | 是 |
 | Quarantine、AI 派发/审核/Promotion | 否 | 否 | 是 |
 
-导航隐藏不代表授权依据；每个请求仍由 Backend 强制校验。参见 [Reader](reader.md)、
+导航隐藏不代表授权依据；每个请求仍由 Backend 强制校验。参见[访问与设备注册](access-and-registration.md)、[Reader](reader.md)、
 [Writer](writer.md) 或 [Administrator](administrator.md) 手册。
 
 <!-- manual-section: feedback -->

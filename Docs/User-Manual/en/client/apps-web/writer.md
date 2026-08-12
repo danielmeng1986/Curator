@@ -8,6 +8,7 @@
 Writer maintains Album-level catalog data and executes reviewed Imports and permitted
 Issue/Repair decisions. Connect with an approved Writer Token as described in the
 [Client overview](README.md). Writer does not receive recovery or authorization power.
+For a new browser, use the UI-only [Access and Device Registration](access-and-registration.md) workflow.
 
 <!-- manual-section: entities -->
 ## 2. Albums and permanent entities

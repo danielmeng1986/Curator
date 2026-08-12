@@ -7,6 +7,7 @@
 
 Reader 用于查看目录和操作信息，不修改数据。获取本设备获准的 Reader Token，
 并先阅读[客户端概览](README.md)。
+新浏览器使用完全基于 UI 的[访问与设备注册](access-and-registration.md)流程。
 
 <!-- manual-section: login -->
 ## 2. 首次连接
