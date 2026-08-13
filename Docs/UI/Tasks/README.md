@@ -71,6 +71,7 @@ snapshot, archive, and output resources.
 | [UI-026](UI-026-standardize-reviewed-action-lifecycle.md) | Explicit lifecycle for material Preview and confirmation | Complete |
 | [UI-027](UI-027-persist-ai-review-drafts.md) | Interruption-safe human AI Review drafts | Complete |
 | [UI-028](UI-028-enforce-workflow-interruption-readiness.md) | Specification interruption matrix in the final readiness gate | Complete |
+| [UI-029](UI-029-simulated-ai-promotion-workflow-drill.md) | No-model dispatch, Worker result, Review, and Album Promotion drill | Complete |
 
 ## Dependency outline
 
@@ -95,3 +96,6 @@ can be classified Ready.
 The 2026-08-13 audit created UI-023–028. UI-023 restores accurate gate
 semantics; UI-024–027 close product workflow gaps; UI-028 makes their
 interruption evidence mandatory in the final readiness gate.
+
+UI-029 adds a focused one-Album drill proving the production orchestration and
+permanent database outcome with deterministic Worker payloads and no AI model.

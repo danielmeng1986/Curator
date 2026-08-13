@@ -88,6 +88,13 @@ export const UI_READINESS_SUITES = Object.freeze([
     command: process.execPath, args: ['apps/web/tests/workspace_review_browser_acceptance.mjs'], timeoutMs: 180_000,
   },
   {
+    id: 'simulated-ai-promotion', task: 'UI-029',
+    specification: 'AI Collection Workspace; Work Dispatch; Review and Promotion',
+    backendEvidence: 'BT-053; test_ai_workspace_workflow_acceptance',
+    interruptions: dimensions({navigation:covered('durable Group and Review routes'),refresh:covered('authoritative Backend state reload'),browserRestart:covered('no model-process dependency'),backendRestart:covered('durable dispatch, results, review, and Promotion'),delayedAction:covered('reservation and Review remain durable'),retry:covered('versioned Review and Promotion contracts'),cancellation:covered('existing Group and Review lifecycle suites')}),
+    command: process.execPath, args: ['apps/web/tests/simulated_ai_promotion_browser_acceptance.mjs'], timeoutMs: 120_000,
+  },
+  {
     id:'workflow-interruptions',task:'UI-024/UI-025/UI-026/UI-027/UI-028',
     specification:'Curator Web UI Specification interruption and recovery contract',
     backendEvidence:'Entity, Import, Preview/execute, and AI Workspace regression',

@@ -40,7 +40,7 @@ zero-side-effect assertion. The final gate is owned by UI-016.
 | BT-042 protected database Restore orchestration | Restore a verified database recovery point after protective Snapshot and typed confirmation. | `/admin/restore`; Admin | UI-010C/D, UI-026 | Invalid/stale/duplicate/cancelled/dismissed Restore does not change the database; failure remains recoverable. | Ready — protected execution, typed confirmation, non-dismissible review, session invalidation, and post-Restore recovery pass. |
 | BT-021 historical Workspace lifecycle; `test_workspace_workflow_acceptance` | Preserve historical lifecycle evidence without presenting archived rows as active UI work. | No active UI route; audit/migration evidence only | Backend evidence only; UI-001 exclusion | No active client can browse, edit, batch, or promote the archived collection. | Ready — intentional non-UI outcome established by MT-008 and the revised UI boundary. |
 | Historical Workspace Review/Promotion contract; BT-031 and MT-008 | Historical materialization/archive remains traceable; it is not a reusable active Workspace. | No active UI route | Backend/migration evidence only | Archived rows cannot be reactivated through UI. | Ready — intentional non-UI outcome; not a future Workspace implementation. |
-| BT-043–058 AI Collection Workspace and Work Dispatch | Admin filters available Albums; Backend atomically reserves one Album per active Worker Group; AI Worker submits dataset-versioned results for review, Promotion, release, and archive. | `/work-dispatch`, `/ai-reviews`; Admin, plus authenticated Worker API | UI-011A–F, UI-026–028 | Cross-Worker duplicate reservation, stale/interrupted dispatch, invalid or interrupted review, duplicate Promotion, premature release, and archived mutation obey the approved contracts. | Ready — durable workflow acceptance, reviewed-action lifecycle, per-item/version Review drafts, stale rebase/discard, refresh/restart recovery, and interruption manifest pass. |
+| BT-043–058 AI Collection Workspace and Work Dispatch | Admin filters available Albums; Backend atomically reserves one Album per active Worker Group; AI Worker submits dataset-versioned results for review, Promotion, release, and archive. | `/work-dispatch`, `/ai-reviews`; Admin, plus authenticated Worker API | UI-011A–F, UI-026–029 | Cross-Worker duplicate reservation, stale/interrupted dispatch, invalid or interrupted review, duplicate Promotion, premature release, and archived mutation obey the approved contracts. | Ready — durable workflow acceptance, reviewed-action lifecycle, per-item/version Review drafts, stale rebase/discard, refresh/restart recovery, interruption manifest, and a deterministic no-model drill proving the promoted value in `album.title` all pass. |
 
 ## Task-to-matrix ownership
 
@@ -53,11 +53,12 @@ zero-side-effect assertion. The final gate is owned by UI-016.
 | UI-012–015 | Feature-level browser acceptance and role/disclosure evidence. |
 | UI-016 | Gate composition, two-run rule, and published final classifications. |
 | UI-022–028 | Controlling workflow Specification, audit remediation, and interruption-readiness enforcement. |
+| UI-029 | Focused no-model AI dispatch-to-Promotion browser and database evidence. |
 
 ## Current gate evidence
 
 `npm run test:ui-readiness` is the final UI-016 gate. Its explicit manifest
-contains ten mandatory suites spanning foundations, authentication, Admin,
+contains thirteen mandatory suites spanning foundations, authentication, Admin,
 entities, Import, Operation history, Repair/Quarantine, disclosure, dispatch,
 and AI review. It performs startup checks, enforces timeouts, uses isolated
 fixtures, stops on failure, and reports each task, Specification, Backend
@@ -69,7 +70,7 @@ regression passed once (751 tests). The smaller authenticated smoke scenario
 remains part of, rather than a substitute for, this complete gate.
 
 The 2026-08-13 Specification remediation completed UI-023–028. The upgraded
-12-suite gate requires nine reasoned interruption dimensions, continues audit
+13-suite gate requires nine reasoned interruption dimensions, continues audit
 execution after failures, and completed two consecutive clean runs. The
 permission gate now distinguishes managed Registration Proof metadata from
 plaintext secrets while retaining negative secret/hash/path assertions.
