@@ -10,8 +10,8 @@ Adapt Permanent Entity Management to the Supported API
 
 ## Related Specification(s)
 
-- [UI Data Interaction Rules](../02_Data_Interaction_Rules.md).
-- [UI Entity Management](../03_Entity_Management.md).
+- [UI Data Interaction Rules](../Data-Interaction-Rules.md).
+- [UI Entity Management](../Features/Entity-Management.md).
 - [API Specification](../../Backend/Specifications/API-Specification.md).
 
 ## Goal

@@ -79,7 +79,7 @@ owning task. Do not silently choose one and rewrite the other.
 | Work type | Read before acting |
 | --- | --- |
 | Backend/API/workflow | Governance → [Backend Architecture](Backend/Backend-Architecture.md) → relevant [Specification](Backend/Specifications/README.md) → Backend task → implementation/tests |
-| Web UI | Governance → [UI plan](UI/Curator_Web_UI_Plan.md) → relevant UI chapter/matrix → UI task → browser evidence |
+| Web UI | Governance → [UI documentation](UI/README.md) → relevant feature/matrix → UI task → browser evidence |
 | Database/schema | Governance → [Schema Source](Database/Schema-Source-of-Truth.md) → [Schema Catalog](Database/Schema-Catalog.md) → relevant [diagram](Database/Curator_Database_Model.md) and persistence map → DBDOC/BT task |
 | AI Worker/Workspace | Backend Architecture → Work Dispatch Specification → AI Workspace acceptance fixture → AI diagram/persistence map → BT/UI task |
 | Runtime/repository migration | [Runtime Layout](Project/Runtime-Layout.md) → Project task index → owning MT task |

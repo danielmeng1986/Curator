@@ -10,7 +10,7 @@ Establish UI Workflow Acceptance Testing
 
 ## Related Specification(s)
 
-- [UI Safety and Acceptance](../../UI/06_Safety_and_Acceptance.md).
+- [UI Specification](../../UI/Specification.md).
 - [Testing Strategy](../../Backend/Testing-Strategy.md), Workflow Tests and API Contract Tests.
 - [Workflow Readiness Matrix](../../Backend/Workflow-Readiness-Matrix.md).
 

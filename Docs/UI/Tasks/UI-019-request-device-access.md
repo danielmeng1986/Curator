@@ -11,7 +11,7 @@ Add Reader and Writer Device Access Request UI
 ## Related Specification(s)
 
 - [Authentication](../../Backend/Specifications/Authentication.md), registration request and Token handling.
-- [UI Foundation](../01_Foundation_and_Navigation.md), connection and unauthenticated states.
+- [UI Foundation](../Foundation-and-Navigation.md), connection and unauthenticated states.
 
 ## Goal
 

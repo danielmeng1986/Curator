@@ -22,7 +22,10 @@ details, or an undocumented sequence of actions.
 - Backend Specifications define what operations and state transitions are
   valid. The UI must not weaken or duplicate Backend authorization.
 - This Specification defines the user-facing orchestration of those operations.
-- Files `01`–`06` define shared and feature-specific UI requirements and must
+- [Foundation and Navigation](Foundation-and-Navigation.md),
+  [Data Interaction Rules](Data-Interaction-Rules.md), the files under
+  [Features](Features/), and the [Verification Strategy](Verification-Strategy.md)
+  define shared, feature-specific, and evidence responsibilities and must
   conform to this Specification.
 - The [Workflow Readiness Matrix](Workflow-Readiness-Matrix.md) records coverage
   and evidence. Task completion alone does not establish workflow readiness.

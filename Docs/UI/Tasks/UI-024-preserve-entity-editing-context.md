@@ -11,7 +11,7 @@ Preserve Unsaved Entity Drafts and List Navigation Context
 ## Related Specification(s)
 
 - [UI Specification](../Specification.md), sections 4.1, 4.3, 4.5, and 5.
-- [Entity Management](../03_Entity_Management.md).
+- [Entity Management](../Features/Entity-Management.md).
 
 ## Goal
 

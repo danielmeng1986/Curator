@@ -10,7 +10,7 @@ Adapt Import Preview and Execution UI
 
 ## Related Specification(s)
 
-- [UI Direct Album Import](../05_Direct_Album_Import.md).
+- [UI Direct Album Import](../Features/Direct-Album-Import.md).
 - [Import Workflow](../../Backend/Specifications/Import-Workflow.md).
 - [Canonical Path Rules](../../Backend/Specifications/Canonical-Path-Rules.md).
 

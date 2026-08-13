@@ -18,7 +18,7 @@ supersession. Status is one of `Proposed`, `Ready`, `In Progress`, `Blocked`,
 ## Readiness rule
 
 A UI task is `Ready` only when its controlling UI and Backend contracts agree.
-If the UI plan is stale—for example, where it still mentions the retired
+If the current UI description is stale—for example, where it still mentions the retired
 historical `workspace_album` collection or excludes the now-required
 authentication model—the specification task must resolve that conflict before
 implementation begins.

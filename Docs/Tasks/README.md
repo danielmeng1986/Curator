@@ -38,6 +38,7 @@ series rather than silently changing behavior from a documentation task.
 | [DOC-007](DOC-007-author-bilingual-web-client-role-manuals.md) | English/Chinese apps.web overview and role manuals | Complete |
 | [DOC-008](DOC-008-establish-user-manual-release-refresh-gate.md) | Repeatable milestone/Tag manual refresh and parity gate | Complete |
 | [DOC-009](DOC-009-refresh-ui-device-enrollment-manuals.md) | Bilingual UI-only Reader/Writer enrollment manuals | Complete |
+| [DOC-010](DOC-010-restructure-ui-design-documentation.md) | Current, role-separated UI design documentation structure | Complete |
 
 ## Recommended execution order
 

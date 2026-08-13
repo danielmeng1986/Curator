@@ -11,7 +11,7 @@ Verify End-to-End Multi-Browser Device Enrollment
 ## Related Specification(s)
 
 - [Authentication](../../Backend/Specifications/Authentication.md), complete registration, approval, and Token lifecycle.
-- [UI Safety and Acceptance](../06_Safety_and_Acceptance.md), workflow and credential-redaction acceptance.
+- [UI Specification](../Specification.md), workflow and credential-redaction acceptance.
 
 ## Goal
 

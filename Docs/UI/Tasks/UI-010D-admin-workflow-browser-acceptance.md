@@ -12,7 +12,7 @@ Add Administrator Workflow Browser Acceptance
 
 - [Authentication](../../Backend/Specifications/Authentication.md).
 - [Snapshot Specification](../../Backend/Specifications/Snapshot-Specification.md).
-- [UI Safety and Acceptance](../06_Safety_and_Acceptance.md).
+- [UI Verification Strategy](../Verification-Strategy.md).
 
 ## Goal
 

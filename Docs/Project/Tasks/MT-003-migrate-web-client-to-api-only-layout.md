@@ -11,7 +11,7 @@ Migrate Web Client to an API-Only Layout
 ## Related Specification(s)
 
 - [Backend Architecture](../../Backend/Backend-Architecture.md), Controller/API Layer and API Versioning.
-- [UI Plan](../../UI/Curator_Web_UI_Plan.md).
+- [UI documentation](../../UI/README.md).
 
 ## Goal
 

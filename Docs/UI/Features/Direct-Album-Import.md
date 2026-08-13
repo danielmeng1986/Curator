@@ -1,8 +1,14 @@
 # Direct Album Import
 
+> Documentation status: Current
+> Owner: UI
+> Last verified: 2026-08-13
+
+Route: `#/import/albums`. Primary role: Writer.
+
 ## Goal
 
-`/import/albums` imports selected folders directly into the permanent `album` table; it does not create `workspace_album` rows. The flow may reuse the local folder naming convention (for example, `{model_name} in {album_name}`), configured source root, archive destination, and copy/move behavior. The destination is explicitly labeled **Import to permanent albums**.
+`#/import/albums` imports selected folders directly into the permanent `album` table; it does not create `workspace_album` rows. The flow may reuse the local folder naming convention (for example, `{model_name} in {album_name}`), configured source root, archive destination, and copy/move behavior. The destination is explicitly labeled **Import to permanent albums**.
 
 ## Staged Workflow
 
@@ -12,6 +18,13 @@
 4. **Validate and preview** — show final album values, entity creations, `album_model`/`album_relation` rows, computed paths, duplicate checks, and filesystem conflicts. Invalid rows cannot be selected.
 5. **Confirm and execute** — confirm counts of Albums, Studios, Models, and relationships created/reused plus the filesystem action. Run as a recorded, recoverable operation.
 6. **Results** — report success/failure per row, link created Albums, and offer a copyable/downloadable operation summary. Remove successful rows from the draft; retain failures for correction and retry.
+
+The compose, review, and result stages use versioned browser-local state where
+the Backend has not yet accepted a durable execution. Navigation, refresh, and
+browser restart offer a truthful resume or discard path. A stale or expired
+Preview is never executed silently; the user returns to review and obtains a
+fresh Preview. Completed and partially completed execution remains discoverable
+through durable Operation evidence.
 
 ## Mapping
 

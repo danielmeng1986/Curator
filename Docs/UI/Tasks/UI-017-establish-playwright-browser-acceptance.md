@@ -10,7 +10,7 @@ Establish Reproducible Playwright Browser Acceptance Infrastructure
 
 ## Related Specification(s)
 
-- [UI Safety and Acceptance](../06_Safety_and_Acceptance.md).
+- [UI Verification Strategy](../Verification-Strategy.md).
 - [UI Workflow Readiness Matrix](../Workflow-Readiness-Matrix.md).
 - [UI-003](UI-003-establish-browser-workflow-fixtures.md).
 

@@ -10,7 +10,8 @@ Establish UI Workflow Coverage Matrix
 
 ## Related Specification(s)
 
-- [UI Plan](../Curator_Web_UI_Plan.md) and modules 01–06.
+- [UI documentation index](../README.md) and its foundation, interaction,
+  feature, and verification documents.
 - [Backend Workflow Readiness Matrix](../../Backend/Workflow-Readiness-Matrix.md).
 - [Authentication](../../Backend/Specifications/Authentication.md), [Import](../../Backend/Specifications/Import-Workflow.md), [Repair](../../Backend/Specifications/Repair-Workflow.md), and [Workspace](../../Backend/Specifications/Workspace-Workflow.md).
 

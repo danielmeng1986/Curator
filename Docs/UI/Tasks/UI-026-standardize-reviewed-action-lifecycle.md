@@ -11,7 +11,7 @@ Make Material Preview, Confirmation, Abandonment, and Recovery Consistent
 ## Related Specification(s)
 
 - [UI Specification](../Specification.md), sections 4.3–4.6.
-- [UI Safety and Acceptance](../06_Safety_and_Acceptance.md).
+- [UI Specification](../Specification.md).
 
 ## Goal
 

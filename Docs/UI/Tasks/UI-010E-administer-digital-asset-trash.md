@@ -11,7 +11,7 @@ Add Administrator Digital Asset Trash Review, Restore, and Purge UI
 ## Related Specification(s)
 
 - Digital Asset Trash specification produced by `BT-033`.
-- [UI Safety and Acceptance](../06_Safety_and_Acceptance.md).
+- [UI Specification](../Specification.md).
 - [Operation Logging](../../Backend/Specifications/Operation-Logging.md).
 
 ## Goal

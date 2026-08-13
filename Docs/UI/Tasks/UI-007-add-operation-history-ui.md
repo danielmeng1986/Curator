@@ -12,7 +12,7 @@ Add Role-Sensitive Operation History and Traceability UI
 
 - [Operation Logging](../../Backend/Specifications/Operation-Logging.md).
 - [Issue Management](../../Backend/Specifications/Issue-Management.md).
-- [UI Safety and Acceptance](../06_Safety_and_Acceptance.md).
+- [UI Specification](../Specification.md).
 
 ## Goal
 

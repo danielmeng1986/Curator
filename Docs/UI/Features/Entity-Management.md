@@ -1,12 +1,18 @@
 # Entity Management
 
+> Documentation status: Current
+> Owner: UI
+> Last verified: 2026-08-13
+
+Routes: `#/albums`, `#/models`, `#/studios`, and `#/statuses`.
+
 ## Albums
 
-`/albums` is the permanent-data center. It searches title, Studio, location, scene, and linked Models; filters by Studio, Status, rating, capture/publish date range, and Model; and sorts by title, Studio, publish date, rating, and update time.
+`#/albums` is the permanent-data center. It searches title, Studio, location, scene, and linked Models; filters by Studio, Status, rating, capture/publish date range, and Model; and sorts by title, Studio, publish date, rating, and update time.
 
 Rows show title, Studio, Status, linked Model names, dates, rating, and a compact path indicator. Eligible bulk metadata changes (for example, Status or Studio) require a review preview and must not silently replace non-empty values.
 
-`/albums/new` and `/albums/:id` contain:
+`#/albums/new` and `#/albums/:id` contain:
 
 1. **Core metadata** — Studio, Status, title, description, scene, location, dates, rating.
 2. **Storage** — the single canonical `path`, with a copy control and path validation warnings.
@@ -18,7 +24,7 @@ The relationship sections are not `album_model` or `album_relation` table views:
 
 `apps.web` treats Album as the minimum routine digital-asset management unit.
 It does not expose Photo browsing or independent Photo create/edit/delete actions
-in permanent-entity management. A future AI review surface may show selected
+in permanent-entity management. The AI Review surface shows Manifest-selected
 Photos as read-only evidence, but that does not make Photo a CRUD surface here.
 
 Removing an Album must not use the current database-only hard-delete path. The
@@ -28,13 +34,13 @@ contained Photos, recovery, and administrator-confirmed permanent purge.
 
 ## Models and Studios
 
-`/models` and `/studios` share browse-and-detail behavior: search, filter, sort, grid, direct creation, and details. Each may be created either from its dedicated list or from an Album/Import inline selector.
+`#/models` and `#/studios` share browse-and-detail behavior: search, filter, sort, grid, direct creation, and details. Each may be created either from its dedicated list or from an Album/Import inline selector.
 
 Model details show a read-only **Albums featuring this model** table. Selecting an Album opens its detail page, where the relationship is managed in the Album’s **Models / Additional Models** section. Studio details show **Albums from this studio**. Selecting a row opens the relevant album.
 
 ## Statuses
 
-`/statuses` is a compact controlled-data screen. It lists name, description,
+`#/statuses` is a compact controlled-data screen. It lists name, description,
 and active permanent-entity usage counts. Editing updates the label globally.
 Deletion is enabled only when all Backend-reported active references are zero;
 otherwise the UI explains the references. Archived historical Workspace rows

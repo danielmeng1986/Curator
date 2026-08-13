@@ -10,7 +10,7 @@ Establish Disposable Browser Workflow Fixtures
 
 ## Related Specification(s)
 
-- [UI Safety and Acceptance](../06_Safety_and_Acceptance.md).
+- [UI Verification Strategy](../Verification-Strategy.md).
 - [Backend Testing Strategy](../../Backend/Testing-Strategy.md).
 - [MT-006](../../Project/Tasks/MT-006-ui-workflow-acceptance.md).
 

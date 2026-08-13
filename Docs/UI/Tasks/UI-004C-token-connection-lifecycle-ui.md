@@ -11,7 +11,7 @@ Add Device Connection and Token Lifecycle UI
 ## Related Specification(s)
 
 - [Authentication](../../Backend/Specifications/Authentication.md), Token and renewal lifecycle.
-- [UI Foundation](../01_Foundation_and_Navigation.md).
+- [UI Foundation](../Foundation-and-Navigation.md).
 
 ## Goal
 

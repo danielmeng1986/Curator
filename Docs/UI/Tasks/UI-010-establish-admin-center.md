@@ -12,7 +12,7 @@ Establish Administrator Center Shell and Safety Policy
 
 - [Authentication](../../Backend/Specifications/Authentication.md).
 - [Snapshot Specification](../../Backend/Specifications/Snapshot-Specification.md).
-- [UI Foundation](../01_Foundation_and_Navigation.md) and [UI Safety](../06_Safety_and_Acceptance.md).
+- [UI Foundation](../Foundation-and-Navigation.md) and [UI Specification](../Specification.md).
 
 ## Goal
 

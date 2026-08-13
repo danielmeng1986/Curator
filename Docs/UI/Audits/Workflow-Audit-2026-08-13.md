@@ -1,9 +1,20 @@
 # UI Workflow Specification Audit — 2026-08-13
 
+> Documentation status: Historical
+> Owner: UI
+> Last verified: 2026-08-13
+
+Snapshot date: 2026-08-13. Remediation status: UI-023–028 completed after this
+audit. Current source: [Workflow Readiness Matrix](../Workflow-Readiness-Matrix.md).
+
+This file preserves the evidence and findings observed on the snapshot date.
+Statements such as **Failing** and **Not Implemented** below are historical and
+must not be read as the current product classification.
+
 ## Purpose
 
 This audit evaluates shipped `apps.web` workflows against the controlling
-[Curator Web UI Specification](Specification.md). It does not treat an existing
+[Curator Web UI Specification](../Specification.md). It does not treat an existing
 button or passing uninterrupted happy path as sufficient evidence.
 
 ## Method and evidence
@@ -62,3 +73,13 @@ the new interruption matrix by themselves.
 4. UI-027 protects long-form AI review work using the shared draft rules.
 5. UI-028 adds the interruption matrix to the final gate and reclassifies rows
    only after their evidence passes.
+
+## Resolution record
+
+- UI-023 corrected the permission-disclosure gate.
+- UI-024 and UI-025 added entity and Import continuity.
+- UI-026 standardized the reviewed-action lifecycle.
+- UI-027 added versioned AI Review drafts and stale reconciliation.
+- UI-028 made interruption evidence mandatory in the readiness manifest.
+- The upgraded gate subsequently passed; UI-029 later added a focused no-model
+  Dispatch-to-Promotion drill. Current status belongs to the living matrix.

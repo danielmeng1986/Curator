@@ -29,7 +29,7 @@ recorded only as a product Memo.
 | Backend | [Backend Architecture](Backend/Backend-Architecture.md), [Specifications](Backend/Specifications/README.md), [Supported Surface](Backend/Supported-Backend-Surface.md) | Current boundaries and approved behavior |
 | Backend delivery | [Backend Tasks](Backend/Tasks/README.md), [Testing Strategy](Backend/Testing-Strategy.md), [Readiness Matrix](Backend/Workflow-Readiness-Matrix.md) | Implementation scope and evidence |
 | Database | [Database Model](Database/Curator_Database_Model.md), [Schema Source](Database/Schema-Source-of-Truth.md), [Schema Catalog](Database/Schema-Catalog.md) | Physical persistence navigation and authority |
-| Web UI | [UI Specification](UI/Specification.md), [UI Plan](UI/Curator_Web_UI_Plan.md), [UI Matrix](UI/Workflow-Readiness-Matrix.md), [UI Tasks](UI/Tasks/README.md) | apps.web workflow behavior, recovery, and browser acceptance |
+| Web UI | [UI documentation](UI/README.md), [UI Specification](UI/Specification.md), [UI Matrix](UI/Workflow-Readiness-Matrix.md), [UI Tasks](UI/Tasks/README.md) | apps.web design characteristics, workflow behavior, recovery, and browser acceptance |
 | Runtime/project | [Runtime Layout](Project/Runtime-Layout.md), [Project Tasks](Project/Tasks/README.md) | Source/runtime boundaries and MT work |
 | Documentation work | [Documentation Tasks](Tasks/README.md) | DOC/DBDOC maintenance plans and status |
 | Releases | [Release governance and index](Release/README.md) | Version classes, REL tasks, deployment records, and publication evidence |

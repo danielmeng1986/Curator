@@ -10,8 +10,8 @@ Standardize Permissions, Errors, and Operation Feedback
 
 ## Related Specification(s)
 
-- [UI Data Interaction Rules](../02_Data_Interaction_Rules.md).
-- [UI Safety and Acceptance](../06_Safety_and_Acceptance.md).
+- [UI Data Interaction Rules](../Data-Interaction-Rules.md).
+- [UI Specification](../Specification.md).
 - [API Contract](../../Backend/Specifications/API-Contract.md) and [Authentication](../../Backend/Specifications/Authentication.md).
 
 ## Goal

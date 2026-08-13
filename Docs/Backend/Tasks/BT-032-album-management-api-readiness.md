@@ -12,8 +12,8 @@ Complete Album Query, Batch Mutation, and Relationship Validation Contracts
 
 - [API Specification](../Specifications/API-Specification.md), Album collection and mutation contracts.
 - [Operation Logging](../Specifications/Operation-Logging.md), durable material-write evidence.
-- [UI Data Interaction Rules](../../UI/02_Data_Interaction_Rules.md), Album filters and relationship rules.
-- [UI Entity Management](../../UI/03_Entity_Management.md), Album management surface.
+- [UI Data Interaction Rules](../../UI/Data-Interaction-Rules.md), Album filters and relationship rules.
+- [UI Entity Management](../../UI/Features/Entity-Management.md), Album management surface.
 
 ## Goal
 

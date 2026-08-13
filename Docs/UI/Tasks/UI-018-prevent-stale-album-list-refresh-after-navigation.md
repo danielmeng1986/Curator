@@ -10,7 +10,7 @@ Prevent Stale Album List Refresh After Navigation
 
 ## Related Specification(s)
 
-- [UI Safety and Acceptance](../06_Safety_and_Acceptance.md).
+- [UI Specification](../Specification.md).
 - [UI-005](UI-005-adapt-entity-management-ui.md).
 - [UI-012](UI-012-entity-management-browser-acceptance.md).
 

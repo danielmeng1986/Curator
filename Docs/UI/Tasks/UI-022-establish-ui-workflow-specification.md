@@ -11,7 +11,7 @@ Establish the Controlling UI Workflow and Recovery Specification
 ## Related Specification(s)
 
 - [Curator Web UI Specification](../Specification.md)
-- [UI Safety and Acceptance](../06_Safety_and_Acceptance.md)
+- [UI Specification](../Specification.md)
 
 ## Goal
 

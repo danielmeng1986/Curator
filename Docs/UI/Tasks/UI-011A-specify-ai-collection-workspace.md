@@ -12,7 +12,8 @@ Specify the AI Collection Workspace Product and Data Contract
 
 - [AI](../../05-AI.md) and [AI Worker](../../../workers/ai_worker/README.md).
 - [Workspace Workflow](../../Backend/Specifications/Workspace-Workflow.md), reusable review/promotion principles only.
-- [UI Workspace Albums](../04_Workspace_Albums.md), to be superseded for active Workspace behavior.
+- [AI Collection Workspace](../Features/AI-Collection-Workspace.md), now the
+  current feature description produced from this delivery sequence.
 
 ## Goal
 

@@ -10,8 +10,8 @@ Add Permanent Entity Management Browser Acceptance
 
 ## Related Specification(s)
 
-- [UI Entity Management](../03_Entity_Management.md).
-- [UI Data Interaction Rules](../02_Data_Interaction_Rules.md).
+- [UI Entity Management](../Features/Entity-Management.md).
+- [UI Data Interaction Rules](../Data-Interaction-Rules.md).
 
 ## Goal
 

@@ -1,5 +1,12 @@
 # Data Interaction Rules
 
+> Documentation status: Current
+> Owner: UI
+> Last verified: 2026-08-13
+
+This document describes shipped field ownership, relationships, labels, and
+edit boundaries.
+
 ## Common Rules
 
 1. `id`, `uuid`, `created_at`, and `updated_at` are system-managed. They may appear in an optional read-only Record Details area, but are hidden from default grids and never editable.
@@ -47,14 +54,14 @@ Some Studios publish one logical Album through multiple separate releases. The A
 | --- | --- | --- |
 | `model` | `display_name`, `primary_name`, `description`, `country`, `ethnicity`, `eye_color`, `natural_hair_color` | `display_name` is the primary label; search both names. |
 | `studio` | `name`, `website`, `description`, `media_scope` | `name` is required; validate `website` as a URL when supplied. |
-| `status` | `name`, `description` | Show as chips elsewhere; prevent deletion while used by Albums or Workspace Albums. |
+| `status` | `name`, `description` | Show as chips elsewhere; prevent deletion while referenced by a current Album or a retained historical `workspace_album` record. |
 | `album` | `studio_id`, `status_id`, `title`, `description`, `scene`, `location`, `capture_date`, `publish_date`, `rating`, `path` | `path` is the single canonical permanent location. The form also includes relationship sections whose writes go to `album_model` and `album_relation`, not `album`. Rating is a non-negative integer until a project range is defined. |
-| `photo` | None in routine `apps.web` entity management | Photo remains a Backend asset record owned by an Album. Selected Photos may later appear as read-only AI evidence; Trash and purge follow their dedicated lifecycle. |
+| `photo` | None in routine `apps.web` entity management | Photo remains a Backend asset record owned by an Album. Manifest-selected Photos appear as read-only AI evidence; Trash and purge follow their dedicated lifecycle. |
 | `album_model` | `model_id`, `age_when_shot`, `role`, `remarks` | Implementation table for the Album form’s Models / Additional Models section; never presented as direct table CRUD. One model may occur once per album. |
 | `album_relation` | `related_album_id`, `relation_type`, `remarks` | Implementation table for the Album form’s Belongs to / Related Releases section; never presented as direct table CRUD. The initial UI supports `BELONGS_TO`. |
 
-The future AI Collection Workspace does not inherit editable fields from the
-retired historical `workspace_album` table. UI-011A/B must define stable review
-fields, dataset-specific presentation fields, field ownership, and permanent
-entity links before a Workspace form is implemented. AI output remains
-non-authoritative unless explicitly accepted through that review contract.
+The active AI Collection Workspace does not inherit editable fields from the
+retired historical `workspace_album` table. Its read model keeps immutable,
+dataset-versioned Worker results separate from human Review fields and
+system-managed state. AI output remains non-authoritative unless an Admin
+approves a value and executes the Backend-controlled Promotion workflow.

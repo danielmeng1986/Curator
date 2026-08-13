@@ -11,7 +11,7 @@ Add One-Time Loopback Administrator UI Bootstrap
 ## Related Specification(s)
 
 - [Authentication](../../Backend/Specifications/Authentication.md), trusted-LAN and one-time issuance rules.
-- [UI Foundation](../01_Foundation_and_Navigation.md) and [UI Safety](../06_Safety_and_Acceptance.md).
+- [UI Foundation](../Foundation-and-Navigation.md) and [UI Specification](../Specification.md).
 
 ## Goal
 

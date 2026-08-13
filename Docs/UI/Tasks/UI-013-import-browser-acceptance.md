@@ -11,7 +11,7 @@ Add Import Workflow Browser Acceptance
 ## Related Specification(s)
 
 - [Import Workflow](../../Backend/Specifications/Import-Workflow.md).
-- [UI Direct Album Import](../05_Direct_Album_Import.md).
+- [UI Direct Album Import](../Features/Direct-Album-Import.md).
 
 ## Goal
 

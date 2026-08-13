@@ -12,7 +12,7 @@ Build Dataset-Adaptable AI Workspace Review UI
 
 - UI-011A AI Collection Workspace Specification.
 - UI-011B stable review state machine and read model.
-- [UI Data Interaction Rules](../02_Data_Interaction_Rules.md).
+- [UI Data Interaction Rules](../Data-Interaction-Rules.md).
 
 ## Goal
 

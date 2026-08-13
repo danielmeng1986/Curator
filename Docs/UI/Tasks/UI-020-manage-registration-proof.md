@@ -11,7 +11,7 @@ Add Registration Proof Management to Administrator Center
 ## Related Specification(s)
 
 - [Authentication](../../Backend/Specifications/Authentication.md), authenticated Admin management and registration policy.
-- [UI Safety and Acceptance](../06_Safety_and_Acceptance.md), credential disclosure and high-risk confirmation.
+- [UI Specification](../Specification.md), credential disclosure and high-risk confirmation.
 
 ## Goal
 
