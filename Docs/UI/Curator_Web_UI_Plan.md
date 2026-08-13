@@ -13,6 +13,7 @@ This is the index for the modular UI requirements of the local Curator web appli
 | [06 — Safety and Acceptance](06_Safety_and_Acceptance.md) | Audit and recovery requirements, out-of-scope decisions, and acceptance criteria. |
 | [UI Tasks](Tasks/README.md) | Independently numbered UI specification, implementation, and browser-workflow acceptance tasks. |
 | [UI Workflow Readiness Matrix](Workflow-Readiness-Matrix.md) | Mapping from Backend workflow evidence to UI surfaces, roles, readiness gaps, and browser acceptance ownership. |
+| [Workflow Audit — 2026-08-13](Workflow-Audit-2026-08-13.md) | First audit of shipped workflows against the controlling Specification, with evidence and remediation ownership. |
 
 ## Reading Order
 
