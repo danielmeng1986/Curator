@@ -221,10 +221,13 @@ erases or hides Manifest evidence when source files move or change. Each entry
 reports `Available`, `Missing`, `Changed`, or `Unavailable`; degraded content
 does not make the historical AI result or review unreadable.
 
-Admin-only Work Item evidence-manifest create/read endpoints select and expose
-immutable relative metadata by Work Item identity. Clients cannot nominate a
-path. Responses contain opaque evidence UUIDs and relative evidence metadata,
-never the Album absolute path. Image content transfer is specified separately.
+Work Item evidence-manifest create/read endpoints select and expose immutable
+relative metadata by Work Item identity. Admin may use them for orchestration
+and audit; a Writer may use them only while the same Token owns the live Work
+Item claim. The claimed Writer may ask the Backend to prepare the Manifest but
+cannot nominate a path, file, or sample. Responses contain opaque evidence UUIDs
+and relative evidence metadata, never the Album absolute path. Image content
+transfer is specified separately.
 
 `GET /api/v1/ai-evidence/{evidence_uuid}` returns redacted Manifest-bound
 metadata; `/content` streams the signature-validated image with its fixed MIME,

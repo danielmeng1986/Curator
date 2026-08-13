@@ -936,15 +936,16 @@ class TestVersionedApiAuthorization(_TestServerBase):
             with patch.object(srv,"APP_CONFIG",{**srv.APP_CONFIG,"archive_root":root}):
                 status, denied = self._get(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",writer)
                 self.assertEqual(403,status)
-                status, created = self._post(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",{},admin)
+                status, claimed = self._post("/api/v1/ai-work-items/claim",{"lease_seconds":300},writer)
+                self.assertEqual(200,status); self.assertEqual(item_uuid,claimed["data"]["item"]["uuid"])
+                status, created = self._post(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",{},writer)
                 self.assertEqual(201,status); manifest = created["data"]["manifest"]
                 self.assertEqual(8,len(manifest["evidence"])); self.assertNotIn(root,str(manifest))
+                status, worker_fetched = self._get(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",writer)
+                self.assertEqual(200,status); self.assertEqual(manifest["uuid"],worker_fetched["data"]["manifest"]["uuid"])
                 status, fetched = self._get(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",admin)
                 self.assertEqual(200,status); self.assertEqual(manifest["uuid"],fetched["data"]["manifest"]["uuid"])
                 evidence_uuid = manifest["evidence"][0]["uuid"]
-                self._db.execute("""UPDATE workspace_album_ai_worker SET run_state='Claimed',claimed_by_token_uuid=?,
-                    lease_expires_at='2099-01-01T00:00:00+00:00' WHERE uuid=?""",
-                    (writer_issued["token_record"]["uuid"],item_uuid)); self._db.commit()
                 status, forbidden = self._get(f"/api/v1/ai-evidence/{evidence_uuid}",other_writer)
                 self.assertEqual(403,status); self.assertEqual("EVIDENCE_CLAIM_REQUIRED",forbidden["error"]["code"])
                 status, metadata = self._get(f"/api/v1/ai-evidence/{evidence_uuid}",writer)
@@ -952,18 +953,20 @@ class TestVersionedApiAuthorization(_TestServerBase):
                 status,mime,cache,content = self._get_raw(f"/api/v1/ai-evidence/{evidence_uuid}/content",writer)
                 self.assertEqual(200,status); self.assertEqual("image/jpeg",mime); self.assertEqual("private, no-store",cache)
                 self.assertEqual((album_dir / manifest["evidence"][0]["relative_path"]).read_bytes(),content)
-                vision = {"schema_version":"curator://album-analysis/vision/v1","payload":{
-                    "scene":"A family beside a lake","people":{"minimum":3,"maximum":4},
-                    "location_environment":"Outdoor lakeside","subjects":["family"],"objects":["trees"],
-                    "actions":["walking"],"confidence":0.9,"warnings":[]}}
-                status, accepted = self._post(f"/api/v1/ai-work-items/{item_uuid}/results/vision",vision,writer)
-                self.assertEqual(200,status); self.assertEqual("Vision",accepted["data"]["result"]["stage"])
-                writer_payload = {"schema_version":"curator://album-analysis/writer/v1","payload":{
-                    "album_summary":"A calm family outing","description":"A family explores a lakeside setting.",
-                    "suggested_names":["Lakeside Family Walk","Quiet Summer Shore","Morning By The Lake",
-                        "Family Waterside Adventure","Gentle Lakeside Memories","Together Near The Water"]}}
-                status, accepted = self._post(f"/api/v1/ai-work-items/{item_uuid}/results/writer",writer_payload,writer)
-                self.assertEqual(200,status); self.assertEqual("Writer",accepted["data"]["result"]["stage"])
+                from workers.ai_worker.client import CuratorClient
+                from workers.ai_worker.runtime import WorkerRuntime
+                class DeterministicWorkflow:
+                    def vision(self,paths,settings):
+                        self.paths=list(paths); return {"scene":"A family beside a lake","people":{"minimum":3,"maximum":4},
+                            "location_environment":"Outdoor lakeside","subjects":["family"],"objects":["trees"],
+                            "actions":["walking"],"confidence":0.9,"warnings":[]},{"provider":"fixture"}
+                    def writer(self,vision,settings): return {"album_summary":"A calm family outing",
+                        "description":"A family explores a lakeside setting.","suggested_names":["Lakeside Family Walk",
+                        "Quiet Summer Shore","Morning By The Lake","Family Waterside Adventure",
+                        "Gentle Lakeside Memories","Together Near The Water"]},{"provider":"fixture"}
+                workflow=DeterministicWorkflow(); client=CuratorClient(f"http://127.0.0.1:{self._port}",writer_issued["token"])
+                self.assertEqual(item_uuid,WorkerRuntime(client,workflow).run_once(claimed["data"]["item"]))
+                self.assertTrue(all(not path.exists() for path in workflow.paths))
                 status, results = self._get(f"/api/v1/ai-work-items/{item_uuid}/results",admin)
                 self.assertEqual(200,status); self.assertEqual("ReadyForReview",results["data"]["results"]["state"]["state"])
                 status, queue = self._get("/api/v1/ai-reviews?state=ReadyForReview",admin)

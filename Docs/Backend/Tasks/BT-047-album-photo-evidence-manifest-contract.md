@@ -79,8 +79,9 @@ AI run using reliable Album paths without requiring prior Photo-table import.
 - Zero/missing images and insufficient eligible images create a durable Issue
   and structured conflict without a Manifest. Selected content is revalidated
   by containment, size, mtime, and hash before later use.
-- Added Admin-only Work Item Manifest create/read APIs. Responses retain opaque
-  evidence identity and relative metadata without absolute Album paths; the
-  permanent `photo` table remains untouched.
+- Added Work Item Manifest create/read APIs, initially Admin-only and later
+  extended by BT-062 to the exact active Writer claim owner. Responses retain
+  opaque evidence identity and relative metadata without absolute Album paths;
+  the permanent `photo` table remains untouched.
 - Verification: 6 focused migration/service/API tests passed and the complete
   Backend regression passed all 723 tests.

@@ -75,6 +75,7 @@ are approved.
 | [BT-059](BT-059-consolidate-canonical-schema-bootstrap-and-migrations.md) | Consolidate the canonical empty-database bootstrap and ordered migration path. |
 | [BT-060](BT-060-managed-registration-proof-lifecycle.md) | Admin-managed hash-only Registration Proof lifecycle. |
 | [BT-061](BT-061-client-owned-device-token-enrollment.md) | Client-owned Device Token activation after Admin approval. |
+| [BT-062](BT-062-claim-owner-evidence-manifest-access.md) | Active Writer claim-owner access to Backend-selected Evidence Manifests. |
 
 BT identifiers record planning order, not mandatory execution order. Dispatch
 is an entry boundary for AI work, so BT-054 through BT-056 precede BT-047 in

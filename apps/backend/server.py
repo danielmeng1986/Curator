@@ -769,8 +769,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                 if not self._require_admin_principal(): return
                 self._send_success(200, {"item": self._ai_work_item_service().get(path.split("/")[-1], include_attempts=True)})
             elif re.match(r"^/api/ai-work-items/[^/]+/evidence-manifest$", path):
-                if not self._require_admin_principal(): return
-                self._send_success(200, {"manifest":self._ai_photo_evidence_service().revalidate(path.split("/")[3])})
+                item_uuid = path.split("/")[3]; service = self._ai_photo_evidence_service()
+                manifest = service.revalidate(item_uuid) if self._principal["role"] == "admin" else \
+                    service.worker_manifest(item_uuid, self._principal["token_uuid"])
+                self._send_success(200, {"manifest":manifest})
             elif re.match(r"^/api/ai-work-items/[^/]+/evidence-history$", path):
                 if not self._require_admin_principal(): return
                 self._send_success(200,{"evidence_history":self._ai_photo_evidence_service().historical(path.split("/")[3])})
@@ -1344,8 +1346,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 item = service.retry(parts[3], expected) if parts[4] == "retry" else service.cancel(parts[3], expected)
                 self._send_success(200, {"item": item})
             elif re.match(r"^/api/ai-work-items/[^/]+/evidence-manifest$", path):
-                if not self._require_admin_principal(): return
-                manifest = self._ai_photo_evidence_service().create(path.split("/")[3])
+                item_uuid = path.split("/")[3]; service = self._ai_photo_evidence_service()
+                manifest = service.create(item_uuid) if self._principal["role"] == "admin" else \
+                    service.worker_manifest(item_uuid, self._principal["token_uuid"], create=True)
                 self._send_success(201, {"manifest":manifest})
             elif path == "/api/ai-model-configurations":
                 if not self._require_admin_principal(): return

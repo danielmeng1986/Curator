@@ -2197,7 +2197,9 @@ class WorkDispatchService:
         if album_id is not None and (not isinstance(album_id,int) or album_id<=0): raise ValueError("album_id is invalid.")
         rows,total=self._repo.search_groups(view,workspace_uuid,worker_kind,album_id,limit,offset)
         for row in rows:
-            row["allowed_actions"]=self.group_detail(row["uuid"])["allowed_actions"] if row["group_state"]=="Active" else []
+            detail=self.group_detail(row["uuid"])
+            row["items"]=detail["items"]
+            row["allowed_actions"]=detail["allowed_actions"] if row["group_state"]=="Active" else []
         return {"items":rows,"total":total,"limit":limit,"offset":offset,"view":view}
 
     def workspace_overview(self,workspace_uuid):
@@ -2362,7 +2364,7 @@ class AIPhotoEvidenceManifestService:
         if not item: raise ServiceNotFound("AI Work Item not found.")
         if self._items.workspace_state(item_uuid)!="Open":
             raise ServiceConflict("AI_WORKSPACE_READ_ONLY","Closed or Archived Workspaces reject evidence creation.")
-        if item["run_state"] not in {"Pending","Failed"}:
+        if item["run_state"] not in {"Pending","Failed","Claimed"}:
             raise ServiceConflict("EVIDENCE_MANIFEST_STATE_INVALID", "Evidence must be selected before Worker processing.")
         sample_count = int(item["configuration_snapshot"]["sample_count"])
         album = self._albums.get_by_id(item["album_id"])
@@ -2412,6 +2414,20 @@ class AIPhotoEvidenceManifestService:
             if stat.st_size != item["size_bytes"] or stat.st_mtime_ns != item["modified_time_ns"] or digest != item["sha256"]:
                 raise ServiceConflict("EVIDENCE_CONTENT_CHANGED","An evidence image changed after selection.",{"evidence_uuid":item["uuid"]})
         return manifest
+
+    def worker_manifest(self, item_uuid, token_uuid, *, create=False):
+        """Return Backend-selected evidence only to the active claim owner."""
+        item = self._items.get(item_uuid)
+        now = self._now().isoformat()
+        if not item or item["run_state"] != "Claimed" \
+                or item.get("claimed_by_token_uuid") != token_uuid \
+                or not item.get("lease_expires_at") or item["lease_expires_at"] <= now:
+            raise AuthorizationFailure("write", "EVIDENCE_CLAIM_REQUIRED",
+                "Photo evidence requires the Work Item's active Writer claim.")
+        manifest = self._repo.get_by_item(item_uuid)
+        if manifest: return self.revalidate(item_uuid)
+        if not create: raise ServiceNotFound("Photo evidence Manifest not found.")
+        return self.create(item_uuid)
 
     def _authorize_evidence(self, evidence_uuid, role, token_uuid):
         evidence = self._repo.get_evidence(evidence_uuid)
