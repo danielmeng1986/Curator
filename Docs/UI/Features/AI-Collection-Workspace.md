@@ -40,6 +40,11 @@ An Admin starts from **AI Work Dispatch**, filters the permanent Album catalogue
 chooses eligible Albums and one or more configurations, reviews a zero-write
 Preview, and explicitly dispatches.
 
+Each configuration choice shows the model identity/file, evidence sample count,
+context and output limits, image-token limit, temperature, CPU threads, GPU
+layers, and prompt versions. This lets the Admin compare execution intent before
+creating one immutable configuration snapshot per Work Item.
+
 The Available view contains only Albums for which the Backend reports no active
 Album Work Reservation. Successful dispatch creates one Group per Album and
 one Work Item per chosen configuration. One Album may have only one active
@@ -51,6 +56,10 @@ Active and History views, stable Group routes, and Workspace summaries provide
 resume points after navigation, browser refresh, delayed Worker activity, or a
 Backend restart. Cancellation, abandonment, and release are explicit
 Backend-controlled Group actions with visible blockers and Operation evidence.
+Active and History render every Album/configuration run separately with a
+human-readable stage, durable run/result states, attempt count, last activity,
+active lease deadline, redacted failure, and a stable detail route. The stage is
+a projection of authoritative Backend state, not a browser-owned progress bar.
 
 ## Worker boundary and evidence
 

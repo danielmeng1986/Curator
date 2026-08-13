@@ -34,6 +34,8 @@ try{
 
   const page=await browser.newPage(); await connect(page,fixture.devices.admin.token);
   await page.getByRole('link',{name:/AI Work Dispatch/}).click(); await page.getByRole('heading',{name:'Album Work Dispatch'}).waitFor();
+  await page.getByText('balanced.gguf',{exact:true}).waitFor();
+  await page.getByText(/context 4096 · max 800 tokens · image 384 · temp 0.2 · 8 threads · 20 GPU layers/).first().waitFor();
   await page.locator('[data-dispatch-album="1"]').check(); await page.getByLabel(/Fixture Balanced/).check();
   await page.getByRole('button',{name:'Preview dispatch'}).click(); await page.getByRole('heading',{name:'Confirm Album Work Dispatch'}).waitFor();
 
@@ -59,10 +61,16 @@ try{
   await page.getByRole('button',{name:'Active'}).click();
   const active=await fixture.request('/work-dispatch/groups?view=active',{role:'admin'});
   assert.equal(active.payload.data.length,3); assert.equal(active.payload.data.every(item=>item.item_count===2),true);
+  assert.equal(active.payload.data.every(item=>item.items.length===2),true);
+  await page.getByText('Waiting for Worker').first().waitFor();
+  await page.getByText('Fixture Balanced').first().waitFor();
+  await page.getByText('Fixture Fast').first().waitFor();
   const after=(await fixture.request('/albums',{role:'admin'})).payload.data.map(item=>[item.id,item.status_id]); assert.deepEqual(after,before);
 
   for(const group of active.payload.data){
     await page.goto(`${fixture.origin}/#/work-dispatch/groups/${group.uuid}`); await page.getByRole('heading',{name:'Dispatch Group'}).waitFor();
+    assert.equal(await page.getByRole('columnheader',{name:'Current stage'}).isVisible(),true);
+    assert.equal(await page.getByText('Waiting for Worker').count(),2);
     page.once('dialog',dialog=>dialog.accept('Browser acceptance terminal cancellation'));
     await page.getByRole('button',{name:'cancel',exact:true}).click(); await page.getByText('Released').waitFor();
   }

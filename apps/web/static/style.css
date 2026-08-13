@@ -391,6 +391,15 @@ code {
 .dispatch-controls { padding:16px; margin-bottom:16px; }
 .dispatch-configs { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:8px; }
 .dispatch-configs label { padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+.dispatch-config { display:flex; align-items:flex-start; gap:9px; cursor:pointer; }
+.dispatch-config > span { display:grid; gap:4px; min-width:0; }
+.config-model, .config-parameters, .config-prompts, .table-secondary, .field-help { color:var(--ink-soft); font-size:.82rem; }
+.config-model code { overflow-wrap:anywhere; }
+.dispatch-group-card { padding:16px; margin-bottom:14px; }
+.dispatch-group-heading { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:12px; }
+.dispatch-group-footer { color:var(--ink-soft); font-size:.85rem; margin-top:10px; }
+.work-progress { min-width:960px; }
+.text-error { color:var(--danger); }
 .workspace-summary, .review-panel { padding:18px; }
 .review-grid { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr); gap:16px; margin-bottom:16px; }
 .ai-output { border-left:4px solid var(--primary); }

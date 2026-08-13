@@ -2608,10 +2608,12 @@ class WorkDispatchRepository:
             self._ensure_schema(conn); AIReviewRepository._ensure_schema(conn); AIAlbumNamePromotionRepository._ensure_schema(conn)
             group=conn.execute("SELECT * FROM work_dispatch_group WHERE uuid=?",(group_uuid,)).fetchone()
             if not group: return None
-            rows=conn.execute("""SELECT gi.item_uuid,i.run_state,i.attempt_count,r.state review_state,
-                rw.successor_work_item_uuid,
+            rows=conn.execute("""SELECT gi.item_uuid,i.run_state,i.attempt_count,i.configuration_snapshot_json,
+                i.created_at,i.updated_at,i.lease_expires_at,i.last_error,r.state review_state,
+                rs.state result_state,rw.successor_work_item_uuid,
                 p.outcome promotion_outcome FROM work_dispatch_group_item gi
                 LEFT JOIN workspace_album_ai_worker i ON i.uuid=gi.item_uuid
+                LEFT JOIN ai_work_item_result_state rs ON rs.work_item_uuid=i.uuid
                 LEFT JOIN ai_work_item_review r ON r.work_item_uuid=i.uuid
                 LEFT JOIN ai_work_item_rework rw ON rw.rework_of_work_item_uuid=i.uuid
                 LEFT JOIN workspace_album_name_promotion p ON p.work_item_uuid=i.uuid AND p.outcome='Promoted'
@@ -2619,7 +2621,11 @@ class WorkDispatchRepository:
             winner=conn.execute("""SELECT p.* FROM workspace_album_name_promotion p
                 JOIN work_dispatch_group_item gi ON gi.item_uuid=p.work_item_uuid
                 WHERE gi.group_uuid=? AND p.outcome='Promoted' LIMIT 1""",(group_uuid,)).fetchone()
-        return {"group":dict(group),"items":[dict(row) for row in rows],"winner":dict(winner) if winner else None}
+        items=[]
+        for row in rows:
+            item=dict(row); item["configuration_snapshot"]=json.loads(item.pop("configuration_snapshot_json") or "{}")
+            items.append(item)
+        return {"group":dict(group),"items":items,"winner":dict(winner) if winner else None}
 
     def close_group(self,group_uuid,expected_version,actor,reason,disposition,now):
         operation_uuid=str(uuid.uuid4())

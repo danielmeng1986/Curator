@@ -72,6 +72,7 @@ snapshot, archive, and output resources.
 | [UI-027](UI-027-persist-ai-review-drafts.md) | Interruption-safe human AI Review drafts | Complete |
 | [UI-028](UI-028-enforce-workflow-interruption-readiness.md) | Specification interruption matrix in the final readiness gate | Complete |
 | [UI-029](UI-029-simulated-ai-promotion-workflow-drill.md) | No-model dispatch, Worker result, Review, and Album Promotion drill | Complete |
+| [UI-030](UI-030-expose-ai-configuration-and-run-progress.md) | Model configuration summaries and per-Album run progress | Complete |
 
 ## Dependency outline
 
@@ -99,3 +100,6 @@ interruption evidence mandatory in the final readiness gate.
 
 UI-029 adds a focused one-Album drill proving the production orchestration and
 permanent database outcome with deterministic Worker payloads and no AI model.
+
+UI-030 makes dispatch choices inspectable before confirmation and projects each
+Album/configuration run independently in Active, History, and Group detail.

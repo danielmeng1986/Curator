@@ -7,6 +7,32 @@ const WorkDispatchPage = {
   _workerKinds: [],
   _preview: null,
 
+  _configurationSummary(item) {
+    return `<strong>${esc(item.name)}</strong><span class="config-model">${esc(item.model_identifier)} · <code>${esc(item.model_file)}</code></span>
+      <span class="config-parameters">${item.sample_count} images · context ${item.context_size} · max ${item.max_tokens} tokens · image ${item.image_max_tokens} · temp ${item.temperature} · ${item.threads} threads · ${item.gpu_layers} GPU layers</span>
+      <span class="config-prompts">Vision ${esc(item.vision_prompt_version)} · Writer ${esc(item.writer_prompt_version)}</span>`;
+  },
+
+  _stage(item) {
+    if (item.review_state) return item.review_state;
+    if (item.run_state === 'Completed') return 'Ready for review';
+    if (item.run_state === 'Failed') return 'Failed';
+    if (item.run_state === 'Cancelled') return 'Cancelled';
+    if (item.result_state === 'AwaitingWriter') return 'Writer analysis';
+    if (item.run_state === 'Claimed') return 'Preparing evidence / Vision analysis';
+    return 'Waiting for Worker';
+  },
+
+  _itemRows(items, albumTitle = '') {
+    return (items || []).map(item => {
+      const config=item.configuration_snapshot || {};
+      return `<tr><td>${esc(albumTitle || '—')}</td><td><strong>${esc(config.name || 'Unknown configuration')}</strong><div class="table-secondary"><code>${esc(config.model_file || '—')}</code></div></td>
+        <td><span class="chip ${item.run_state === 'Failed' ? 'chip-error' : item.run_state === 'Completed' ? 'chip-ok' : 'chip-warn'}">${esc(this._stage(item))}</span><div class="table-secondary">Run ${esc(item.run_state)}${item.result_state ? ` · Result ${esc(item.result_state)}` : ''}</div></td>
+        <td>${item.attempt_count}</td><td>${item.updated_at ? esc(new Date(item.updated_at).toLocaleString()) : '—'}${item.lease_expires_at ? `<div class="table-secondary">Lease until ${esc(new Date(item.lease_expires_at).toLocaleString())}</div>` : ''}</td>
+        <td>${item.last_error ? `<span class="text-error">${esc(item.last_error)}</span>` : '—'}</td><td><a class="btn btn-secondary" href="#/ai-work-items/${esc(item.item_uuid)}/review">Open</a></td></tr>`;
+    }).join('');
+  },
+
   async render({ view = 'available' } = {}) {
     this._view = ['available', 'active', 'history'].includes(view) ? view : 'available';
     this._selected = new Set();
@@ -27,10 +53,11 @@ const WorkDispatchPage = {
     const el=document.getElementById('page-content'); el.innerHTML='<div class="loading">Loading Dispatch Group…</div>';
     try {
       const result=await api.get(`/work-dispatch/groups/${encodeURIComponent(uuid)}`); const detail=result.group; const group=detail.group;
-      el.innerHTML=`<div class="page-header"><div><a href="#/work-dispatch">← Work Dispatch</a><h1 class="page-title">Dispatch Group</h1></div><span class="chip">${esc(group.group_state)}</span></div>
+      el.innerHTML=`<div class="page-header"><div><a href="#/work-dispatch">← Work Dispatch</a><h1 class="page-title">Dispatch Group</h1></div><div><button class="btn btn-secondary" onclick="WorkDispatchPage.renderGroup({uuid:'${esc(group.uuid)}'})">Refresh progress</button> <span class="chip">${esc(group.group_state)}</span></div></div>
         <div class="card workspace-summary"><p>Group: <code>${esc(group.uuid)}</code></p><p>Album #${group.album_id} · Worker ${esc(group.worker_kind)} · Version ${group.version}</p>
         ${detail.blockers.length ? `<div class="alert alert-warning">${detail.blockers.map(item=>esc(item.reason)).join(' · ')}</div>` : ''}
-        <div class="detail-actions">${detail.items.map(item=>`<a class="btn btn-secondary" href="#/ai-work-items/${esc(item.item_uuid)}/review">${esc(item.review_state || item.run_state)}</a>`).join('')}
+        <div class="table-wrap"><table class="work-progress"><thead><tr><th>Album</th><th>Configuration</th><th>Current stage</th><th>Attempts</th><th>Last activity</th><th>Failure</th><th>Details</th></tr></thead><tbody>${this._itemRows(detail.items, `Album #${group.album_id}`)}</tbody></table></div>
+        <div class="detail-actions">
         ${detail.allowed_actions.map(action=>`<button class="btn ${action==='release'?'btn-primary':'btn-danger'}" onclick="WorkDispatchPage.closeGroup('${esc(group.uuid)}','${action}',${group.version},this)">${action}</button>`).join('')}</div></div>`;
     } catch(error){ui.renderPageError(el,error,'Dispatch Group');}
   },
@@ -60,7 +87,7 @@ const WorkDispatchPage = {
     const el = document.getElementById('page-content');
     const tabs = [['available','Available'],['active','Active'],['history','History']];
     el.innerHTML = `<div class="page-header"><div><h1 class="page-title">Album Work Dispatch</h1>
-      <p class="page-subtitle">Assign selected Albums to a Worker without changing Album Status.</p></div></div>
+      <p class="page-subtitle">Assign selected Albums to a Worker without changing Album Status.</p></div>${this._view !== 'available' ? '<button class="btn btn-secondary" onclick="WorkDispatchPage.loadView()">Refresh progress</button>' : ''}</div>
       <div class="dispatch-tabs" role="tablist">${tabs.map(([key,label]) => `<button class="btn ${this._view === key ? 'btn-primary' : 'btn-secondary'}" onclick="WorkDispatchPage.changeView('${key}')">${label}</button>`).join('')}</div>
       <div class="filter-bar">
         <label>Worker <select id="dispatchWorkerKind" onchange="WorkDispatchPage.loadView()">${this._workerKinds.map(kind => `<option value="${esc(kind.worker_kind)}" ${kind.worker_kind === workerKind ? 'selected' : ''}>${esc(kind.worker_kind)}</option>`).join('')}</select></label>
@@ -73,7 +100,7 @@ const WorkDispatchPage = {
     const rows = Array.isArray(this._candidates) ? this._candidates : [];
     return `<div class="dispatch-controls card"><div class="form-grid">
       <div class="form-field"><label for="dispatchWorkspace">Open Workspace</label><select id="dispatchWorkspace">${this._workspaces.map(item => `<option value="${esc(item.uuid)}">${esc(item.title)}</option>`).join('')}</select></div>
-      <div class="form-field form-field-full"><label>Model configurations</label><div class="dispatch-configs">${this._configurations.map(item => `<label><input type="checkbox" name="dispatchConfig" value="${esc(item.uuid)}"> ${esc(item.name)} · samples ${item.sample_count}</label>`).join('') || 'No Active configuration'}</div></div>
+      <div class="form-field form-field-full"><label>Model configurations</label><p class="field-help">Each selected configuration creates a separate comparable run for every selected Album.</p><div class="dispatch-configs">${this._configurations.map(item => `<label class="dispatch-config"><input type="checkbox" name="dispatchConfig" value="${esc(item.uuid)}"><span>${this._configurationSummary(item)}</span></label>`).join('') || 'No Active configuration'}</div></div>
       </div><div class="detail-actions"><button class="btn btn-secondary" onclick="WorkDispatchPage.selectPage()">Select current page</button>
       <button class="btn btn-secondary" onclick="WorkDispatchPage.selectFirst()">Select first N…</button>
       <button id="dispatchPreviewBtn" class="btn btn-primary" onclick="WorkDispatchPage.preview()" disabled>Preview dispatch</button>
@@ -88,12 +115,9 @@ const WorkDispatchPage = {
 
   _groupsHtml() {
     const rows = Array.isArray(this._candidates) ? this._candidates : [];
-    return `<div class="card table-wrap"><table><thead><tr><th>Album</th><th>Workspace</th><th>Group</th><th>Runs</th><th>Review</th><th>Promotion</th><th>State</th><th>Traceability</th></tr></thead><tbody>
-      ${rows.map(item => `<tr><td><a href="#/albums/${item.album_id}">${esc(item.album_title)}</a></td><td><a href="#/ai-workspaces/${esc(item.workspace_uuid)}">${esc(item.workspace_uuid)}</a></td>
-        <td><a href="#/work-dispatch/groups/${esc(item.uuid)}">${esc(item.uuid)}</a></td><td>${item.item_count} total · ${item.active_item_count} active</td>
-        <td>${item.open_review_count} open</td><td>${item.promotion_count}</td><td><span class="chip ${item.group_state === 'Active' ? 'chip-warn' : 'chip-ok'}">${esc(item.group_state)}</span>${item.disposition ? ` · ${esc(item.disposition)}` : ''}</td>
-        <td>${item.closure_operation_uuid ? `<a href="#/operations/${esc(item.closure_operation_uuid)}">Operation</a>` : '—'}</td></tr>`).join('') || `<tr><td colspan="8">No ${esc(this._view)} Groups.</td></tr>`}
-      </tbody></table></div>`;
+    return rows.map(group => `<section class="card dispatch-group-card"><div class="dispatch-group-heading"><div><a href="#/albums/${group.album_id}"><strong>${esc(group.album_title)}</strong></a><div class="table-secondary"><a href="#/work-dispatch/groups/${esc(group.uuid)}">Group details</a> · Workspace <a href="#/ai-workspaces/${esc(group.workspace_uuid)}">${esc(group.workspace_uuid)}</a></div></div><span class="chip ${group.group_state === 'Active' ? 'chip-warn' : 'chip-ok'}">${esc(group.group_state)}</span></div>
+      <div class="table-wrap"><table class="work-progress"><thead><tr><th>Album</th><th>Configuration</th><th>Current stage</th><th>Attempts</th><th>Last activity</th><th>Failure</th><th>Details</th></tr></thead><tbody>${this._itemRows(group.items, group.album_title)}</tbody></table></div>
+      <div class="dispatch-group-footer">${group.item_count} runs · ${group.open_review_count} open reviews · ${group.promotion_count} promotions${group.closure_operation_uuid ? ` · <a href="#/operations/${esc(group.closure_operation_uuid)}">Operation</a>` : ''}</div></section>`).join('') || `<div class="card empty-state">No ${esc(this._view)} Groups.</div>`;
   },
 
   changeView(view) { this._view = view; this._selected = new Set(); void this.loadView(); },

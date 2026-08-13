@@ -27,6 +27,19 @@ assert.match(pageSource, /Status will not change/);
 assert.match(pageSource, /preview_token/);
 assert.match(pageSource, /configuration_uuids/);
 assert.match(pageSource, /view=\$\{this\._view\}/);
+assert.match(pageSource, /image_max_tokens/);
+assert.match(pageSource, /Preparing evidence \/ Vision analysis/);
+assert.match(pageSource, /Writer analysis/);
+assert.match(pageSource, /Waiting for Worker/);
+assert.match(pageSource, /Refresh progress/);
+
+const configHtml=page._configurationSummary({name:'Balanced',model_identifier:'qwen',model_file:'qwen.gguf',sample_count:8,
+  context_size:4096,max_tokens:800,image_max_tokens:384,temperature:0.2,threads:8,gpu_layers:20,
+  vision_prompt_version:'v1',writer_prompt_version:'w1'});
+assert.match(configHtml,/qwen\.gguf/);assert.match(configHtml,/context 4096/);assert.match(configHtml,/384/);
+assert.equal(page._stage({run_state:'Pending'}),'Waiting for Worker');
+assert.equal(page._stage({run_state:'Claimed',result_state:'AwaitingWriter'}),'Writer analysis');
+assert.equal(page._stage({run_state:'Completed',review_state:'ReadyForReview'}),'ReadyForReview');
 
 elements.set('dispatchSelectionCount', { textContent:'' });
 elements.set('dispatchPreviewBtn', { disabled:true });
