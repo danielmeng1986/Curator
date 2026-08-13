@@ -17,6 +17,7 @@ EXPECTED = {
     "client/apps-web/reader.md": ROOT / "apps" / "web" / "static" / "index.html",
     "client/apps-web/writer.md": ROOT / "apps" / "web" / "static" / "index.html",
     "client/apps-web/administrator.md": ROOT / "apps" / "web" / "static" / "index.html",
+    "worker/ai-worker.md": ROOT / "workers" / "ai_worker" / "README.md",
 }
 REQUIRED_SECTIONS = {
     "server/apps-backend.md": {
@@ -40,6 +41,11 @@ REQUIRED_SECTIONS = {
     "client/apps-web/administrator.md": {
         "purpose", "bootstrap", "authentication", "issue-admin", "backup",
         "ai-config", "ai-review", "risk", "checklist",
+    },
+    "worker/ai-worker.md": {
+        "purpose", "prerequisites", "source", "network", "access",
+        "configuration", "workflow", "lifecycle", "troubleshooting",
+        "security", "checklist",
     },
 }
 SECTION_RE = re.compile(r"<!--\s*manual-section:\s*([a-z0-9-]+)\s*-->")

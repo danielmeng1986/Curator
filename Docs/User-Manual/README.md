@@ -15,9 +15,12 @@ exclusion, safety rules, and release refresh process are defined in the
 | --- | --- | --- | --- |
 | `apps.backend` | Server | [English](en/server/apps-backend.md) | [简体中文](zh-CN/server/apps-backend.md) |
 | `apps.web` | Client | [English](en/client/apps-web/README.md) | [简体中文](zh-CN/client/apps-web/README.md) |
+| `workers.ai_worker` | External AI Worker | [English](en/worker/ai-worker.md) | [简体中文](zh-CN/worker/ai-worker.md) |
 
-Only supported `apps/` applications are listed. Developer scripts under
-`tools/` are not user-manual applications.
+Supported `apps/` applications and explicitly identified external Worker
+runtimes are listed. The AI Worker is a headless WSL2 API client with its own
+least-privilege Writer identity.
+Developer scripts under `tools/` are not user-manual applications.
 
 ## Milestone and release refresh
 

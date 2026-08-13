@@ -26,6 +26,8 @@ The manual audience includes:
 - Administrators performing authentication, authorization, review, recovery,
   and high-risk actions;
 - role-limited users who need to understand both available actions and expected denial.
+- operators preparing an external Worker host and managing its least-privilege
+  device identity, runtime, model, connectivity, and lifecycle.
 
 ## Application inclusion policy
 
@@ -38,10 +40,13 @@ surface is usable. Current applications are:
 | --- | --- | --- |
 | `apps.backend` | Server | Server operations manual |
 | `apps.web` | Client | Client overview plus Reader, Writer, and Admin guidance |
+| `workers.ai_worker` | External Worker | Worker deployment and operating manual |
 
 An application directory that contains only a future foundation, tests, or no
 supported entry point is listed as `Not yet documented` rather than described
-as usable.
+as usable. A preparation-only manual may be added for an approved external
+runtime when it prominently states the unsupported execution boundary and links
+the owning implementation task.
 
 ### Excluded by default
 
@@ -59,7 +64,7 @@ application workflow, not create a general Tools chapter.
 
 Current examples:
 
-- `python3 -m apps.backend auth bootstrap-code` for first-Admin initialization;
+- `python3 -m apps.backend auth create-bootstrap-code` for first-Admin initialization;
 - `python3 -m apps.backend.migrations` for explicit Backend schema maintenance;
 - the guarded historical Workspace archive command only when upgrading a
   database that actually requires it.
@@ -75,6 +80,8 @@ Docs/User-Manual/
 ├── en/
 │   ├── server/
 │   │   └── apps-backend.md
+│   ├── worker/
+│   │   └── ai-worker.md
 │   └── client/
 │       └── apps-web/
 │           ├── README.md
@@ -84,6 +91,8 @@ Docs/User-Manual/
 └── zh-CN/
     ├── server/
     │   └── apps-backend.md
+    ├── worker/
+    │   └── ai-worker.md
     └── client/
         └── apps-web/
             ├── README.md
@@ -94,6 +103,25 @@ Docs/User-Manual/
 
 Future Server and Client applications follow the same pattern. Slugs and file
 layout must match across locales so parity can be checked mechanically.
+
+## Required Worker manual structure
+
+Each external Worker manual contains, in this order where applicable:
+
+1. purpose, current support status, and strict Server/Client ownership boundary;
+2. supported host/runtime prerequisites and installation preparation;
+3. source/package preparation and local verification;
+4. trusted-LAN connectivity and firewall boundary;
+5. least-privilege device enrollment linked to shared credential concepts;
+6. configuration, Token, model, evidence, and temporary-data handling;
+7. claim, heartbeat, processing, submission, and failure lifecycle;
+8. start, graceful stop, restart, update, and service supervision;
+9. troubleshooting by observable symptom;
+10. security/data boundaries and verification checklist.
+
+If implementation lacks a supported entry point or enrollment path, the manual
+must say so before commands, omit invented operational steps, and link the
+owning task. Passing library tests is not evidence that deployment is supported.
 
 ## Required Server manual structure
 
