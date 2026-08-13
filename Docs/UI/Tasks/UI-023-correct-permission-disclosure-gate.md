@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-023` — Status: `Ready`
+`UI-023` — Status: `Complete`
 
 ## Title
 
@@ -64,3 +64,8 @@ plaintext credentials, hashes, private paths, or diagnostic secrets.
 
 - Do not solve this by deleting `registration_proof` from the forbidden list
   without adding value- and schema-aware assertions.
+
+## Completion Record
+
+- Added schema-aware Registration Proof metadata validation plus injected
+  plaintext/hash negative assertions; the focused disclosure suite passes.

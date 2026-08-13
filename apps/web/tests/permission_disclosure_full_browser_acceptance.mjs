@@ -41,14 +41,35 @@ async function rawRequest(page, path, { method = 'GET', authorization = null, bo
 
 function assertNoSecretFields(value, secrets = []) {
   const serialized = JSON.stringify(value);
-  for (const forbidden of ['token_hash', 'registration_proof', 'bootstrap_code', 'error_details']) {
+  for (const forbidden of ['token_hash', 'bootstrap_code', 'error_details']) {
     assert.equal(serialized.includes(`"${forbidden}"`), false, `response disclosed ${forbidden}`);
   }
+  const visit = candidate => {
+    if (!candidate || typeof candidate !== 'object') return;
+    for (const [key, item] of Object.entries(candidate)) {
+      if (key === 'registration_proof') {
+        assert.equal(typeof item, 'object', 'response disclosed plaintext registration_proof');
+        if (item) {
+          const permitted = new Set(['singleton', 'created_at', 'rotated_at', 'last_used_at', 'disabled_at', 'active']);
+          for (const metadataKey of Object.keys(item)) {
+            assert.equal(permitted.has(metadataKey), true, `registration_proof disclosed ${metadataKey}`);
+          }
+          assert.equal(Object.hasOwn(item, 'proof_hash'), false, 'registration_proof disclosed proof_hash');
+        }
+      }
+      visit(item);
+    }
+  };
+  visit(value);
   for (const secret of secrets.filter(Boolean)) {
     assert.equal(serialized.includes(secret), false, 'response disclosed a fixture credential');
   }
   assert.equal(serialized.includes('/private/'), false, 'response disclosed a private absolute path');
 }
+
+assertNoSecretFields({ data: { registration_proof: { singleton: 1, active: true, created_at: 'fixture' } } });
+assert.throws(() => assertNoSecretFields({ data: { registration_proof: 'plaintext-proof' } }), /plaintext registration_proof/);
+assert.throws(() => assertNoSecretFields({ data: { registration_proof: { active: true, proof_hash: 'hash' } } }), /proof_hash/);
 
 const browser = await chromium.launch({ headless: true });
 try {
