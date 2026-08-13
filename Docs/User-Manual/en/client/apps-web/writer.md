@@ -38,6 +38,11 @@ or direct photo deletion.
 Changing the batch invalidates the old Preview. Never execute a Preview for a different
 selection or after its source assumptions changed.
 
+The current Import batch and review state are saved in this browser profile.
+After navigation, refresh, or browser restart, reopen **Import** to continue.
+Use **Abandon saved Import** to remove it explicitly. A restored workflow never
+executes automatically; an expired or stale Preview must be generated again.
+
 <!-- manual-section: issues -->
 ## 4. Issues and Repair Cases
 

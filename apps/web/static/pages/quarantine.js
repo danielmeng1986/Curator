@@ -50,12 +50,12 @@ const QuarantinePage = {
   _showPreview(preview) {
     this._previewToken = preview.preview_token;
     const target = preview.managed_path || preview.managed_destination;
-    showModal(`<h3 id="modal-title" class="modal-title">Confirm ${esc(preview.action)} preview</h3>
+    ui.showReviewedAction(`<h3 id="modal-title" class="modal-title">Confirm ${esc(preview.action)} preview</h3>
       <p><strong>Managed path:</strong> <span class="path-mono">${esc(target)}</span></p>
       ${preview.file_count !== undefined ? `<p><strong>Files:</strong> ${preview.file_count}</p>` : ''}<p>${esc(preview.consequence)}</p>
       <p style="color:var(--ink-soft)">Preview ${esc(preview.preview_uuid)} expires ${esc(preview.expires_at)}.</p>
       <div class="modal-footer"><button class="btn btn-secondary" onclick="QuarantinePage.cancelPreview()">Cancel</button>
-        <button id="executeQuarantineBtn" class="btn btn-danger" onclick="QuarantinePage.executePreview(this)">Execute reviewed ${esc(preview.action)}</button></div>`);
+        <button id="executeQuarantineBtn" class="btn btn-danger" onclick="QuarantinePage.executePreview(this)">Execute reviewed ${esc(preview.action)}</button></div>`, { key:`quarantine-${preview.action}`, label:`Quarantine ${preview.action} review` });
   },
 
   cancelPreview() { this._previewToken = ''; closeModal(); },

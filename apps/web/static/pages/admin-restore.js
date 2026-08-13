@@ -21,11 +21,11 @@ const AdminRestorePage = {
     const result = await ui.runAction('preview-database-restore', () => api.post('/backups/restore/preview', { identity }), { trigger, context: 'review database Restore' });
     if (!result.ok) return;
     const preview = result.value.preview;
-    showModal(`<h3 id="modal-title" class="modal-title">Confirm Database Restore</h3>
+    ui.showReviewedAction(`<h3 id="modal-title" class="modal-title">Confirm Database Restore</h3>
       <div class="alert alert-warning">The active database will be replaced by <strong>${esc(preview.target.filename)}</strong>. Current browser data becomes stale.</div>
       <p>A protected pre-Restore recovery point will be created and verified before replacement. Success requires a post-Restore database integrity check.</p>
       <div class="form-field"><label for="restorePhrase">Type <strong>${esc(preview.confirmation_phrase)}</strong></label><input id="restorePhrase" autocomplete="off"></div>
-      <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button id="executeRestore" class="btn btn-danger" disabled>Restore reviewed database</button></div>`);
+      <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button id="executeRestore" class="btn btn-danger" disabled>Restore reviewed database</button></div>`, { key:'database-restore', label:'Database Restore review' });
     const input = document.getElementById('restorePhrase'); const execute = document.getElementById('executeRestore');
     input.oninput = () => { execute.disabled = input.value !== preview.confirmation_phrase; };
     execute.onclick = async () => {

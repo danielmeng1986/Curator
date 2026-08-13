@@ -10,7 +10,7 @@ const values=new Map([
   ['reviewRating',{value:'4'}],['reviewNotes',{value:'Useful composition analysis'}],['reviewReason',{value:'Needs another sample'}],
 ]);
 const context=vm.createContext({window:{location:{hash:''}},document:{getElementById:id=>values.get(id)||null},console,
-  api:{},ui:{},esc:value=>String(value),toast(){},showModal(){},closeModal(){},URLSearchParams,Number,Object,Array,Promise,encodeURIComponent});
+  api:{},ui:{saveDraft(){return true;},markDirty(){},clearDraft(){},clearDirty(){},loadDraft(){return null;}},esc:value=>String(value),toast(){},showModal(){},closeModal(){},URLSearchParams,Number,Object,Array,Promise,encodeURIComponent});
 vm.runInContext(`${source}\nthis.WorkspaceReviewPage=WorkspaceReviewPage;`,context,{filename:'workspace-review.js'});
 const page=context.WorkspaceReviewPage;
 

@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-026` — Status: `Ready`
+`UI-026` — Status: `Complete`
 
 ## Title
 
@@ -68,3 +68,8 @@ being silently discarded by Escape, overlay click, navigation, or refresh.
 
 - Not every zero-write Preview needs long-term persistence. The requirement is
   an explicit, safe, understandable lifecycle, not indefinite Token storage.
+
+## Completion Record
+
+- Added a shared non-dismissible reviewed-action surface and restart guidance
+  for Album batch, Quarantine, cleanup, Restore, Dispatch, and Promotion actions.

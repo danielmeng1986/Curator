@@ -1,6 +1,7 @@
 const WorkspaceReviewPage = {
   _detail: null,
   _draft: {},
+  _draftStale: false,
 
   async renderWorkspaces() {
     const el = document.getElementById('page-content');
@@ -76,6 +77,10 @@ const WorkspaceReviewPage = {
     const d = this._detail; const review = d.review; const writer = this._writer(); const vision = this._vision();
     const recommendations = writer?.payload?.suggested_names || [];
     const evidence = d.evidence_history?.evidence || [];
+    const key=this._draftKey(review.work_item_uuid); const saved=ui.loadDraft(key);
+    if(!this._draft[review.work_item_uuid]&&saved){this._draft[review.work_item_uuid]=saved.data;this._draftStale=saved.metadata?.reviewVersion!==review.version;ui.markDirty(key,'this AI Review',()=>ui.clearDraft(key));toast(this._draftStale?'Restored an AI Review draft created before the current review state changed.':'Restored the AI Review draft saved in this browser.','warning');}
+    else if(!saved){this._draftStale=false;}
+    else if(saved.metadata?.reviewVersion===review.version){this._draftStale=false;}
     const draft = this._draft[review.work_item_uuid] || { selected_name:review.selected_name || recommendations[0] || '', selection_source:'Recommendation', rating:review.rating || 5, notes:review.notes || '', reason:'' };
     this._draft[review.work_item_uuid] = draft;
     const el = document.getElementById('page-content');
@@ -86,13 +91,14 @@ const WorkspaceReviewPage = {
         <p><strong>Summary:</strong> ${esc(writer?.payload?.album_summary || '—')}</p><p><strong>Description:</strong> ${esc(writer?.payload?.description || '—')}</p>
         <div><strong>AI recommendations:</strong>${recommendations.map(name => `<label class="recommendation"><input type="radio" name="recommendedName" value="${esc(name)}" ${draft.selected_name === name ? 'checked' : ''} onchange="WorkspaceReviewPage.chooseRecommendation(this.value)"> ${esc(name)}</label>`).join('')}</div></section>
       <section class="card review-panel human-decision"><div class="form-section-title">Human review · editable draft</div>
+        ${this._draftStale?'<div class="alert alert-warning">This local draft predates the current Backend review state. Rebase it deliberately before submitting.<div class="detail-actions"><button class="btn btn-secondary" onclick="WorkspaceReviewPage.discardDraft()">Discard local draft</button><button class="btn btn-primary" onclick="WorkspaceReviewPage.rebaseDraft()">Keep text and rebase</button></div></div>':''}
         <div class="form-field"><label for="reviewSelectedName">Final Album name</label><input id="reviewSelectedName" value="${esc(draft.selected_name)}" oninput="WorkspaceReviewPage.saveDraft()"></div>
         <div class="form-field"><label for="reviewSelectionSource">Selection source</label><select id="reviewSelectionSource" onchange="WorkspaceReviewPage.saveDraft()"><option ${draft.selection_source === 'Recommendation' ? 'selected' : ''}>Recommendation</option><option ${draft.selection_source === 'HumanRevision' ? 'selected' : ''}>HumanRevision</option></select></div>
         <div class="form-field"><label for="reviewRating">Rating (1–5)</label><input id="reviewRating" type="number" min="1" max="5" value="${draft.rating}" oninput="WorkspaceReviewPage.saveDraft()"></div>
         <div class="form-field"><label for="reviewNotes">Administrator evaluation</label><textarea id="reviewNotes" oninput="WorkspaceReviewPage.saveDraft()">${esc(draft.notes)}</textarea></div>
         <div class="form-field"><label for="reviewReason">Reason (required for Reject/Rework)</label><textarea id="reviewReason" oninput="WorkspaceReviewPage.saveDraft()">${esc(draft.reason)}</textarea></div>
         <div class="detail-actions">${review.allowed_actions.includes('start') ? `<button class="btn btn-primary" onclick="WorkspaceReviewPage.startReview(this)">Begin review</button>` : ''}
-        ${review.allowed_actions.includes('approve') ? '<button class="btn btn-primary" onclick="WorkspaceReviewPage.decide(\'approve\',this)">Approve selection</button><button class="btn btn-danger" onclick="WorkspaceReviewPage.decide(\'reject\',this)">Reject</button><button class="btn btn-secondary" onclick="WorkspaceReviewPage.decide(\'request_rework\',this)">Request rework</button>' : ''}
+        ${review.allowed_actions.includes('approve') ? `<button class="btn btn-primary" ${this._draftStale?'disabled':''} onclick="WorkspaceReviewPage.decide('approve',this)">Approve selection</button><button class="btn btn-danger" ${this._draftStale?'disabled':''} onclick="WorkspaceReviewPage.decide('reject',this)">Reject</button><button class="btn btn-secondary" ${this._draftStale?'disabled':''} onclick="WorkspaceReviewPage.decide('request_rework',this)">Request rework</button>` : ''}
         ${review.state === 'Approved' && !d.promotions.some(item => item.outcome === 'Promoted') ? '<button class="btn btn-danger" onclick="WorkspaceReviewPage.previewPromotion(this)">Review Promotion</button>' : ''}</div></section></div>
       <section class="card review-panel system-evidence"><div class="form-section-title">System evidence and provenance</div>
         <p>Work Item: <code>${esc(review.work_item_uuid)}</code> · Group: <a href="#/work-dispatch/groups/${esc(d.group_uuid)}">${esc(d.group_uuid || '—')}</a></p>
@@ -102,22 +108,26 @@ const WorkspaceReviewPage = {
   },
 
   chooseRecommendation(value) { const input = document.getElementById('reviewSelectedName'); input.value = value; document.getElementById('reviewSelectionSource').value = 'Recommendation'; this.saveDraft(); },
+  _draftKey(uuid){return `ai-review.${uuid}`;},
   saveDraft() {
     if (!this._detail) return; const uuid = this._detail.review.work_item_uuid;
     this._draft[uuid] = { selected_name:document.getElementById('reviewSelectedName')?.value || '', selection_source:document.getElementById('reviewSelectionSource')?.value || 'Recommendation', rating:Number(document.getElementById('reviewRating')?.value || 0), notes:document.getElementById('reviewNotes')?.value || '', reason:document.getElementById('reviewReason')?.value || '' };
+    ui.saveDraft(this._draftKey(uuid),this._draft[uuid],{reviewVersion:this._detail.review.version});ui.markDirty(this._draftKey(uuid),'this AI Review',()=>ui.clearDraft(this._draftKey(uuid)));
   },
-  async startReview(trigger) { const r=this._detail.review; const result=await ui.runAction('review-start',()=>api.post(`/ai-work-items/${r.work_item_uuid}/review/start`,{expected_version:r.version}),{trigger,context:'begin AI review'}); if(result.ok){this._detail=result.value.review;this._renderDetail();} },
+  rebaseDraft(){this._draftStale=false;this.saveDraft();this._renderDetail();},
+  discardDraft(){const uuid=this._detail.review.work_item_uuid;delete this._draft[uuid];this._draftStale=false;ui.clearDraft(this._draftKey(uuid));ui.clearDirty();this._renderDetail();},
+  async startReview(trigger) { const r=this._detail.review; const result=await ui.runAction('review-start',()=>api.post(`/ai-work-items/${r.work_item_uuid}/review/start`,{expected_version:r.version}),{trigger,context:'begin AI review'}); if(result.ok){this._detail=result.value.review;this.saveDraft();this._renderDetail();} },
   async decide(action,trigger) {
     this.saveDraft(); const r=this._detail.review; const draft=this._draft[r.work_item_uuid];
     const body={expected_version:r.version,action,rating:draft.rating,notes:draft.notes,reason:draft.reason};
     if(action==='approve') Object.assign(body,{selected_name:draft.selected_name,selection_source:draft.selection_source});
     const result=await ui.runAction(`review-${action}`,()=>api.post(`/ai-work-items/${r.work_item_uuid}/review/decision`,body),{trigger,context:`${action} AI review`});
-    if(result.ok){this._detail=result.value.review;this._renderDetail();}
+    if(result.ok){delete this._draft[r.work_item_uuid];ui.clearDraft(this._draftKey(r.work_item_uuid));ui.clearDirty();this._draftStale=false;this._detail=result.value.review;this._renderDetail();}
   },
   async previewPromotion(trigger) {
     const uuid=this._detail.review.work_item_uuid; const result=await ui.runAction('promotion-preview',()=>api.post(`/ai-work-items/${uuid}/promotion/preview`,{}),{trigger,context:'preview Album name Promotion'}); if(!result.ok)return;
-    const preview=result.value.preview; showModal(`<h3 id="modal-title" class="modal-title">Confirm Album Name Promotion</h3><p>Current: <strong>${esc(preview.current.title)}</strong></p><p>Result: <strong>${esc(preview.resulting.title)}</strong> · Status ${esc(preview.resulting.status_name || preview.resulting.status_id)}</p>
-      <div class="form-field"><label for="promotionConfirmation">Type the exact selected name</label><input id="promotionConfirmation"></div><div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button id="executePromotionBtn" class="btn btn-danger" onclick="WorkspaceReviewPage.executePromotion('${esc(preview.preview_token)}',this)">Promote reviewed name</button></div>`);
+    const preview=result.value.preview; ui.showReviewedAction(`<h3 id="modal-title" class="modal-title">Confirm Album Name Promotion</h3><p>Current: <strong>${esc(preview.current.title)}</strong></p><p>Result: <strong>${esc(preview.resulting.title)}</strong> · Status ${esc(preview.resulting.status_name || preview.resulting.status_id)}</p>
+      <div class="form-field"><label for="promotionConfirmation">Type the exact selected name</label><input id="promotionConfirmation"></div><div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button id="executePromotionBtn" class="btn btn-danger" onclick="WorkspaceReviewPage.executePromotion('${esc(preview.preview_token)}',this)">Promote reviewed name</button></div>`, { key:`ai-promotion-${uuid}`, label:'Album name Promotion review' });
   },
   async executePromotion(token,trigger) { const confirmation=document.getElementById('promotionConfirmation').value; const result=await ui.runAction('promotion-execute',()=>api.post('/ai-promotions/execute',{preview_token:token,confirmation}),{trigger,context:'promote Album name'}); if(result.ok){closeModal();toast('Album name Promotion completed.');await this.renderDetail({uuid:this._detail.review.work_item_uuid});} },
 };

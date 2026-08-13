@@ -106,6 +106,9 @@ recommended names, model configuration, and exact sampled photo evidence before 
 Promotion is separate: choose exactly one approved candidate or a valid human-edited
 name for an Album, preview it, and execute once. Only one promoted `album_name` can win,
 even when several model configurations analyzed the Album. Review Operation/Issue output.
+Human Review fields are saved as a browser-profile draft. Refresh or restart
+restores a compatible draft. If the Backend review version changed, Curator
+requires **Keep text and rebase** or **Discard local draft** before submission.
 Release completed Groups, then close/archive a Workspace only after its active work and
 retention requirements permit it. Do not purge audit evidence to tidy the queue.
 

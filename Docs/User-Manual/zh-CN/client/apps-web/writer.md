@@ -33,6 +33,10 @@ Album 是资产管理单位。本客户端不提供通用照片浏览或直接�
 
 修改批次会使旧 Preview 失效。绝不能对不同选择或来源假设已变化的内容执行旧 Preview。
 
+当前 Import 批次与审核状态保存在此浏览器配置文件中。导航、刷新或浏览器重启后，
+重新打开 **Import** 即可继续。使用 **Abandon saved Import** 可明确删除草稿。恢复的
+流程绝不会自动 Execute；过期或陈旧 Preview 必须重新生成。
+
 <!-- manual-section: issues -->
 ## 4. Issues 与 Repair Cases
 

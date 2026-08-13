@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-024` — Status: `Ready`
+`UI-024` — Status: `Complete`
 
 ## Title
 
@@ -66,3 +66,8 @@ Album, Model, Studio, and Status management.
 
 - Draft restoration must compare entity identity and Backend version to avoid
   silently applying old input over newer durable data.
+
+## Completion Record
+
+- Added versioned Album, Model, Studio, and Status drafts, guarded navigation,
+  compatible restore/stale discard, save cleanup, and URL-backed Model/Studio context.

@@ -10,6 +10,9 @@ const StudiosPage = {
     btn.classList.remove('hidden');
     btn.onclick = () => navigate('#/studios/new');
 
+    const query = new URLSearchParams((window.location.hash.split('?')[1] || ''));
+    this._listState.q = query.get('q') || '';
+    this._listState.offset = Math.max(0, Number(query.get('offset') || 0));
     await this._loadList(el);
   },
 
@@ -57,13 +60,14 @@ const StudiosPage = {
     let debounce;
     document.getElementById('studioQ').addEventListener('input', e => {
       clearTimeout(debounce);
-      debounce = setTimeout(() => { this._listState.q = e.target.value; this._listState.offset = 0; this._loadList(el); }, 350);
+      debounce = setTimeout(() => { this._listState.q = e.target.value; this._listState.offset = 0; this._syncListHash(); this._loadList(el); }, 350);
     });
   },
 
-  _applyFilter() { this._listState.offset = 0; this._loadList(document.getElementById('page-content')); },
-  _prevPage() { this._listState.offset = Math.max(0, this._listState.offset - this._listState.limit); this._loadList(document.getElementById('page-content')); },
-  _nextPage() { this._listState.offset += this._listState.limit; this._loadList(document.getElementById('page-content')); },
+  _syncListHash() { const q = new URLSearchParams(); if (this._listState.q) q.set('q', this._listState.q); if (this._listState.offset) q.set('offset', this._listState.offset); history.replaceState(null, '', `#/studios${q.size ? `?${q}` : ''}`); },
+  _applyFilter() { this._listState.offset = 0; this._syncListHash(); this._loadList(document.getElementById('page-content')); },
+  _prevPage() { this._listState.offset = Math.max(0, this._listState.offset - this._listState.limit); this._syncListHash(); this._loadList(document.getElementById('page-content')); },
+  _nextPage() { this._listState.offset += this._listState.limit; this._syncListHash(); this._loadList(document.getElementById('page-content')); },
 
   async renderDetail({ id }) {
     const el = document.getElementById('page-content');
@@ -149,9 +153,19 @@ const StudiosPage = {
           </div>
         </div>` : ''}
       `;
+      this._bindDraft(id, studio?.updated_at || null);
     } catch (e) {
       ui.renderPageError(el, e, 'this Studio');
     }
+  },
+
+  _draftKey(id = null) { return `entity.studio.${id || 'new'}`; },
+  _draftBody() { return { name:fName.value, scope:fScope.value, website:fWebsite.value, description:fDescription.value }; },
+  _bindDraft(id, updatedAt) {
+    const key=this._draftKey(id); const saved=ui.loadDraft(key);
+    if(saved && (!updatedAt || saved.metadata?.updatedAt===updatedAt)) { const d=saved.data;fName.value=d.name||'';fScope.value=d.scope||'p';fWebsite.value=d.website||'';fDescription.value=d.description||'';ui.markDirty(key,'this Studio',()=>ui.clearDraft(key));toast('Restored the Studio draft saved in this browser.','warning'); }
+    else if(saved){ui.clearDraft(key);toast('An older Studio draft was discarded because the record changed.','warning');}
+    document.querySelector('.card').addEventListener('input',()=>{ui.saveDraft(key,this._draftBody(),{updatedAt});ui.markDirty(key,'this Studio',()=>ui.clearDraft(key));});
   },
 
   async _save() {
@@ -168,9 +182,11 @@ const StudiosPage = {
       const m = hash.match(/#\/studios\/(\d+)$/);
       if (m) {
         await api.put(`/studios/${m[1]}`, body);
+        ui.clearDraft(this._draftKey(m[1])); ui.clearDirty();
         toast('Studio saved');
       } else {
         const res = await api.post('/studios', body);
+        ui.clearDraft(this._draftKey()); ui.clearDirty();
         toast('Studio created');
         navigate(`#/studios/${res.id}`);
       }

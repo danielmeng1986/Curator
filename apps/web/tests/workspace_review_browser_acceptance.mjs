@@ -37,8 +37,11 @@ try{
   const promotionHistory=await admin({path:`/ai-work-items/${items[0]}/promotion`});assert.equal(promotionHistory.payload.data.promotion_history.items.length,1);
 
   await openReview(page,items[1]);await page.getByRole('button',{name:'Begin review'}).click();await page.getByLabel('Administrator evaluation').fill('Retain this local stale draft');await page.getByLabel(/Reason/).fill('The proposed naming is not suitable');
+  page.once('dialog',dialog=>dialog.accept());await page.reload();await page.getByLabel('Administrator evaluation').waitFor();assert.equal(await page.getByLabel('Administrator evaluation').inputValue(),'Retain this local stale draft');
+  const initialRebase=page.getByRole('button',{name:'Keep text and rebase'});if(await initialRebase.count())await initialRebase.click();
   const concurrent=await admin({path:`/ai-work-items/${items[1]}/review/decision`,method:'POST',body:{expected_version:2,action:'reject',reason:'Concurrent administrator rejection'}});assert.equal(concurrent.status,200);
   await page.getByRole('button',{name:'Reject',exact:true}).click();await page.getByText(/The action conflicts with current state/).waitFor();assert.equal(await page.getByLabel('Administrator evaluation').inputValue(),'Retain this local stale draft');
+  page.once('dialog',dialog=>dialog.accept());await page.reload();await page.getByText(/local draft predates the current Backend review state/).waitFor();assert.equal(await page.getByLabel('Administrator evaluation').inputValue(),'Retain this local stale draft');await page.getByRole('button',{name:'Discard local draft'}).click();
   const rejectedAlbum=await admin({path:'/albums/2'});assert.equal(rejectedAlbum.payload.data.album.title,'AI Fixture Album 2');assert.equal(rejectedAlbum.payload.data.album.status_name,'TEMPORARY');
 
   await openReview(page,items[2]);await page.getByRole('button',{name:'Begin review'}).click();await page.getByLabel(/Reason/).fill('Use a different sample and retry');await page.getByRole('button',{name:'Request rework'}).click();await page.getByText('ReworkRequested',{exact:true}).waitFor();

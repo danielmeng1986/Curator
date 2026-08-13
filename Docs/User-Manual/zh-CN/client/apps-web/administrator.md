@@ -96,6 +96,9 @@ release/closure 后才恢复可派发资格。
 
 Promotion 独立执行：为 Album 选择恰好一个获批候选或有效人工修订名，Preview 后执行一次。
 即使多个模型配置分析过 Album，也只能有一个最终 `album_name`。检查 Operation/Issue 输出。
+人工 Review 字段会保存为浏览器配置文件草稿。刷新或重启会恢复兼容草稿。如果 Backend
+审核版本已经变化，Curator 会要求先选择 **Keep text and rebase** 或
+**Discard local draft**，之后才能提交。
 释放已完成 Group，并仅在无活动工作且满足保留规则时关闭/归档 Workspace。不要为了清理队列
 而 purge 审计证据。
 

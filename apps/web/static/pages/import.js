@@ -1,4 +1,5 @@
 const ImportPage = {
+  _draftKey: 'workflow.import.current',
   _step: 1,
   _items: [],
   _previews: [],
@@ -11,7 +12,7 @@ const ImportPage = {
   _operationUuid: '',
   _executionSummary: null,
 
-  async render() {
+  async render({ reset = false } = {}) {
     const el = document.getElementById('page-content');
     document.getElementById('pageActionBtn').classList.add('hidden');
     try {
@@ -20,16 +21,24 @@ const ImportPage = {
       ui.renderPageError(el, error, 'Import');
       return;
     }
-    this._step = 1;
-    this._items = [];
-    this._previews = [];
-    this._results = [];
-    this._importAction = 'COPY';
-    this._previewToken = '';
-    this._operationUuid = '';
-    this._executionSummary = null;
+    if (reset) ui.clearDraft(this._draftKey);
+    const saved = reset ? null : ui.loadDraft(this._draftKey);
+    this._step = saved?.data?.step || 1;
+    this._items = saved?.data?.items || [];
+    this._previews = saved?.data?.previews || [];
+    this._results = saved?.data?.results || [];
+    this._importAction = saved?.data?.importAction || 'COPY';
+    this._previewToken = saved?.data?.previewToken || '';
+    this._previewUuid = saved?.data?.previewUuid || '';
+    this._previewExpiresAt = saved?.data?.previewExpiresAt || '';
+    this._operationUuid = saved?.data?.operationUuid || '';
+    this._executionSummary = saved?.data?.executionSummary || null;
+    if (saved) toast('Restored the Import workflow saved in this browser.', 'warning');
     this._renderStep(el);
   },
+
+  _saveState() { ui.saveDraft(this._draftKey,{step:this._step,items:this._items,previews:this._previews,results:this._results,importAction:this._importAction,previewToken:this._previewToken,previewUuid:this._previewUuid,previewExpiresAt:this._previewExpiresAt,operationUuid:this._operationUuid,executionSummary:this._executionSummary}); },
+  async _abandon() { if(!await confirmDialog({title:'Abandon Import draft?',message:'The saved batch and reviewed choices will be removed from this browser. No Import will be executed.',confirmLabel:'Abandon draft'}))return;ui.clearDraft(this._draftKey);await this.render({reset:true}); },
 
   _renderStep(el = document.getElementById('page-content')) {
     el.innerHTML = `
@@ -39,6 +48,7 @@ const ImportPage = {
           <div class="wizard-step ${this._step === i + 1 ? 'active' : this._step > i + 1 ? 'done' : ''}">${s}</div>
         `).join('')}
       </div>
+      ${(this._items.length||this._results.length)?'<div style="text-align:right;margin-bottom:10px"><button class="btn btn-secondary btn-sm" onclick="ImportPage._abandon()">Abandon saved Import</button></div>':''}
       <div id="stepContent"></div>`;
     const sc = document.getElementById('stepContent');
     ({ 1: this._renderStep1, 2: this._renderStep2, 3: this._renderStep3,
@@ -99,6 +109,7 @@ const ImportPage = {
 
   _setAction(value) {
     this._importAction = value;
+    this._saveState();
     const help = document.getElementById('iActionHelp');
     if (help) help.textContent = this._actionDescription();
   },
@@ -116,19 +127,21 @@ const ImportPage = {
       studio_name: document.getElementById('iStudio')?.value?.trim() || this._config?.default_import_studio || 'MetArt',
       model_name, album_name,
     });
+    this._saveState();
     this._renderStep();
   },
 
-  _removeItem(i) { this._items.splice(i, 1); this._renderStep(); },
+  _removeItem(i) { this._items.splice(i, 1); this._saveState(); this._renderStep(); },
 
   async _requestPreview(items = this._items) {
     if (!items.length) { toast('Select at least one valid item', 'error'); return false; }
     this._step = 2;
+    this._saveState();
     this._renderStep();
     const result = await ui.runAction('import-preview', () => api.post('/import/preview', {
       items, import_action: this._importAction,
     }), { context: 'preview the Import' });
-    if (!result.ok) { this._step = 1; this._renderStep(); return false; }
+    if (!result.ok) { this._step = 1; this._saveState(); this._renderStep(); return false; }
     const preview = result.value.preview;
     this._items = items;
     this._previews = (preview.items || []).map((item, index) => ({ ...item, selected: Boolean(item.can_import), sourceIndex: index }));
@@ -136,6 +149,7 @@ const ImportPage = {
     this._previewUuid = preview.preview_uuid || '';
     this._previewExpiresAt = preview.expires_at || '';
     this._step = 3;
+    this._saveState();
     this._renderStep();
     return true;
   },
@@ -185,8 +199,8 @@ const ImportPage = {
       </div>`;
   },
 
-  _togglePreview(index, selected) { this._previews[index].selected = selected; this._renderStep(); },
-  _backToStep1() { this._step = 1; this._previewToken = ''; this._renderStep(); },
+  _togglePreview(index, selected) { this._previews[index].selected = selected; this._saveState(); this._renderStep(); },
+  _backToStep1() { this._step = 1; this._previewToken = ''; this._saveState(); this._renderStep(); },
 
   async _reviewSelection() {
     const selectedIndexes = this._previews.filter(item => item.can_import && item.selected).map(item => item.sourceIndex);
@@ -196,6 +210,7 @@ const ImportPage = {
       if (!await this._requestPreview(selectedItems)) return;
     }
     this._step = 4;
+    this._saveState();
     this._renderStep();
   },
 
@@ -216,7 +231,7 @@ const ImportPage = {
       </div>`;
   },
 
-  _goStep3() { this._step = 3; this._renderStep(); },
+  _goStep3() { this._step = 3; this._saveState(); this._renderStep(); },
 
   async _executeImport(trigger) {
     const result = await ui.runAction('import-execute', () => api.post('/import/execute', {
@@ -228,6 +243,7 @@ const ImportPage = {
     this._operationUuid = result.value.operation_uuid || '';
     this._previewToken = '';
     this._step = 5;
+    this._saveState();
     this._renderStep();
   },
 
@@ -253,7 +269,7 @@ const ImportPage = {
         <th>#</th><th>Model</th><th>Studio</th><th>Album</th><th>Record</th><th>Action</th><th>Durable outcome</th>
       </tr></thead><tbody>${rows}</tbody></table></div>
       ${summary.needs_repair ? '<p class="alert alert-warning">One or more records were created but their filesystem work needs repair. Review the Operation; this UI has not attempted a repair.</p>' : ''}
-      <div style="display:flex;gap:10px"><button class="btn btn-secondary" onclick="ImportPage.render()">Start New Import</button>
+      <div style="display:flex;gap:10px"><button class="btn btn-secondary" onclick="ImportPage.render({reset:true})">Start New Import</button>
         ${this._operationUuid ? `<a href="#/operations/${esc(this._operationUuid)}" class="btn btn-primary">View Operation</a>` : '<a href="#/albums" class="btn btn-primary">View Albums</a>'}
       </div>`;
   },

@@ -127,13 +127,13 @@ const WorkDispatchPage = {
     if (!result.ok) return;
     this._preview = result.value.preview;
     const preview = this._preview;
-    showModal(`<h3 id="modal-title" class="modal-title">Confirm Album Work Dispatch</h3>
+    ui.showReviewedAction(`<h3 id="modal-title" class="modal-title">Confirm Album Work Dispatch</h3>
       <div class="stats-grid"><div class="stat-card"><div class="stat-number">${preview.summary.albums}</div><div class="stat-label">Albums / Groups</div></div>
       <div class="stat-card"><div class="stat-number">${preview.summary.work_items}</div><div class="stat-label">Work Items</div></div></div>
       <p>Each Album receives one exclusive Group and reservation. Its Status will not change.</p>
       <ul>${preview.items.map(item => `<li>${esc(item.title)} — ${esc(item.eligibility)} ${(item.warnings || []).map(esc).join(', ')}</li>`).join('')}</ul>
       <label class="acknowledgement"><input id="dispatchAcknowledge" type="checkbox" onchange="document.getElementById('executeDispatchBtn').disabled=!this.checked"> I reviewed this zero-write preview.</label>
-      <div class="modal-footer"><button class="btn btn-secondary" onclick="WorkDispatchPage.cancelPreview()">Cancel</button><button id="executeDispatchBtn" class="btn btn-danger" disabled onclick="WorkDispatchPage.execute(this)">Dispatch reviewed Albums</button></div>`);
+      <div class="modal-footer"><button class="btn btn-secondary" onclick="WorkDispatchPage.cancelPreview()">Cancel</button><button id="executeDispatchBtn" class="btn btn-danger" disabled onclick="WorkDispatchPage.execute(this)">Dispatch reviewed Albums</button></div>`, { key:'work-dispatch', label:'Album Work Dispatch review' });
   },
   cancelPreview() { this._preview = null; closeModal(); },
   async execute(trigger) {

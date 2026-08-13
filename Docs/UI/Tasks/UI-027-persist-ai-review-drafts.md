@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-027` — Status: `Ready`
+`UI-027` — Status: `Complete`
 
 ## Title
 
@@ -67,3 +67,8 @@ decision reason from disappearing on refresh or browser restart.
 
 - Human notes may be sensitive; storage must be local, bounded, and cleared by
   documented lifecycle rules.
+
+## Completion Record
+
+- Added per-Work-Item/version browser drafts, compatible restore, stale warning,
+  explicit rebase/discard, terminal cleanup, and browser acceptance.

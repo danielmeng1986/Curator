@@ -59,6 +59,11 @@ Promotion 与 Album status 分离。
 - 结果不确定或部分失败时，重试前查看 **Operations** 和关联 **Issues**；结果页面
   才是依据，按钮动画不是。
 - 导航会取消过时的列表刷新；返回页面可请求新数据。
+- 实体表单和 AI Review 会在此浏览器配置文件中保存带版本的草稿。刷新或重启会恢复
+  兼容草稿；完成后应保存或明确丢弃。Import 同样会恢复批次，并提供
+  **Abandon saved Import**。
+- 重要审核对话框不会响应 Escape 或遮罩点击，请使用可见的 Cancel 操作。浏览器中断后，
+  应按提示重新打开来源操作并生成新 Preview。
 
 <!-- manual-section: safety -->
 ## 6. 安全与故障排查

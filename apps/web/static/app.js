@@ -34,7 +34,7 @@ const ROUTES = [
 ];
 
 function navigate(hash) {
-  window.location.hash = hash;
+  void ui.confirmNavigation(() => { window.location.hash = hash; });
 }
 
 function route() {
@@ -144,8 +144,8 @@ function toast(msg, type = 'ok', duration = 3500) {
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
-function showModal(html) {
-  return ui.showModal(html);
+function showModal(html, options) {
+  return ui.showModal(html, options);
 }
 
 function closeModal() {
@@ -426,6 +426,17 @@ document.getElementById('globalSearch').addEventListener('keydown', e => {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 window.addEventListener('hashchange', route);
+window.addEventListener('beforeunload', event => {
+  if (!ui.hasUnsavedChanges()) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+document.addEventListener('click', event => {
+  const link = event.target.closest?.('a[href^="#/"]');
+  if (!link || !ui.hasUnsavedChanges()) return;
+  event.preventDefault();
+  void ui.confirmNavigation(() => { window.location.hash = link.getAttribute('href'); });
+});
 window.addEventListener('load', () => {
   document.getElementById('connectionBtn').onclick = openConnectionSettings;
   refreshConnectionButton();
@@ -433,4 +444,5 @@ window.addEventListener('load', () => {
   void refreshPrincipal().then(route);
   checkHealth();
   setInterval(checkHealth, 60000);
+  ui.recoverInterruptedReview();
 });

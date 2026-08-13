@@ -43,12 +43,12 @@ const AdminBackupsPage = {
     const result = await ui.runAction('preview-snapshot-cleanup', () => api.post('/backups/cleanup/preview', {}), { context: 'review retention cleanup' });
     if (!result.ok) return;
     const preview = result.value.preview;
-    showModal(`<h3 id="modal-title" class="modal-title">Review retention cleanup</h3>
+    ui.showReviewedAction(`<h3 id="modal-title" class="modal-title">Review retention cleanup</h3>
       <p><strong>${preview.summary.eligible}</strong> expired, unprotected recovery point(s) are eligible.</p>
       <ul>${preview.items.map(item => `<li>${esc(item.filename)} — ${esc(item.created_at || 'unknown')}</li>`).join('') || '<li>Nothing will be deleted.</li>'}</ul>
       <p>Only the reviewed identities above can be removed. This preview expires and can be used once.</p>
       <div class="form-field"><label for="cleanupPhrase">Type <strong>CLEANUP</strong> to continue</label><input id="cleanupPhrase" autocomplete="off"></div>
-      <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button id="executeCleanup" class="btn btn-danger" disabled>Execute reviewed cleanup</button></div>`);
+      <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button id="executeCleanup" class="btn btn-danger" disabled>Execute reviewed cleanup</button></div>`, { key:'backup-retention-cleanup', label:'Retention cleanup review' });
     const input = document.getElementById('cleanupPhrase'); const button = document.getElementById('executeCleanup');
     input.oninput = () => { button.disabled = input.value !== 'CLEANUP'; };
     button.onclick = async () => {

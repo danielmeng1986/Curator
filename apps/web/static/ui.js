@@ -1,6 +1,10 @@
 /* Shared interaction contract for permission, error, feedback, and modal states. */
 (function () {
   const activeActions = new Set();
+  const DRAFT_PREFIX = 'curator.web.draft.v1.';
+  let dirtyContext = null;
+  const REVIEW_KEY = 'curator.web.interruptedReview.v1';
+  let activeReview = null;
   let returnFocus = null;
   let modalKeyHandler = null;
 
@@ -92,6 +96,10 @@
     const target = returnFocus;
     returnFocus = null;
     target?.focus?.();
+    if (activeReview) {
+      try { window.localStorage.removeItem(REVIEW_KEY); } catch { /* no fallback */ }
+      activeReview = null;
+    }
   }
 
   function showModal(html, { dismissible = true } = {}) {
@@ -118,6 +126,20 @@
     document.addEventListener('keydown', modalKeyHandler);
     const initial = box.querySelector('[autofocus], button, input, select, textarea, [href]');
     (initial || box).focus?.();
+  }
+
+  function showReviewedAction(html, { key, label }) {
+    activeReview = { key, label, sourceHash: window.location.hash, savedAt: new Date().toISOString() };
+    try { window.localStorage.setItem(REVIEW_KEY, JSON.stringify(activeReview)); } catch { /* restart guidance unavailable */ }
+    showModal(html, { dismissible: false });
+  }
+
+  function recoverInterruptedReview() {
+    let saved = null;
+    try { saved = JSON.parse(window.localStorage.getItem(REVIEW_KEY) || 'null'); window.localStorage.removeItem(REVIEW_KEY); } catch { /* ignore invalid state */ }
+    if (!saved?.label) return null;
+    toast(`${saved.label} was interrupted before execution. Open it again to generate a fresh review.`, 'warning', 7000);
+    return saved;
   }
 
   function confirmDialog(messageOrOptions) {
@@ -160,6 +182,43 @@
     }
   }
 
+  function saveDraft(key, data, metadata = {}) {
+    try {
+      window.localStorage.setItem(`${DRAFT_PREFIX}${key}`, JSON.stringify({ version: 1, savedAt: new Date().toISOString(), metadata, data }));
+      return true;
+    } catch { return false; }
+  }
+
+  function loadDraft(key) {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(`${DRAFT_PREFIX}${key}`) || 'null');
+      return saved?.version === 1 && saved.data && typeof saved.data === 'object' ? saved : null;
+    } catch { return null; }
+  }
+
+  function clearDraft(key) {
+    try { window.localStorage.removeItem(`${DRAFT_PREFIX}${key}`); } catch { /* no fallback */ }
+    if (dirtyContext?.key === key) dirtyContext = null;
+  }
+
+  function markDirty(key, label, discard) { dirtyContext = { key, label, discard }; }
+  function clearDirty(key = null) { if (!key || dirtyContext?.key === key) dirtyContext = null; }
+  function hasUnsavedChanges() { return Boolean(dirtyContext); }
+
+  async function confirmNavigation(continueNavigation) {
+    if (!dirtyContext) { continueNavigation(); return true; }
+    const current = dirtyContext;
+    const discard = await confirmDialog({
+      title: `Leave ${current.label || 'this draft'}?`,
+      message: 'Your draft is saved in this browser. Leave now and continue it later?',
+      confirmLabel: 'Leave and keep draft', danger: false,
+    });
+    if (!discard) return false;
+    clearDirty(current.key);
+    continueNavigation();
+    return true;
+  }
+
   function can(role, requiredScope) {
     return Boolean(ROLE_SCOPES[role]?.includes(requiredScope));
   }
@@ -185,6 +244,7 @@
 
   window.ui = Object.freeze({
     ROLE_SCOPES, can, applyPermissions, escapeHtml, errorPresentation, errorHtml, renderPageError,
-    toast, toastError, showModal, closeModal, confirmDialog, runAction,
+    toast, toastError, showModal, showReviewedAction, recoverInterruptedReview, closeModal, confirmDialog, runAction,
+    saveDraft, loadDraft, clearDraft, markDirty, clearDirty, hasUnsavedChanges, confirmNavigation,
   });
 })();

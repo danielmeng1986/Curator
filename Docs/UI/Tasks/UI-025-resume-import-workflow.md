@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-025` — Status: `Ready`
+`UI-025` — Status: `Complete`
 
 ## Title
 
@@ -66,3 +66,8 @@ while respecting Preview expiry, replay protection, and filesystem safety.
 
 - Source paths are operationally sensitive. Draft storage must be local-only,
   bounded, documented, and excluded from diagnostics.
+
+## Completion Record
+
+- Import now persists compose, selection, Preview, confirmation, results, and
+  Operation reference, restores them after interruption, and supports explicit Abandon.

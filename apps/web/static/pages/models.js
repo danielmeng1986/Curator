@@ -10,6 +10,9 @@ const ModelsPage = {
     btn.classList.remove('hidden');
     btn.onclick = () => navigate('#/models/new');
 
+    const query = new URLSearchParams((window.location.hash.split('?')[1] || ''));
+    this._listState.q = query.get('q') || '';
+    this._listState.offset = Math.max(0, Number(query.get('offset') || 0));
     await this._loadList(el);
   },
 
@@ -59,13 +62,14 @@ const ModelsPage = {
     let debounce;
     document.getElementById('modelQ').addEventListener('input', e => {
       clearTimeout(debounce);
-      debounce = setTimeout(() => { this._listState.q = e.target.value; this._listState.offset = 0; this._loadList(el); }, 350);
+      debounce = setTimeout(() => { this._listState.q = e.target.value; this._listState.offset = 0; this._syncListHash(); this._loadList(el); }, 350);
     });
   },
 
-  _applyFilter() { this._listState.offset = 0; this._loadList(document.getElementById('page-content')); },
-  _prevPage() { this._listState.offset = Math.max(0, this._listState.offset - this._listState.limit); this._loadList(document.getElementById('page-content')); },
-  _nextPage() { this._listState.offset += this._listState.limit; this._loadList(document.getElementById('page-content')); },
+  _syncListHash() { const q = new URLSearchParams(); if (this._listState.q) q.set('q', this._listState.q); if (this._listState.offset) q.set('offset', this._listState.offset); history.replaceState(null, '', `#/models${q.size ? `?${q}` : ''}`); },
+  _applyFilter() { this._listState.offset = 0; this._syncListHash(); this._loadList(document.getElementById('page-content')); },
+  _prevPage() { this._listState.offset = Math.max(0, this._listState.offset - this._listState.limit); this._syncListHash(); this._loadList(document.getElementById('page-content')); },
+  _nextPage() { this._listState.offset += this._listState.limit; this._syncListHash(); this._loadList(document.getElementById('page-content')); },
 
   async renderDetail({ id }) {
     const el = document.getElementById('page-content');
@@ -159,9 +163,22 @@ const ModelsPage = {
           </div>
         </div>` : ''}
       `;
+      this._bindDraft(id, model?.updated_at || null);
     } catch (e) {
       ui.renderPageError(el, e, 'this Model');
     }
+  },
+
+  _draftKey(id = null) { return `entity.model.${id || 'new'}`; },
+  _draftBody() { return { displayName:fDisplayName.value, primaryName:fPrimaryName.value, country:fCountry.value, ethnicity:fEthnicity.value, eyeColor:fEyeColor.value, hairColor:fHairColor.value, description:fDescription.value }; },
+  _bindDraft(id, updatedAt) {
+    const key=this._draftKey(id); const saved=ui.loadDraft(key);
+    if(saved && (!updatedAt || saved.metadata?.updatedAt===updatedAt)) {
+      const d=saved.data; fDisplayName.value=d.displayName||'';fPrimaryName.value=d.primaryName||'';fCountry.value=d.country||'';fEthnicity.value=d.ethnicity||'';fEyeColor.value=d.eyeColor||'';fHairColor.value=d.hairColor||'';fDescription.value=d.description||'';
+      ui.markDirty(key,'this Model',()=>ui.clearDraft(key));
+      toast('Restored the Model draft saved in this browser.', 'warning');
+    } else if(saved) { ui.clearDraft(key); toast('An older Model draft was discarded because the record changed.', 'warning'); }
+    document.querySelector('.card').addEventListener('input',()=>{ui.saveDraft(key,this._draftBody(),{updatedAt});ui.markDirty(key,'this Model',()=>ui.clearDraft(key));});
   },
 
   async _save() {
@@ -181,9 +198,11 @@ const ModelsPage = {
       const m = hash.match(/#\/models\/(\d+)$/);
       if (m) {
         await api.put(`/models/${m[1]}`, body);
+        ui.clearDraft(this._draftKey(m[1])); ui.clearDirty();
         toast('Model saved');
       } else {
         const res = await api.post('/models', body);
+        ui.clearDraft(this._draftKey()); ui.clearDirty();
         toast('Model created');
         navigate(`#/models/${res.id}`);
       }

@@ -173,7 +173,7 @@ const AlbumsPage = {
     if (!this._selectedIds.size) { toast('Select at least one Album', 'error'); return; }
     const statusOpts = (this._statuses || []).map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
     const studioOpts = (this._studios || []).map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
-    showModal(`
+    ui.showReviewedAction(`
       <h3 class="modal-title">Batch edit ${this._selectedIds.size} Albums</h3>
       <div class="form-field"><label>Field</label><select id="batchField">
         <option value="status_id">Status</option><option value="studio_id">Studio</option><option value="rating">Rating</option>
@@ -182,7 +182,7 @@ const AlbumsPage = {
       <label><input type="checkbox" id="batchOverwrite"> Explicitly replace existing non-empty values</label>
       <div id="batchPreview"></div>
       <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="batchPreviewBtn" onclick="AlbumsPage._previewBatch()">Review changes</button></div>
-    `);
+    `, { key:'album-batch-edit', label:'Album batch edit review' });
     document.getElementById('batchField').onchange = event => {
       const field = event.target.value;
       const value = document.getElementById('batchValue');
@@ -344,12 +344,33 @@ const AlbumsPage = {
         </div>
       `;
 
+      this._bindDraft(album?.updated_at || null);
+
       this._renderModelsSection();
       this._renderRelationsSection();
 
     } catch (e) {
       ui.renderPageError(el, e, 'this Album');
     }
+  },
+
+  _draftKey() { return `entity.album.${this._currentId || 'new'}`; },
+  _captureDraft() {
+    const value=id=>document.getElementById(id)?.value||'';
+    return { fields:{title:value('fTitle'),studio:value('fStudio'),status:value('fStatus'),scene:value('fScene'),location:value('fLocation'),captureDate:value('fCaptureDate'),publishDate:value('fPublishDate'),rating:value('fRating'),description:value('fDescription'),path:value('fPath')},models:this._editModels,relations:this._editRelations };
+  },
+  _persistDraft(updatedAt=this._draftUpdatedAt) { const key=this._draftKey();ui.saveDraft(key,this._captureDraft(),{updatedAt});ui.markDirty(key,'this Album',()=>ui.clearDraft(key)); },
+  _bindDraft(updatedAt) {
+    this._draftUpdatedAt=updatedAt; const key=this._draftKey(); const saved=ui.loadDraft(key);
+    if(saved && (!updatedAt||saved.metadata?.updatedAt===updatedAt)) {
+      const d=saved.data,f=d.fields||{},set=(id,value)=>{const node=document.getElementById(id);if(node)node.value=value??'';};
+      set('fTitle',f.title);set('fStudio',f.studio);set('fStatus',f.status);set('fScene',f.scene);set('fLocation',f.location);set('fCaptureDate',f.captureDate);set('fPublishDate',f.publishDate);set('fRating',f.rating);set('fDescription',f.description);set('fPath',f.path);
+      this._editModels=Array.isArray(d.models)?d.models:this._editModels;this._editRelations=Array.isArray(d.relations)?d.relations:this._editRelations;
+      ui.markDirty(key,'this Album',()=>ui.clearDraft(key));
+      toast('Restored the Album draft saved in this browser.','warning');
+    } else if(saved){ui.clearDraft(key);toast('An older Album draft was discarded because the record changed.','warning');}
+    document.querySelector('#page-content > .card')?.addEventListener('input',()=>this._persistDraft(updatedAt));
+    document.querySelector('#page-content > .card')?.addEventListener('change',()=>this._persistDraft(updatedAt));
   },
 
   _renderModelsSection() {
@@ -383,8 +404,8 @@ const AlbumsPage = {
       </tr>`).join('')}</tbody></table></div>`;
   },
 
-  _removeModel(i) { this._editModels.splice(i, 1); this._renderModelsSection(); },
-  _removeRelation(i) { this._editRelations.splice(i, 1); this._renderRelationsSection(); },
+  _removeModel(i) { this._editModels.splice(i, 1); this._renderModelsSection(); this._persistDraft(); },
+  _removeRelation(i) { this._editRelations.splice(i, 1); this._renderRelationsSection(); this._persistDraft(); },
 
   _openAddModel() {
     const opts = (this._allModels || []).map(m =>
@@ -433,6 +454,7 @@ const AlbumsPage = {
     });
     closeModal();
     this._renderModelsSection();
+    this._persistDraft();
   },
 
   _openAddRelation() {
@@ -468,6 +490,7 @@ const AlbumsPage = {
     });
     closeModal();
     this._renderRelationsSection();
+    this._persistDraft();
   },
 
   _openInlineStudio() {
@@ -523,9 +546,11 @@ const AlbumsPage = {
     try {
       if (this._currentId) {
         await api.put(`/albums/${this._currentId}`, body);
+        ui.clearDraft(this._draftKey()); ui.clearDirty();
         toast('Album saved');
       } else {
         const res = await api.post('/albums', body);
+        ui.clearDraft(this._draftKey()); ui.clearDirty();
         toast('Album created');
         navigate(`#/albums/${res.id}`);
       }

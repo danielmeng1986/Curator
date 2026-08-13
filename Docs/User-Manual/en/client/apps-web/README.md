@@ -67,6 +67,12 @@ See [Access and Device Registration](access-and-registration.md), [Reader](reade
 - On uncertain or partial failure, open **Operations** and related **Issues** before
   retrying. The result screen—not button animation—is authoritative.
 - Navigation cancels obsolete list refreshes; return to the page to request fresh data.
+- Entity forms and AI Review keep versioned drafts in this browser profile.
+  Refresh or restart restores a compatible draft; save or explicitly discard it.
+  Import similarly restores its batch and provides **Abandon saved Import**.
+- Material review dialogs ignore Escape and overlay clicks. Use the visible
+  Cancel action. After a browser interruption, reopen the source action and
+  generate a fresh Preview when prompted.
 
 <!-- manual-section: safety -->
 ## 6. Safety and troubleshooting
