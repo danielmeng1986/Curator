@@ -19,7 +19,14 @@ function sanitized(value) {
 async function preflight() {
   if (Number(process.versions.node.split('.')[0]) < 20) throw new Error('Node.js 20 or newer is required.');
   await access(resolve('node_modules', 'playwright', 'package.json'));
-  for (const suite of UI_READINESS_SUITES) await access(resolve(suite.args.at(-1)));
+  const requiredDimensions=['modalClose','navigation','refresh','browserRestart','backendRestart','delayedAction','retry','cancellation','upgradeCache'];
+  for (const suite of UI_READINESS_SUITES) {
+    await access(resolve(suite.args.at(-1)));
+    for(const dimension of requiredDimensions){
+      const claim=suite.interruptions?.[dimension];
+      if(!claim||!(/^(covered|not-applicable): /.test(claim)))throw new Error(`${suite.id} lacks a reasoned ${dimension} interruption claim.`);
+    }
+  }
 }
 
 function runSuite(suite) {
@@ -69,7 +76,7 @@ try {
         '', outcome.stdout, outcome.stderr,
       ].join('\n')), 'utf8');
       console.error(`[FAIL] ${suite.id} · sanitized artifact: ${artifact}`);
-      break;
+      continue;
     }
     console.log(`[PASS] ${suite.id} · ${(outcome.durationMs / 1000).toFixed(1)}s`);
   }
@@ -79,6 +86,7 @@ try {
     console.log(`${ok ? 'PASS' : 'FAIL'}\t${suite.id}\t${suite.task}\t${(durationMs / 1000).toFixed(1)}s${timedOut ? '\tTIMEOUT' : ''}`);
     console.log(`  specification: ${suite.specification}`);
     console.log(`  backend evidence: ${suite.backendEvidence}`);
+    console.log(`  interruptions: ${Object.entries(suite.interruptions).map(([key,value])=>`${key}=${value}`).join('; ')}`);
   }
   if (results.length !== UI_READINESS_SUITES.length || results.some(result => !result.ok)) {
     process.exitCode = 1;

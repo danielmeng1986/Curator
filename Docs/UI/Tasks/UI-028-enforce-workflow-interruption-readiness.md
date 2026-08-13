@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-028` — Status: `Ready`
+`UI-028` — Status: `Complete`
 
 ## Title
 
@@ -68,3 +68,8 @@ contract instead of accepting only an uninterrupted happy path.
 
 - Applicability exemptions require a concrete reason; they must not become a
   generic mechanism for skipping difficult recovery behavior.
+
+## Completion Record
+
+- The manifest now requires nine reasoned interruption dimensions per suite,
+  the runner continues after failures, and a dedicated interruption suite is mandatory.

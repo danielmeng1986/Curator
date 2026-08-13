@@ -65,12 +65,12 @@ snapshot, archive, and output resources.
 | [UI-020](UI-020-manage-registration-proof.md) | Admin Registration Proof lifecycle UI | Complete |
 | [UI-021](UI-021-device-enrollment-browser-acceptance.md) | Multi-browser device enrollment acceptance | Complete |
 | [UI-022](UI-022-establish-ui-workflow-specification.md) | Controlling workflow, interruption, recovery, and upgrade specification | Complete |
-| [UI-023](UI-023-correct-permission-disclosure-gate.md) | Schema-aware credential disclosure readiness gate | Ready |
-| [UI-024](UI-024-preserve-entity-editing-context.md) | Entity draft and list-navigation continuity | Ready |
-| [UI-025](UI-025-resume-import-workflow.md) | Resumable Import compose, review, and result workflow | Ready |
-| [UI-026](UI-026-standardize-reviewed-action-lifecycle.md) | Explicit lifecycle for material Preview and confirmation | Ready |
-| [UI-027](UI-027-persist-ai-review-drafts.md) | Interruption-safe human AI Review drafts | Ready |
-| [UI-028](UI-028-enforce-workflow-interruption-readiness.md) | Specification interruption matrix in the final readiness gate | Ready |
+| [UI-023](UI-023-correct-permission-disclosure-gate.md) | Schema-aware credential disclosure readiness gate | Complete |
+| [UI-024](UI-024-preserve-entity-editing-context.md) | Entity draft and list-navigation continuity | Complete |
+| [UI-025](UI-025-resume-import-workflow.md) | Resumable Import compose, review, and result workflow | Complete |
+| [UI-026](UI-026-standardize-reviewed-action-lifecycle.md) | Explicit lifecycle for material Preview and confirmation | Complete |
+| [UI-027](UI-027-persist-ai-review-drafts.md) | Interruption-safe human AI Review drafts | Complete |
+| [UI-028](UI-028-enforce-workflow-interruption-readiness.md) | Specification interruption matrix in the final readiness gate | Complete |
 
 ## Dependency outline
 
