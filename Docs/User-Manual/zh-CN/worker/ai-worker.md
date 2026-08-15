@@ -100,6 +100,17 @@ runtime 配置由私有状态文件、CLI 主机路径和 Admin 创建的 AI Mod
 共同组成。Admin UI 中的 `model_file` 是相对于 `--model-root` 的可移植路径；
 `--llama-cli` 指定可执行文件，需要独立 projector 的多模态 build 使用 `--mmproj`。
 
+首次派遣前，Administrator 在 **Administrator Center → AI Model
+Configurations** 中选择 **New Configuration**。填写可辨识的名称、模型标识、相对
+`model_file`、Vision/Writer prompt 版本和运行参数，然后保持配置为 Enabled。例如，当
+Worker 以 `--model-root /opt/curator-models` 启动时，配置中的
+`qwen2.5-vl-7b/model.gguf` 解析为
+`/opt/curator-models/qwen2.5-vl-7b/model.gguf`。不要填写绝对路径；Backend 不会也不能
+检查远程 Worker 上是否存在该文件。配置创建后返回 **AI Work Dispatch** 即可选择它。
+
+当前 `--mmproj` 是 Worker 进程级参数。一次受控验证只选择与该 projector 匹配的模型
+配置；不要让同一个 Worker 进程用一个 projector 混合运行不同多模态模型家族。
+
 - Device Token 绝不能进入源码、Git、命令参数、截图、日志、聊天、模型 prompt，或与无关
   进程共享的 Windows 环境。
 - 模型文件应位于仓库之外，也不能位于 Backend 管理的路径中。
@@ -174,4 +185,5 @@ Admin policy 让 item 可重试。
 - [ ] Worker 主机上没有数据库、archive root、Album 目录或 Admin Token。
 - [ ] WSL2 专用身份以 Writer 显示 `Registration status: Approved`。
 - [ ] `model_file`、`--model-root`、llama.cpp CLI 和可选 mmproj 相互一致。
+- [ ] Administrator 已在 AI Model Configurations 中创建并启用对应配置。
 - [ ] `--once` smoke run 能干净退出，或生成一个 Admin 可见的 ReadyForReview item。

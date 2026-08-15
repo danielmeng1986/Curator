@@ -111,6 +111,19 @@ Admin-created AI Model Configuration snapshot. `model_file` in the Admin UI is
 a portable path relative to `--model-root`; `--llama-cli` names the executable,
 and multimodal builds that require it use `--mmproj`.
 
+Before the first dispatch, an Administrator opens **Administrator Center → AI
+Model Configurations** and selects **New Configuration**. Enter a recognizable
+name, model identifier, relative `model_file`, Vision/Writer prompt versions,
+and runtime parameters, then leave the configuration Enabled. For example, with
+`--model-root /opt/curator-models`, `qwen2.5-vl-7b/model.gguf` resolves to
+`/opt/curator-models/qwen2.5-vl-7b/model.gguf`. Do not enter an absolute path;
+the Backend cannot and does not verify files on a remote Worker. Return to **AI
+Work Dispatch** after creation to select the configuration.
+
+`--mmproj` is currently a Worker-process option. For a controlled run, select
+only model configurations compatible with that projector; do not use one
+projector to mix unrelated multimodal model families in one Worker process.
+
 - Never put a Device Token in source, Git, a command argument, screenshot, log,
   chat, model prompt, or Windows environment shared with unrelated processes.
 - Keep model files outside the repository and outside Backend-managed paths.
@@ -191,4 +204,5 @@ is an approval: only an Admin can Review and Promote results.
 - [ ] No database, archive root, Album directory, or Admin Token is on the Worker.
 - [ ] The dedicated WSL2 identity shows `Registration status: Approved` as Writer.
 - [ ] `model_file`, `--model-root`, llama.cpp CLI, and optional mmproj agree.
+- [ ] An Administrator created and enabled the corresponding AI Model Configuration.
 - [ ] A `--once` smoke run exits cleanly or produces one Admin-visible ReadyForReview item.

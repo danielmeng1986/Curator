@@ -25,6 +25,7 @@ const ROUTES = [
   { pattern: /^#\/admin\/devices$/, page: 'admin-devices', params: [], scope: 'admin' },
   { pattern: /^#\/admin\/backups$/, page: 'admin-backups', params: [], scope: 'admin' },
   { pattern: /^#\/admin\/restore$/, page: 'admin-restore', params: [], scope: 'admin' },
+  { pattern: /^#\/admin\/ai-model-configurations$/, page: 'admin-ai-model-configurations', params: [], scope: 'admin' },
   { pattern: /^#\/work-dispatch(?:\?view=(available|active|history))?$/, page: 'work-dispatch', params: ['view'], scope: 'admin' },
   { pattern: /^#\/work-dispatch\/groups\/([^/?]+)$/, page: 'work-dispatch-group', params: ['uuid'], scope: 'admin' },
   { pattern: /^#\/ai-workspaces$/, page: 'ai-workspaces', params: [], scope: 'admin' },
@@ -88,6 +89,7 @@ function route() {
         case 'admin-devices':   renderPage(AdminAuthPage.render(paramValues)); break;
         case 'admin-backups':   renderPage(AdminBackupsPage.render(paramValues)); break;
         case 'admin-restore':   renderPage(AdminRestorePage.render(paramValues)); break;
+        case 'admin-ai-model-configurations': renderPage(AIModelConfigurationsPage.render(paramValues)); break;
         case 'work-dispatch':   renderPage(WorkDispatchPage.render(paramValues)); break;
         case 'work-dispatch-group': renderPage(WorkDispatchPage.renderGroup(paramValues)); break;
         case 'ai-workspaces':   renderPage(WorkspaceReviewPage.renderWorkspaces(paramValues)); break;
