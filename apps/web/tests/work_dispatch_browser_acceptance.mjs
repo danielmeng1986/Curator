@@ -24,8 +24,6 @@ async function createConfiguration(name,modelFile){
 try{
   const configA=await createConfiguration('Fixture Balanced','balanced.gguf');
   const configB=await createConfiguration('Fixture Fast','fast.gguf');
-  const workspaceResponse=await fixture.request('/ai-workspaces',{method:'POST',role:'admin',body:{title:'Browser Dispatch Workspace'}});
-  assert.equal(workspaceResponse.status,201); const workspace=workspaceResponse.payload.data.workspace;
   const before=(await fixture.request('/albums',{role:'admin'})).payload.data.map(item=>[item.id,item.status_id]);
 
   const denied=await browser.newPage(); await connect(denied,fixture.devices.writer.token);
@@ -33,6 +31,12 @@ try{
   assert.equal(await denied.getByRole('link',{name:/AI Work Dispatch/}).isVisible(),false); await denied.close();
 
   const page=await browser.newPage(); await connect(page,fixture.devices.admin.token);
+  await page.goto(`${fixture.origin}/#/work-dispatch`);await page.getByText('No Open AI Workspace exists.').waitFor();
+  await page.getByRole('button',{name:'Select current page'}).click();assert.equal(await page.getByRole('button',{name:'Preview dispatch'}).isDisabled(),true);
+  await page.getByRole('link',{name:'Create Workspace'}).click();await page.getByRole('heading',{name:'AI Workspaces'}).waitFor();
+  await page.getByRole('button',{name:'+ New Workspace',exact:true}).click();await page.getByLabel('Workspace title').fill('Browser Dispatch Workspace');
+  await page.getByRole('button',{name:'Create Workspace',exact:true}).click();await page.getByText('AI Workspace created.').waitFor();await page.getByRole('link',{name:'Browser Dispatch Workspace'}).waitFor();
+  const workspace=(await fixture.request('/ai-workspaces',{role:'admin'})).payload.data.items[0];assert.equal(workspace.lifecycle_state,'Open');
   await page.getByRole('link',{name:/AI Work Dispatch/}).click(); await page.getByRole('heading',{name:'Album Work Dispatch'}).waitFor();
   await page.getByText('balanced.gguf',{exact:true}).waitFor();
   await page.getByText(/context 4096 · max 800 tokens · image 384 · temp 0.2 · 8 threads · 20 GPU layers/).first().waitFor();

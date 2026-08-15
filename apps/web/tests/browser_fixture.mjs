@@ -19,6 +19,10 @@ export const SCENARIOS = Object.freeze({
     readiness: 'Ready',
     dependency: 'BT-053/BT-058 and UI-011E',
   }),
+  'work-dispatch-pagination': Object.freeze({
+    readiness: 'Ready',
+    dependency: 'BT-055 and UI-032',
+  }),
 });
 
 const ROLE_SCOPES = Object.freeze({

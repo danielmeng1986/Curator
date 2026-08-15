@@ -28,6 +28,7 @@ SCENARIOS = {
     "workflow-evidence": "Issue, Repair, and Operation records for read-model work.",
     "filesystem": "Disposable Import source, Archive, Snapshot, and Quarantine roots.",
     "future-ai-workspace": "Albums ready for AI Workspace dispatch and review.",
+    "work-dispatch-pagination": "More than one page of filterable AI dispatch candidates.",
 }
 
 
@@ -46,10 +47,10 @@ def _initialize_database(database_path: Path, scenario: str) -> None:
             "INSERT INTO status (name, description) VALUES (?, ?)",
             ("Active", "Active albums"),
         )
-        if scenario == "future-ai-workspace":
+        if scenario in {"future-ai-workspace", "work-dispatch-pagination"}:
             connection.execute("INSERT INTO status (name, description) VALUES ('TEMPORARY', 'Awaiting curated name')")
             connection.execute("INSERT INTO status (name, description) VALUES ('NAME_GENERATED', 'AI name promoted')")
-        if scenario in {"entities", "future-ai-workspace"}:
+        if scenario in {"entities", "future-ai-workspace", "work-dispatch-pagination"}:
             connection.execute(
                 "INSERT INTO studio (uuid, name, website) VALUES (?, ?, ?)",
                 ("studio-ui-fixture", "Fixture Studio", "https://example.invalid"),
@@ -74,9 +75,10 @@ def _initialize_database(database_path: Path, scenario: str) -> None:
                    VALUES (?, 1, ?, ?)""",
                 ("photo-ui-fixture", "cover.jpg", "cover.jpg"),
             )
-            if scenario == "future-ai-workspace":
+            if scenario in {"future-ai-workspace", "work-dispatch-pagination"}:
                 connection.execute("UPDATE album SET status_id=2 WHERE id=1")
-                for index in range(2, 4):
+                upper_bound = 56 if scenario == "work-dispatch-pagination" else 4
+                for index in range(2, upper_bound):
                     connection.execute(
                         """INSERT INTO album
                            (uuid, studio_id, status_id, title, path, updated_at)

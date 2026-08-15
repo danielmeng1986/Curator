@@ -160,6 +160,10 @@
     if (!Array.isArray(data)) return data;
     const route = path.split('?')[0];
     if (route === '/operations') return { operations: data, meta: meta || {} };
+    if (route === '/work-dispatch/candidates' || route === '/work-dispatch/groups') {
+      return { items: data, meta: meta || {}, total: meta?.pagination?.total ?? meta?.total ?? data.length,
+        limit: meta?.pagination?.limit ?? data.length };
+    }
     const key = {
       '/albums': 'albums',
       '/models': 'models',

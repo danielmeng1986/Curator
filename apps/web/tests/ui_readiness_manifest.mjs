@@ -81,6 +81,20 @@ export const UI_READINESS_SUITES = Object.freeze([
     command: process.execPath, args: ['apps/web/tests/work_dispatch_browser_acceptance.mjs'], timeoutMs: 120_000,
   },
   {
+    id:'ai-model-configurations',task:'UI-031',
+    specification:'Managed llama.cpp Model Configuration; Work Dispatch Workflow',
+    backendEvidence:'BT-045 service/API optimistic-version and authorization regression',
+    interruptions:dimensions({modalClose:covered('explicit form Cancel'),navigation:covered('stable Admin and Dispatch routes'),refresh:covered('authoritative configuration reload'),backendRestart:covered('durable configuration records'),delayedAction:covered('stale-version conflict'),retry:covered('conflict retains form and refresh permits retry'),cancellation:covered('Cancel performs no mutation')}),
+    command:process.execPath,args:['apps/web/tests/ai_model_configurations_browser_acceptance.mjs'],timeoutMs:120_000,
+  },
+  {
+    id:'work-dispatch-pagination',task:'UI-032',
+    specification:'Work Dispatch Workflow; Album query pagination contract',
+    backendEvidence:'BT-032/BT-055 filter, total, offset, and bounded first-N regression',
+    interruptions:dimensions({navigation:covered('view-specific state and stable routes'),refresh:covered('selection safely resets'),backendRestart:covered('queries are independently repeatable'),delayedAction:covered('signed Preview remains the mutation boundary'),retry:covered('filter/page query can be repeated'),cancellation:covered('selection reset performs no mutation')}),
+    command:process.execPath,args:['apps/web/tests/work_dispatch_pagination_browser_acceptance.mjs'],timeoutMs:120_000,
+  },
+  {
     id: 'workspace-review', task: 'UI-011A-D',
     specification: 'AI Collection Workspace; Workspace Review state machine',
     backendEvidence: 'BT-043 through BT-053/BT-057; test_ai_workspace_workflow_acceptance',

@@ -24,6 +24,9 @@ assert.match(source,/review\.allowed_actions\.includes/);
 assert.match(source,/expected_version:r\.version/);
 assert.match(source,/promotion\/preview/);
 assert.match(source,/preview_token:token,confirmation/);
+assert.match(source,/\+ New Workspace/);
+assert.match(source,/api\.post\('\/ai-workspaces',\{title\}\)/);
+assert.match(source,/album_analysis/);
 
 page._detail={review:{work_item_uuid:'item-1'}};
 page.saveDraft();

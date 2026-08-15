@@ -73,6 +73,8 @@ snapshot, archive, and output resources.
 | [UI-028](UI-028-enforce-workflow-interruption-readiness.md) | Specification interruption matrix in the final readiness gate | Complete |
 | [UI-029](UI-029-simulated-ai-promotion-workflow-drill.md) | No-model dispatch, Worker result, Review, and Album Promotion drill | Complete |
 | [UI-030](UI-030-expose-ai-configuration-and-run-progress.md) | Model configuration summaries and per-Album run progress | Complete |
+| [UI-031](UI-031-administer-ai-model-configurations.md) | Administrator AI Model Configuration management | Complete |
+| [UI-032](UI-032-complete-work-dispatch-filtering-and-pagination.md) | Status-centered Dispatch filtering and bounded pagination | Complete |
 
 ## Dependency outline
 
@@ -103,3 +105,8 @@ permanent database outcome with deterministic Worker payloads and no AI model.
 
 UI-030 makes dispatch choices inspectable before confirmation and projects each
 Album/configuration run independently in Active, History, and Group detail.
+
+UI-031 closes the first-run configuration gap by exposing the existing managed
+model configuration contract to Administrators. UI-032 completes the Dispatch
+list behavior promised by UI-011E by wiring the existing Status, Studio, Model,
+and pagination contracts into the browser workflow.

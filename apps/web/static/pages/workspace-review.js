@@ -8,12 +8,28 @@ const WorkspaceReviewPage = {
     el.innerHTML = '<div class="loading">Loading AI Workspaces…</div>';
     try {
       const result = await api.get('/ai-workspaces');
-      el.innerHTML = `<div class="page-header"><h1 class="page-title">AI Workspaces</h1><a class="btn btn-primary" href="#/work-dispatch">Dispatch Albums</a></div>
+      el.innerHTML = `<div class="page-header"><div><h1 class="page-title">AI Workspaces</h1><p class="page-subtitle">Create an Open Workspace before dispatching Albums for AI analysis.</p></div><div><button class="btn btn-primary" onclick="WorkspaceReviewPage.openCreateWorkspace()">+ New Workspace</button> <a class="btn btn-secondary" href="#/work-dispatch">Dispatch Albums</a></div></div>
         <div class="card table-wrap"><table><thead><tr><th>Workspace</th><th>Dataset</th><th>Lifecycle</th><th>Created</th><th>Review</th></tr></thead><tbody>
         ${(result.items || []).map(item => `<tr><td><a href="#/ai-workspaces/${esc(item.uuid)}">${esc(item.title)}</a></td><td>${esc(item.dataset_type)} · ${esc(item.schema_version)}</td>
           <td><span class="chip ${item.lifecycle_state === 'Open' ? 'chip-ok' : ''}">${esc(item.lifecycle_state)}</span></td><td>${esc(item.created_at)}</td><td><a href="#/ai-reviews?workspace_uuid=${esc(item.uuid)}">Open queue</a></td></tr>`).join('') || '<tr><td colspan="5">No AI Workspaces.</td></tr>'}
         </tbody></table></div>`;
     } catch (error) { ui.renderPageError(el,error,'AI Workspaces'); }
+  },
+
+  openCreateWorkspace() {
+    showModal(`<h3 id="modal-title" class="modal-title">New AI Workspace</h3>
+      <div class="form-field"><label for="aiWorkspaceTitle">Workspace title *</label><input id="aiWorkspaceTitle" maxlength="200" placeholder="Album Name Analysis — 2026-08"></div>
+      <p class="field-help">The Workspace will be created as <strong>Open</strong> for the <code>album_analysis</code> dataset, schema version 1.</p>
+      <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="WorkspaceReviewPage.createWorkspace(this)">Create Workspace</button></div>`);
+    document.getElementById('aiWorkspaceTitle')?.focus();
+  },
+
+  async createWorkspace(trigger) {
+    const title=document.getElementById('aiWorkspaceTitle').value.trim();
+    if(!title){toast('Enter a Workspace title.','error');return;}
+    const result=await ui.runAction('ai-workspace-create',()=>api.post('/ai-workspaces',{title}),{trigger,context:'create the AI Workspace'});
+    if(!result.ok)return;
+    closeModal();toast('AI Workspace created.');await this.renderWorkspaces();
   },
 
   async renderWorkspace({ uuid }) {

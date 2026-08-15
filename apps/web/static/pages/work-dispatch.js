@@ -5,6 +5,16 @@ const WorkDispatchPage = {
   _workspaces: [],
   _configurations: [],
   _workerKinds: [],
+  _statuses: [],
+  _studios: [],
+  _models: [],
+  _meta: { total:0, limit:50, offset:0 },
+  _state: {
+    available:{status_id:'',studio_id:'',model_id:'',limit:50,offset:0},
+    active:{limit:50,offset:0},history:{limit:50,offset:0},
+  },
+  _selectionMode: 'ids',
+  _firstN: null,
   _preview: null,
 
   _configurationSummary(item) {
@@ -36,15 +46,18 @@ const WorkDispatchPage = {
   async render({ view = 'available' } = {}) {
     this._view = ['available', 'active', 'history'].includes(view) ? view : 'available';
     this._selected = new Set();
+    this._selectionMode='ids';this._firstN=null;
     const el = document.getElementById('page-content');
     el.innerHTML = '<div class="loading">Loading Work Dispatch…</div>';
     try {
-      const [workspaces, configurations, kinds] = await Promise.all([
+      const [workspaces, configurations, kinds, statuses, studios, models] = await Promise.all([
         api.get('/ai-workspaces'), api.get('/ai-model-configurations'), api.get('/work-dispatch/worker-kinds'),
+        api.get('/statuses'),api.get('/studios?limit=100'),api.get('/models?limit=100'),
       ]);
       this._workspaces = (workspaces.items || []).filter(item => item.lifecycle_state === 'Open');
       this._configurations = (configurations.items || []).filter(item => item.enabled);
       this._workerKinds = kinds.items || [];
+      this._statuses=statuses.statuses||[];this._studios=studios.studios||[];this._models=models.models||[];
       await this.loadView();
     } catch (error) { ui.renderPageError(el, error, 'Work Dispatch'); }
   },
@@ -70,43 +83,58 @@ const WorkDispatchPage = {
 
   async loadView() {
     const el = document.getElementById('page-content');
-    const q = document.getElementById('dispatchSearch')?.value?.trim() || '';
     const workerKind = document.getElementById('dispatchWorkerKind')?.value || this._workerKinds[0]?.worker_kind || '';
+    const state=this._state[this._view];
     try {
       if (this._view === 'available') {
-        const result = await api.get(`/work-dispatch/candidates?worker_kind=${encodeURIComponent(workerKind)}&availability=available&limit=100${q ? `&q=${encodeURIComponent(q)}` : ''}`);
-        this._candidates = result;
+        const params=new URLSearchParams({worker_kind:workerKind,availability:'available',limit:String(state.limit),offset:String(state.offset)});
+        for(const key of ['status_id','studio_id','model_id'])if(state[key])params.set(key,state[key]);
+        const result = await api.get(`/work-dispatch/candidates?${params}`);
+        this._candidates = result.items||[];this._meta={total:result.total||0,limit:result.limit||state.limit,offset:state.offset};
       } else {
-        this._candidates = await api.get(`/work-dispatch/groups?view=${this._view}&worker_kind=${encodeURIComponent(workerKind)}&limit=100`);
+        const result=await api.get(`/work-dispatch/groups?view=${this._view}&worker_kind=${encodeURIComponent(workerKind)}&limit=${state.limit}&offset=${state.offset}`);
+        this._candidates=result.items||[];this._meta={total:result.total||0,limit:result.limit||state.limit,offset:state.offset};
       }
-      this._renderShell({ q, workerKind });
+      this._renderShell({ workerKind });
     } catch (error) { ui.renderPageError(el, error, 'Work Dispatch'); }
   },
 
-  _renderShell({ q = '', workerKind = '' } = {}) {
+  _renderShell({ workerKind = '' } = {}) {
     const el = document.getElementById('page-content');
     const tabs = [['available','Available'],['active','Active'],['history','History']];
     el.innerHTML = `<div class="page-header"><div><h1 class="page-title">Album Work Dispatch</h1>
       <p class="page-subtitle">Assign selected Albums to a Worker without changing Album Status.</p></div>${this._view !== 'available' ? '<button class="btn btn-secondary" onclick="WorkDispatchPage.loadView()">Refresh progress</button>' : ''}</div>
       <div class="dispatch-tabs" role="tablist">${tabs.map(([key,label]) => `<button class="btn ${this._view === key ? 'btn-primary' : 'btn-secondary'}" onclick="WorkDispatchPage.changeView('${key}')">${label}</button>`).join('')}</div>
       <div class="filter-bar">
-        <label>Worker <select id="dispatchWorkerKind" onchange="WorkDispatchPage.loadView()">${this._workerKinds.map(kind => `<option value="${esc(kind.worker_kind)}" ${kind.worker_kind === workerKind ? 'selected' : ''}>${esc(kind.worker_kind)}</option>`).join('')}</select></label>
-        ${this._view === 'available' ? `<label>Album search <input id="dispatchSearch" value="${esc(q)}" placeholder="Title" onkeydown="if(event.key==='Enter') WorkDispatchPage.loadView()"></label><button class="btn btn-secondary" onclick="WorkDispatchPage.loadView()">Apply</button>` : ''}
+        <label>Worker <select id="dispatchWorkerKind" onchange="WorkDispatchPage.workerChanged()">${this._workerKinds.map(kind => `<option value="${esc(kind.worker_kind)}" ${kind.worker_kind === workerKind ? 'selected' : ''}>${esc(kind.worker_kind)}</option>`).join('')}</select></label>
+        ${this._view === 'available' ? this._filterHtml() : ''}
+        <label>Per page <select id="dispatchPageSize" onchange="WorkDispatchPage.pageSizeChanged(this.value)">${[25,50,100].map(value=>`<option value="${value}" ${this._meta.limit===value?'selected':''}>${value}</option>`).join('')}</select></label>
       </div>
-      ${this._view === 'available' ? this._availableHtml() : this._groupsHtml()}`;
+      ${this._view === 'available' ? this._availableHtml() : this._groupsHtml()}${this._paginationHtml()}`;
   },
+
+  _filterHtml(){const state=this._state.available;const options=(items,value,label)=>`<option value="">All ${label}</option>${items.map(item=>`<option value="${item.id}" ${String(value)===String(item.id)?'selected':''}>${esc(item.name||item.display_name||item.primary_name)}</option>`).join('')}`;
+    return `<label>Status <select id="dispatchStatusFilter" onchange="WorkDispatchPage.filterChanged()">${options(this._statuses,state.status_id,'statuses')}</select></label>
+      <label>Studio <select id="dispatchStudioFilter" onchange="WorkDispatchPage.filterChanged()">${options(this._studios,state.studio_id,'studios')}</select></label>
+      <label>Model <select id="dispatchModelFilter" onchange="WorkDispatchPage.filterChanged()">${options(this._models,state.model_id,'models')}</select></label>
+      <button class="btn btn-secondary" onclick="WorkDispatchPage.clearFilters()">Clear filters</button>`;},
+
+  _paginationHtml(){const {total,limit,offset}=this._meta;const start=total?offset+1:0,end=Math.min(offset+limit,total);return `<div class="pagination">
+    <span>Showing ${start}–${end} of ${total}</span><button class="btn btn-secondary" ${offset<=0?'disabled':''} onclick="WorkDispatchPage.changePage(-1)">Previous</button>
+    <span>Page ${total?Math.floor(offset/limit)+1:1} of ${Math.max(1,Math.ceil(total/limit))}</span><button class="btn btn-secondary" ${offset+limit>=total?'disabled':''} onclick="WorkDispatchPage.changePage(1)">Next</button></div>`;},
 
   _availableHtml() {
     const rows = Array.isArray(this._candidates) ? this._candidates : [];
-    return `<div class="dispatch-controls card"><div class="form-grid">
-      <div class="form-field"><label for="dispatchWorkspace">Open Workspace</label><select id="dispatchWorkspace">${this._workspaces.map(item => `<option value="${esc(item.uuid)}">${esc(item.title)}</option>`).join('')}</select></div>
-      <div class="form-field form-field-full"><label>Model configurations</label><p class="field-help">Each selected configuration creates a separate comparable run for every selected Album.</p><div class="dispatch-configs">${this._configurations.map(item => `<label class="dispatch-config"><input type="checkbox" name="dispatchConfig" value="${esc(item.uuid)}"><span>${this._configurationSummary(item)}</span></label>`).join('') || 'No Active configuration'}</div></div>
+    const noWorkspace=!this._workspaces.length;
+    return `<div class="dispatch-controls card">${noWorkspace?'<div class="alert alert-warning">No Open AI Workspace exists. Create one before Preview dispatch. <a class="btn btn-primary" href="#/ai-workspaces">Create Workspace</a></div>':''}<div class="form-grid">
+      <div class="form-field"><label for="dispatchWorkspace">Open Workspace</label><select id="dispatchWorkspace" onchange="WorkDispatchPage._selectionChanged()" ${noWorkspace?'disabled':''}>${this._workspaces.map(item => `<option value="${esc(item.uuid)}">${esc(item.title)}</option>`).join('')}${noWorkspace?'<option value="">No Open Workspace</option>':''}</select></div>
+      <div class="form-field form-field-full"><label>Model configurations</label><p class="field-help">Each selected configuration creates a separate comparable run for every selected Album.</p><div class="dispatch-configs">${this._configurations.map(item => `<label class="dispatch-config"><input type="checkbox" name="dispatchConfig" value="${esc(item.uuid)}"><span>${this._configurationSummary(item)}</span></label>`).join('') || '<div class="empty-state">No enabled AI Model Configuration exists. <a class="btn btn-primary" href="#/admin/ai-model-configurations">Create model configuration</a></div>'}</div></div>
       </div><div class="detail-actions"><button class="btn btn-secondary" onclick="WorkDispatchPage.selectPage()">Select current page</button>
       <button class="btn btn-secondary" onclick="WorkDispatchPage.selectFirst()">Select first N…</button>
       <button id="dispatchPreviewBtn" class="btn btn-primary" onclick="WorkDispatchPage.preview()" disabled>Preview dispatch</button>
       <span id="dispatchSelectionCount">0 Albums selected</span></div></div>
       <div class="card table-wrap"><table><thead><tr><th>Select</th><th>Album</th><th>Studio</th><th>Status</th><th>Eligibility</th><th>Warnings</th></tr></thead><tbody>
-      ${rows.map(item => `<tr><td><input type="checkbox" data-dispatch-album="${item.id}" ${item.can_dispatch ? '' : 'disabled'} onchange="WorkDispatchPage.toggle(${item.id},this.checked)"></td>
+      ${rows.map(item => `<tr><td><input type="checkbox" aria-label="Select ${esc(item.title)}" data-dispatch-album="${item.id}" ${item.can_dispatch ? '' : 'disabled'} onchange="WorkDispatchPage.toggle(${item.id},this.checked)"></td>
         <td><a href="#/albums/${item.id}">${esc(item.title)}</a></td><td>${esc(item.studio_name || '—')}</td><td>${esc(item.status_name || '—')}</td>
         <td><span class="chip ${item.can_dispatch ? 'chip-ok' : 'chip-error'}">${esc(item.eligibility)}</span>${item.eligibility_reason ? `<div>${esc(item.eligibility_reason)}</div>` : ''}</td>
         <td>${(item.warnings || []).map(value => `<span class="chip chip-warn">${esc(value)}</span>`).join(' ') || '—'}</td></tr>`).join('') || '<tr><td colspan="6">No Albums are currently available for this Worker.</td></tr>'}
@@ -120,33 +148,44 @@ const WorkDispatchPage = {
       <div class="dispatch-group-footer">${group.item_count} runs · ${group.open_review_count} open reviews · ${group.promotion_count} promotions${group.closure_operation_uuid ? ` · <a href="#/operations/${esc(group.closure_operation_uuid)}">Operation</a>` : ''}</div></section>`).join('') || `<div class="card empty-state">No ${esc(this._view)} Groups.</div>`;
   },
 
-  changeView(view) { this._view = view; this._selected = new Set(); void this.loadView(); },
-  toggle(id, checked) { if (checked) this._selected.add(id); else this._selected.delete(id); this._selectionChanged(); },
+  changeView(view) { this._view = view; this._resetSelection(); void this.loadView(); },
+  _resetSelection(){this._selected=new Set();this._selectionMode='ids';this._firstN=null;},
+  workerChanged(){this._state[this._view].offset=0;this._resetSelection();void this.loadView();},
+  filterChanged(){const state=this._state.available;state.status_id=document.getElementById('dispatchStatusFilter').value;state.studio_id=document.getElementById('dispatchStudioFilter').value;state.model_id=document.getElementById('dispatchModelFilter').value;state.offset=0;this._resetSelection();void this.loadView();},
+  clearFilters(){Object.assign(this._state.available,{status_id:'',studio_id:'',model_id:'',offset:0});this._resetSelection();void this.loadView();},
+  pageSizeChanged(value){const size=Number(value);if(![25,50,100].includes(size))return;this._state[this._view].limit=size;this._state[this._view].offset=0;this._resetSelection();void this.loadView();},
+  changePage(direction){const state=this._state[this._view];const next=state.offset+direction*state.limit;if(next<0||next>=this._meta.total)return;state.offset=next;this._resetSelection();void this.loadView();},
+  toggle(id, checked) { this._selectionMode='ids';this._firstN=null;if (checked) this._selected.add(id); else this._selected.delete(id); this._selectionChanged(); },
   _selectionChanged() {
-    const count = this._selected.size;
-    const label = document.getElementById('dispatchSelectionCount'); if (label) label.textContent = `${count} Albums selected`;
-    const button = document.getElementById('dispatchPreviewBtn'); if (button) button.disabled = count === 0;
+    const count = this._selectionMode==='first_n'?this._firstN:this._selected.size;
+    const label = document.getElementById('dispatchSelectionCount'); if (label) label.textContent = this._selectionMode==='first_n'?`First ${count} filtered Albums selected`:`${count} Albums selected`;
+    const workspace=document.getElementById('dispatchWorkspace')?.value;
+    const button = document.getElementById('dispatchPreviewBtn'); if (button) button.disabled = !count||!workspace;
   },
   selectPage() {
+    this._selectionMode='ids';this._firstN=null;
     this._selected = new Set((Array.isArray(this._candidates) ? this._candidates : []).filter(item => item.can_dispatch).map(item => item.id));
     document.querySelectorAll('[data-dispatch-album]').forEach(input => { input.checked = this._selected.has(Number(input.dataset.dispatchAlbum)); });
     this._selectionChanged();
   },
   selectFirst() {
-    const raw = window.prompt('How many currently filtered Albums should be selected? (1–100)', '10');
+    const raw = window.prompt('How many Albums from the complete filtered result should be selected? (1–100)', '10');
     const count = Number(raw); if (!Number.isInteger(count) || count < 1 || count > 100) { toast('Enter a number from 1 to 100.', 'error'); return; }
-    this._selected = new Set((Array.isArray(this._candidates) ? this._candidates : []).filter(item => item.can_dispatch).slice(0,count).map(item => item.id));
-    document.querySelectorAll('[data-dispatch-album]').forEach(input => { input.checked = this._selected.has(Number(input.dataset.dispatchAlbum)); });
+    this._selectionMode='first_n';this._firstN=count;this._selected=new Set();document.querySelectorAll('[data-dispatch-album]').forEach(input=>{input.checked=false;});
     this._selectionChanged();
   },
 
   async preview() {
+    const workspace=document.getElementById('dispatchWorkspace')?.value;
+    if(!workspace){toast('Create and select an Open AI Workspace before Preview dispatch.','error');return;}
     const configurations = [...document.querySelectorAll('input[name="dispatchConfig"]:checked')].map(input => input.value);
     if (!configurations.length) { toast('Select at least one model configuration.', 'error'); return; }
+    const state=this._state.available;const filters={};for(const key of ['status_id','studio_id','model_id'])if(state[key])filters[key]=state[key];
+    const selection=this._selectionMode==='first_n'?{filters,first_n:this._firstN}:{album_ids:[...this._selected]};
     const result = await ui.runAction('dispatch-preview', () => api.post('/work-dispatch/preview', {
       worker_kind: document.getElementById('dispatchWorkerKind').value,
-      workspace_uuid: document.getElementById('dispatchWorkspace').value,
-      configuration_uuids: configurations, album_ids: [...this._selected],
+      workspace_uuid: workspace,
+      configuration_uuids: configurations, ...selection,
     }), { context: 'preview Work Dispatch' });
     if (!result.ok) return;
     this._preview = result.value.preview;
@@ -166,6 +205,6 @@ const WorkDispatchPage = {
     if (!result.ok) return;
     const groups = result.value.result.groups || []; this._preview = null; closeModal();
     toast(`Dispatched ${groups.length} Album Group(s). Album Status was unchanged.`);
-    this._view = 'active'; this._selected = new Set(); await this.loadView();
+    this._view = 'active'; this._resetSelection(); await this.loadView();
   },
 };
