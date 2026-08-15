@@ -23,3 +23,4 @@ database access; Web UI, AI Worker, and tools are API clients.
 | [MT-007](MT-007-add-album-remark-schema-compatibility.md) | Album remark compatibility | Completed |
 | [MT-008](MT-008-close-and-archive-historical-workspace-albums.md) | Historical Workspace closure/archive | Completed |
 | [MT-009](MT-009-add-runnable-ai-worker.md) | Runnable, enrollable WSL2 AI Worker | Completed |
+| [MT-010](MT-010-add-capability-aware-waiting-ai-worker.md) | Capability-declared long-poll AI Worker | Proposed |

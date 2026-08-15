@@ -76,10 +76,15 @@ are approved.
 | [BT-060](BT-060-managed-registration-proof-lifecycle.md) | Admin-managed hash-only Registration Proof lifecycle. |
 | [BT-061](BT-061-client-owned-device-token-enrollment.md) | Client-owned Device Token activation after Admin approval. |
 | [BT-062](BT-062-claim-owner-evidence-manifest-access.md) | Active Writer claim-owner access to Backend-selected Evidence Manifests. |
+| [BT-063](BT-063-capability-aware-long-poll-work-claim.md) | Capability-matched atomic claims with bounded long-poll wake-up and attempt audit snapshots. |
 
 BT identifiers record planning order, not mandatory execution order. Dispatch
 is an entry boundary for AI work, so BT-054 through BT-056 precede BT-047 in
 the first complete workflow. BT-057 follows review and Promotion behavior.
+
+BT-063 extends the completed claim and Dispatch foundations. Its controlling API
+and Work Dispatch specification amendments precede the matching Worker runtime
+change in MT-010.
 
 Recommended implementation order:
 
