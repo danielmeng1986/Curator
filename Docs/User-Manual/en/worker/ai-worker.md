@@ -138,17 +138,23 @@ Confirm the Admin configuration's `model_file` exists below the chosen model
 root, then start the Worker:
 
 ```bash
-python3 -m workers.ai_worker run --llama-cli /opt/llama.cpp/build/bin/llama-mtmd-cli --model-root /opt/curator-models --mmproj /opt/curator-models/mmproj.gguf
+python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /opt/llama.cpp/build/bin/llama-mtmd-cli --model-root /opt/curator-models --mmproj /opt/curator-models/mmproj.gguf
 ```
 
 Omit `--mmproj` only when the chosen llama.cpp/model combination does not
-require a separate projector. Use `--once` for a controlled smoke run: it
-processes at most one available item, or exits successfully when none is ready.
+require a separate projector. Normal mode waits on outbound HTTP requests of at
+most 30 seconds for `album_name_analysis` work. A committed Dispatch wakes a
+compatible Worker without rerunning the command or opening a WSL listener.
+Normal timeout renews quietly; transient network or Backend restart failures
+use bounded backoff, while authentication, authorization, and configuration
+errors stop visibly. Use `--once` for one immediate non-waiting compatible
+claim: it processes at most one available item or exits successfully when none
+is ready.
 
 The runtime performs this sequence:
 
 1. Validate configuration and Backend reachability before claiming.
-2. Poll for one eligible Work Item using its approved Writer identity.
+2. Declare `album_name_analysis` on every claim and wait for a matching Work Item.
 3. Maintain the lease with heartbeats while processing.
 4. Download only the immutable Evidence Manifest items through the API.
 5. Run Vision processing and submit the versioned Vision result.
@@ -183,7 +189,7 @@ rerun Worker tests, inspect `--help`, and review release notes before restarting
 | Health works in Windows but not Ubuntu | Check WSL DNS/VPN/NAT behavior and the Microsoft networking guide; use the Backend's private IPv4 for a separate host. |
 | `401` | Credential is missing, expired, revoked, replaced, or not yet approved. Never print it while diagnosing. |
 | `403` | Confirm the dedicated Worker device was approved as Writer with required scopes; do not elevate to Admin. |
-| No Work Item is claimed | Confirm Admin dispatched an eligible Album and configuration; `--once` exits normally when the queue is empty. |
+| No Work Item is claimed | Confirm the process uses `--worker-kind album_name_analysis` and Admin dispatched the same Worker kind; `--once` exits normally when the queue is empty. |
 | Model/provider failure | Preserve redacted diagnostics and leave Review/Promotion untouched; the Worker reports failure or retries inference according to its lease policy. |
 
 <!-- manual-section: security -->

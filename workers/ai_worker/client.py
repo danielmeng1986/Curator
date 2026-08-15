@@ -5,7 +5,9 @@ import hashlib
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-class CuratorApiError(RuntimeError): pass
+class CuratorApiError(RuntimeError):
+    def __init__(self,message,*,status=None,transient=False):
+        super().__init__(message);self.status,self.transient=status,transient
 
 class CuratorClient:
     def __init__(self, base_url: str, token: str, opener=urlopen):
@@ -16,14 +18,16 @@ class CuratorClient:
             with self._opener(request, timeout=10) as response: return json.loads(response.read())
         except HTTPError as exc: raise CuratorApiError(f"Backend rejected request: HTTP {exc.code}") from exc
         except URLError as exc: raise CuratorApiError("Backend unavailable; retry the worker request.") from exc
-    def post(self, path: str, body: dict) -> dict:
+    def post(self, path: str, body: dict, *, timeout: float = 10) -> dict:
         request = Request(f"{self.base_url}/api/v1{path}", data=json.dumps(body).encode(), method="POST",
             headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json", "Content-Type": "application/json"})
         try:
-            with self._opener(request, timeout=10) as response: return json.loads(response.read())
-        except HTTPError as exc: raise CuratorApiError(f"Backend rejected request: HTTP {exc.code}") from exc
-        except URLError as exc: raise CuratorApiError("Backend unavailable; retry the worker request.") from exc
-    def claim_work(self, lease_seconds: int = 300) -> dict: return self.post("/ai-work-items/claim", {"lease_seconds": lease_seconds})
+            with self._opener(request, timeout=timeout) as response: return json.loads(response.read())
+        except HTTPError as exc: raise CuratorApiError(f"Backend rejected request: HTTP {exc.code}",status=exc.code,transient=exc.code>=500) from exc
+        except (URLError,TimeoutError) as exc: raise CuratorApiError("Backend unavailable; retry the worker request.",transient=True) from exc
+    def claim_work(self, worker_kind: str, lease_seconds: int = 300, wait_seconds: int = 0) -> dict:
+        return self.post("/ai-work-items/claim",{"worker_kinds":[worker_kind],"lease_seconds":lease_seconds,
+            "wait_seconds":wait_seconds},timeout=max(10,wait_seconds+10))
     def heartbeat(self, item_uuid: str, lease_seconds: int = 300) -> dict:
         return self.post(f"/ai-work-items/{item_uuid}/heartbeat", {"lease_seconds": lease_seconds})
     def fail_work(self, item_uuid: str, error_code: str, message: str) -> dict:

@@ -124,16 +124,20 @@ Worker 以 `--model-root /opt/curator-models` 启动时，配置中的
 确认 Admin 配置中的 `model_file` 位于所选 model root 下，然后启动 Worker：
 
 ```bash
-python3 -m workers.ai_worker run --llama-cli /opt/llama.cpp/build/bin/llama-mtmd-cli --model-root /opt/curator-models --mmproj /opt/curator-models/mmproj.gguf
+python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /opt/llama.cpp/build/bin/llama-mtmd-cli --model-root /opt/curator-models --mmproj /opt/curator-models/mmproj.gguf
 ```
 
-仅当所选 llama.cpp/模型组合不要求独立 projector 时才省略 `--mmproj`。使用 `--once`
-进行受控 smoke run：最多处理一个可用 item；没有任务时正常退出。
+仅当所选 llama.cpp/模型组合不要求独立 projector 时才省略 `--mmproj`。正常模式会用最长
+30 秒的 outbound HTTP 请求等待 `album_name_analysis` 任务；Backend Dispatch 提交后会立即
+唤醒兼容 Worker，不需要重新运行命令，也不会在 WSL 开放监听端口。正常超时会安静地开始
+下一次等待。临时网络或 Backend 重启会使用有上限的退避重连；认证、授权和配置错误会明确
+停止。使用 `--once` 进行受控 smoke run：只做一次不等待的匹配 claim，最多处理一个 item，
+没有任务时正常退出。
 
 runtime 执行以下顺序：
 
 1. claim 前校验配置与 Backend 连通性。
-2. 使用获准 Writer 身份轮询一个符合条件的 Work Item。
+2. 每次 claim 声明 `album_name_analysis` 能力并等待一个匹配的 Work Item。
 3. 处理期间通过 heartbeat 维持 lease。
 4. 只通过 API 下载不可变 Evidence Manifest 中的项目。
 5. 执行 Vision 处理并提交带版本的 Vision 结果。
@@ -166,7 +170,7 @@ Admin policy 让 item 可重试。
 | Windows 可访问但 Ubuntu 不可访问 | 检查 WSL DNS/VPN/NAT 行为并参考 Microsoft 网络指南；连接另一台主机时使用 Backend 私有 IPv4。 |
 | `401` | 凭据缺失、过期、已撤销、已替换或尚未批准；排障时绝不要打印它。 |
 | `403` | 确认专用 Worker 设备已按所需 scopes 批准为 Writer；不要提升为 Admin。 |
-| 没有领取 Work Item | 确认 Admin 已派发符合条件的 Album 与配置；队列为空时 `--once` 会正常退出。 |
+| 没有领取 Work Item | 确认进程使用 `--worker-kind album_name_analysis`，Admin 已派发相同 Worker kind 的 Album 与配置；队列为空时 `--once` 会正常退出。 |
 | 模型/provider 失败 | 保留脱敏诊断，保持 Review/Promotion 不变；Worker 会依照 lease policy 上报失败或重试推理。 |
 
 <!-- manual-section: security -->

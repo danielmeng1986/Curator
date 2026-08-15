@@ -24,13 +24,16 @@ class LeaseHeartbeat:
         if self.thread:self.thread.join(timeout=5)
 
 class WorkerRuntime:
-    def __init__(self,client,workflow,*,lease_seconds=300,temp_root=None):
-        self.client,self.workflow,self.lease_seconds=client,workflow,lease_seconds;self.temp_root=temp_root
+    def __init__(self,client,workflow,*,worker_kind="album_name_analysis",lease_seconds=300,temp_root=None):
+        self.client,self.workflow,self.worker_kind,self.lease_seconds=client,workflow,worker_kind,lease_seconds;self.temp_root=temp_root
     def run_once(self,claimed=None):
-        claimed=claimed or payload_data(self.client.claim_work(self.lease_seconds)).get("item")
+        claimed=claimed or payload_data(self.client.claim_work(self.worker_kind,self.lease_seconds,0)).get("item")
         if not claimed:return None
         item_uuid=claimed["uuid"]
         try:
+            if claimed.get("worker_kind")!=self.worker_kind:
+                self.client.fail_work(item_uuid,"WORKER_KIND_MISMATCH","Claimed Work Item kind does not match this Worker process.")
+                raise RuntimeError("Claimed Work Item kind does not match this Worker process.")
             with LeaseHeartbeat(self.client,item_uuid,self.lease_seconds) as heartbeat:
                 manifest=payload_data(self.client.prepare_manifest(item_uuid))["manifest"]
                 with tempfile.TemporaryDirectory(prefix="curator-ai-worker-",dir=self.temp_root) as directory:

@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`MT-010` — Status: `Proposed`
+`MT-010` — Status: `Complete`
 
 ## Title
 
@@ -145,3 +145,18 @@ automatically, promptly, and safely over outbound HTTP.
 - The initial single-kind process is intentional. Supporting several kinds in
   one process requires explicit workflow/provider compatibility and scheduling
   policy rather than accepting an arbitrary list at the CLI.
+
+## Completion Record
+
+- Added required `--worker-kind album_name_analysis` startup selection and a
+  local workflow registry that rejects unsupported kinds before claim.
+- Replaced fixed empty-queue sleeping with renewable bounded long polls;
+  `--once` remains one immediate compatible claim and exits cleanly when empty.
+- Added bounded exponential reconnect backoff with jitter for transient
+  transport failures while leaving authentication, authorization, and contract
+  failures terminal.
+- Added returned-kind validation before evidence/model access, truthful mismatch
+  failure reporting, and retained heartbeat, cleanup, two-stage submission, and
+  Ctrl-C behavior.
+- Updated English/Chinese deployment guidance and unit/real-HTTP regression
+  coverage. Completed on 2026-08-15 with all release gates passing.

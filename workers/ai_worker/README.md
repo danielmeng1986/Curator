@@ -7,7 +7,8 @@ python3 -m workers.ai_worker --help
 ```
 
 Use `enroll` to create a dedicated WSL2-owned Writer identity, `status` after
-Admin approval, and `run` to poll and process Work Items. Private state defaults
+Admin approval, and `run --worker-kind album_name_analysis` to wait for and
+process compatible Work Items. Private state defaults
 to `~/.config/curator/ai-worker.json` with mode `0600`.
 
 The Worker never opens SQLite, imports Backend code, reads an Album path, or

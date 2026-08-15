@@ -8,6 +8,7 @@ from workers.ai_worker.client import CuratorClient,EnrollmentClient
 from workers.ai_worker.workflow import AnalysisWorkflow
 from workers.ai_worker.provider import LlamaCliProvider,ProviderError,parse_json_object
 from workers.ai_worker.runtime import WorkerRuntime
+from workers.ai_worker.cli import parser
 from workers.ai_worker import config
 class FakeProvider:
     def __init__(self, failures=0): self.failures=failures
@@ -15,6 +16,11 @@ class FakeProvider:
         if self.failures: self.failures-=1; raise ProviderError("x")
         return '{"suggested_names": []}'
 class WorkerTests(unittest.TestCase):
+    def test_run_requires_a_registered_worker_kind(self):
+        with self.assertRaises(SystemExit):parser().parse_args(["run","--llama-cli","llama","--model-root","models"])
+        args=parser().parse_args(["run","--worker-kind","album_name_analysis","--llama-cli","llama","--model-root","models","--once"])
+        self.assertEqual("album_name_analysis",args.worker_kind);self.assertTrue(args.once)
+
     def test_result_is_suggestion_only_after_retry(self):
         result=AnalysisWorkflow(FakeProvider(1), sleep=lambda _: None).analyze("x")
         self.assertEqual("suggestion_only", result["status"]); self.assertEqual(2, result["attempt"])
@@ -27,10 +33,11 @@ class WorkerTests(unittest.TestCase):
             def read(self): return b'{"data":{"item":null}}'
         def opener(request, timeout): requests.append(request); return Response()
         client = CuratorClient("http://curator", "writer-token", opener=opener)
-        client.claim_work(120); client.heartbeat("item-1", 120); client.fail_work("item-1", "MODEL_TIMEOUT", "timeout")
+        client.claim_work("album_name_analysis",120,30);client.heartbeat("item-1",120);client.fail_work("item-1","MODEL_TIMEOUT","timeout")
         self.assertEqual(["/api/v1/ai-work-items/claim", "/api/v1/ai-work-items/item-1/heartbeat", "/api/v1/ai-work-items/item-1/fail"],
                          [request.full_url.replace("http://curator", "") for request in requests])
         self.assertTrue(all(request.headers["Authorization"] == "Bearer writer-token" for request in requests))
+        self.assertEqual({"worker_kinds":["album_name_analysis"],"lease_seconds":120,"wait_seconds":30},json.loads(requests[0].data))
         self.assertEqual("MODEL_TIMEOUT", json.loads(requests[2].data)["error_code"])
 
     def test_worker_downloads_evidence_by_opaque_identity_only(self):
@@ -80,7 +87,7 @@ class WorkerTests(unittest.TestCase):
         image=b"\xff\xd8\xfffixture";digest=hashlib.sha256(image).hexdigest()
         class Client:
             def __init__(self):self.calls=[]
-            def claim_work(self,*_):return {"data":{"item":{"uuid":"item-1","configuration_snapshot":{}}}}
+            def claim_work(self,*_):return {"data":{"item":{"uuid":"item-1","worker_kind":"album_name_analysis","configuration_snapshot":{}}}}
             def prepare_manifest(self,item):return {"data":{"manifest":{"evidence":[{"uuid":"e-1","ordinal":1,"size_bytes":len(image),"sha256":digest,"mime_type":"image/jpeg"}]}}}
             def download_evidence(self,*_):return image
             def submit_vision(self,*args):self.calls.append(("vision",args))
@@ -92,6 +99,15 @@ class WorkerTests(unittest.TestCase):
             def writer(self,vision,settings):return {"suggested_names":["a"]},{"duration_ms":1}
         client=Client();workflow=Workflow();self.assertEqual("item-1",WorkerRuntime(client,workflow).run_once())
         self.assertEqual(["vision","writer"],[item[0] for item in client.calls]);self.assertFalse(workflow.paths[0].exists())
+
+    def test_runtime_rejects_and_truthfully_fails_a_mismatched_claim_before_evidence(self):
+        class Client:
+            def __init__(self):self.calls=[]
+            def fail_work(self,*args):self.calls.append(args)
+        client=Client();claimed={"uuid":"item-1","worker_kind":"other_kind","configuration_snapshot":{}}
+        with self.assertRaisesRegex(RuntimeError,"does not match"):
+            WorkerRuntime(client,object(),worker_kind="album_name_analysis").run_once(claimed)
+        self.assertEqual("WORKER_KIND_MISMATCH",client.calls[0][1])
 
     def test_json_extraction_ignores_provider_noise(self):
         self.assertEqual({"scene":"lake"},parse_json_object("timing log\n{\"scene\":\"lake\"}\nmore"))
