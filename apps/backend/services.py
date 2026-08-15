@@ -22,6 +22,8 @@ import hmac
 import secrets
 import base64
 import json
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -1877,13 +1879,39 @@ class AIModelConfigurationService:
             self._operations.succeed(op["uuid"], summary=summary)
 
 
+class WorkClaimCoordinator:
+    """Process-local wake optimization; durable SQLite claims remain authoritative."""
+
+    def __init__(self):
+        self._condition=threading.Condition();self._generation={}
+
+    def snapshot(self,worker_kinds):
+        with self._condition:return {kind:self._generation.get(kind,0) for kind in worker_kinds}
+
+    def notify(self,worker_kind):
+        with self._condition:
+            self._generation[worker_kind]=self._generation.get(worker_kind,0)+1
+            self._condition.notify_all()
+
+    def wait_for_change(self,snapshot,timeout):
+        with self._condition:
+            return self._condition.wait_for(
+                lambda:any(self._generation.get(kind,0)!=value for kind,value in snapshot.items()),timeout)
+
+
+WORK_CLAIM_COORDINATOR=WorkClaimCoordinator()
+
+
 class AIWorkItemService:
     """Own Album AI queue creation, Worker leases, failures, cancellation and retry."""
 
-    def __init__(self, item_repo, workspace_repo, album_repo, configuration_service, operation_service=None, now_fn=None):
+    def __init__(self, item_repo, workspace_repo, album_repo, configuration_service, operation_service=None, now_fn=None,
+                 claim_coordinator=None,registered_worker_kinds=None):
         self._repo, self._workspaces, self._albums = item_repo, workspace_repo, album_repo
         self._configs, self._operations = configuration_service, operation_service
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
+        self._claim_coordinator=claim_coordinator or WORK_CLAIM_COORDINATOR
+        self._registered_worker_kinds=frozenset(registered_worker_kinds or {"album_name_analysis"})
 
     def create(self, workspace_uuid, album_id, configuration_uuid):
         workspace = self._workspaces.get(workspace_uuid)
@@ -1906,13 +1934,32 @@ class AIWorkItemService:
         if include_attempts: item["attempts"] = self._repo.attempts(item_uuid)
         return item
 
-    def claim_next(self, worker_token_uuid, lease_seconds=300):
+    def _worker_kinds(self,worker_kinds):
+        if not isinstance(worker_kinds,list) or not 1<=len(worker_kinds)<=8:
+            raise ValueError("worker_kinds must contain 1 to 8 registered Worker kinds.")
+        if any(not isinstance(kind,str) or not re.fullmatch(r"[a-z][a-z0-9_]{1,63}",kind) for kind in worker_kinds):
+            raise ValueError("worker_kinds contains a malformed Worker kind.")
+        if len(set(worker_kinds))!=len(worker_kinds):raise ValueError("worker_kinds must not contain duplicates.")
+        unknown=set(worker_kinds)-self._registered_worker_kinds
+        if unknown:raise ValueError(f"worker_kinds contains unsupported values: {sorted(unknown)}.")
+        return tuple(worker_kinds)
+
+    def claim_next(self, worker_token_uuid, lease_seconds=300, worker_kinds=None, wait_seconds=0):
         if not isinstance(lease_seconds, int) or not 60 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be an integer from 60 to 3600.")
-        now = self._now(); item = self._repo.claim_next(worker_token_uuid, now.isoformat(),
-            (now + timedelta(seconds=lease_seconds)).isoformat())
-        if item: self._record("ai_work_item_claim", item, f"AI Worker claimed attempt {item['attempt_count']}", OP_INITIATOR_AI_WORKER)
-        return item
+        if not isinstance(wait_seconds,int) or not 0<=wait_seconds<=30:
+            raise ValueError("wait_seconds must be an integer from 0 to 30.")
+        kinds=self._worker_kinds(["album_name_analysis"] if worker_kinds is None else worker_kinds);deadline=time.monotonic()+wait_seconds
+        while True:
+            observed=self._claim_coordinator.snapshot(kinds)
+            now=self._now();item=self._repo.claim_next(worker_token_uuid,kinds,now.isoformat(),
+                (now+timedelta(seconds=lease_seconds)).isoformat())
+            if item:
+                self._record("ai_work_item_claim",item,f"AI Worker claimed attempt {item['attempt_count']}",OP_INITIATOR_AI_WORKER)
+                return item
+            remaining=deadline-time.monotonic()
+            if remaining<=0:return None
+            self._claim_coordinator.wait_for_change(observed,remaining)
 
     def heartbeat(self, item_uuid, worker_token_uuid, lease_seconds=300):
         if not isinstance(lease_seconds, int) or not 60 <= lease_seconds <= 3600: raise ValueError("lease_seconds must be an integer from 60 to 3600.")
@@ -1998,12 +2045,13 @@ class WorkDispatchService:
     MAX_PREVIEW_ALBUMS = 100
 
     def __init__(self, dispatch_repo, album_repo, adapter_registry=None, now_fn=None,
-                 workspace_repo=None, configuration_service=None, preview_secret=None):
+                 workspace_repo=None, configuration_service=None, preview_secret=None,claim_coordinator=None):
         self._repo, self._albums = dispatch_repo, album_repo
         self._adapters = adapter_registry or WorkDispatchAdapterRegistry()
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
         self._workspaces, self._configs = workspace_repo, configuration_service
         self._preview_secret = preview_secret
+        self._claim_coordinator=claim_coordinator or WORK_CLAIM_COORDINATOR
 
     def worker_kinds(self):
         return self._adapters.describe()
@@ -2177,7 +2225,9 @@ class WorkDispatchService:
         if adapter.worker_kind != "album_name_analysis":
             raise ServiceConflict("DISPATCH_ADAPTER_NOT_EXECUTABLE", "The Worker adapter cannot execute this dispatch.")
         try:
-            return self._repo.execute(payload, self._now().isoformat())
+            result=self._repo.execute(payload,self._now().isoformat())
+            self._claim_coordinator.notify(adapter.worker_kind)
+            return result
         except repo.PersistenceConflict as exc:
             code = exc.details.get("code", "ALBUM_WORK_RESERVATION_CONFLICT")
             messages = {"DISPATCH_PREVIEW_REPLAYED":"The Work Dispatch preview was already executed.",

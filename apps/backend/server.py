@@ -1301,7 +1301,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                     "Create AI Work Items through Work Dispatch preview and execution.")
             elif path == "/api/ai-work-items/claim":
                 if not self._require_worker_principal(): return
-                item = self._ai_work_item_service().claim_next(self._principal["token_uuid"], body.get("lease_seconds", 300))
+                if "worker_kinds" not in body:raise ValueError("worker_kinds is required.")
+                item = self._ai_work_item_service().claim_next(self._principal["token_uuid"],body.get("lease_seconds",300),
+                    body.get("worker_kinds"),body.get("wait_seconds",0))
                 self._send_success(200, {"item": item})
             elif re.match(r"^/api/ai-work-items/[^/]+/(heartbeat|fail)$", path):
                 if not self._require_worker_principal(): return

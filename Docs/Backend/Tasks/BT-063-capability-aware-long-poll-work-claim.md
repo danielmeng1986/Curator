@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-063` — Status: `Proposed`
+`BT-063` — Status: `Complete`
 
 ## Title
 
@@ -156,3 +156,18 @@ binding work permanently to one Device.
   increasing the timeout.
 - Runtime capability declarations describe process behavior; they do not grant
   additional authorization beyond the approved Writer Token.
+
+## Completion Record
+
+- Amended the controlling API and Work Dispatch specifications before changing
+  implementation behavior.
+- Added ordered migration `0016` for immutable Work Item `worker_kind`,
+  deterministic Album-analysis backfill, the queue index, and attempt capability
+  snapshots.
+- Added capability validation, atomic kind-filtered claims, bounded 0–30 second
+  waiting, commit-time compatible wake-up, durable rechecks, and zero-write
+  timeout behavior.
+- Added migration, service, real-HTTP Dispatch-during-wait, authorization,
+  validation, incompatible-head, and audit-snapshot coverage.
+- Completed on 2026-08-15; the 690-test Backend/Worker regression and complete
+  15-suite UI readiness gate passed.

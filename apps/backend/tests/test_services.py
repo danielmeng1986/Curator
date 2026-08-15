@@ -1380,6 +1380,22 @@ class TestAIWorkItemClaimContract(unittest.TestCase):
         reclaimed = self.service.claim_next("worker-two", 60); self.assertEqual(item["uuid"], reclaimed["uuid"])
         self.assertEqual("LeaseExpired", self.service.get(item["uuid"], True)["attempts"][0]["outcome"])
 
+    def test_claim_skips_incompatible_head_and_snapshots_declared_capabilities(self):
+        first=self.service.create(self.workspace["uuid"],self.album_id,self.config["uuid"])
+        self.conn.execute("UPDATE workspace_album_ai_worker SET worker_kind='metadata_enrichment' WHERE uuid=?",(first["uuid"],))
+        second=self.service.create(self.workspace["uuid"],self.album_id,self.config["uuid"])
+        claimed=self.service.claim_next("worker-one",60,["album_name_analysis"],0)
+        self.assertEqual(second["uuid"],claimed["uuid"]);self.assertEqual("album_name_analysis",claimed["worker_kind"])
+        attempt=self.service.get(second["uuid"],True)["attempts"][0]
+        self.assertEqual('["album_name_analysis"]',attempt["worker_kinds_json"])
+        self.assertEqual("Pending",self.service.get(first["uuid"])["run_state"])
+
+    def test_claim_capability_and_wait_bounds_are_validated_without_mutation(self):
+        item=self.service.create(self.workspace["uuid"],self.album_id,self.config["uuid"])
+        for kinds,wait in [([],0),(["unknown_kind"],0),(["album_name_analysis","album_name_analysis"],0),(["album_name_analysis"],31)]:
+            with self.assertRaises(ValueError):self.service.claim_next("worker-one",60,kinds,wait)
+        self.assertEqual(0,self.service.get(item["uuid"])["attempt_count"])
+
     def test_closed_workspace_and_disabled_config_cannot_queue(self):
         self.conn.execute("UPDATE ai_workspace SET lifecycle_state='Closed',version=2 WHERE uuid=?",(self.workspace["uuid"],)); self.conn.commit()
         closed = self.workspace_repo.get(self.workspace["uuid"])
@@ -1644,7 +1660,7 @@ class TestAtomicAlbumAIWorkDispatchContract(unittest.TestCase):
                 conn.executescript(_SCHEMA_SQL)
                 for name in ("0003_ai_workspace_container.sql","0004_ai_model_configuration.sql",
                              "0005_album_ai_work_item.sql","0006_work_dispatch_foundation.sql",
-                             "0007_work_dispatch_execution.sql"):
+                             "0007_work_dispatch_execution.sql","0016_capability_aware_work_claim.sql"):
                     conn.executescript((migrations / name).read_text())
                 conn.execute("INSERT INTO album (id,uuid,title,updated_at) VALUES (1,'race-execute','Race','v1')")
                 conn.execute("INSERT INTO ai_dataset_schema VALUES ('album_analysis',1,'Active','{}','now')")

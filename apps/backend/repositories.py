@@ -2298,6 +2298,7 @@ class AIWorkItemRepository:
         conn.execute("""CREATE TABLE IF NOT EXISTS workspace_album_ai_worker (
             id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
             workspace_uuid TEXT NOT NULL, album_id INTEGER NOT NULL,
+            worker_kind TEXT NOT NULL DEFAULT 'album_name_analysis',
             ai_model_configuration_uuid TEXT NOT NULL, configuration_snapshot_json TEXT NOT NULL,
             run_state TEXT NOT NULL DEFAULT 'Pending' CHECK(run_state IN ('Pending','Claimed','Failed','Cancelled','Completed')),
             attempt_count INTEGER NOT NULL DEFAULT 0, claimed_by_token_uuid TEXT,
@@ -2309,7 +2310,7 @@ class AIWorkItemRepository:
             id INTEGER PRIMARY KEY AUTOINCREMENT, work_item_uuid TEXT NOT NULL,
             attempt_number INTEGER NOT NULL, worker_token_uuid TEXT NOT NULL,
             claimed_at TEXT NOT NULL, lease_expires_at TEXT NOT NULL, ended_at TEXT,
-            outcome TEXT, error_code TEXT, error_message TEXT,
+            outcome TEXT, error_code TEXT, error_message TEXT, worker_kinds_json TEXT,
             UNIQUE(work_item_uuid,attempt_number), FOREIGN KEY(work_item_uuid) REFERENCES workspace_album_ai_worker(uuid))"""); conn.commit()
 
     @staticmethod
@@ -2321,9 +2322,10 @@ class AIWorkItemRepository:
         with self._db() as conn:
             self._ensure_schema(conn)
             cur = conn.execute("""INSERT INTO workspace_album_ai_worker
-                (uuid,workspace_uuid,album_id,ai_model_configuration_uuid,configuration_snapshot_json,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?)""", (item_uuid, fields["workspace_uuid"], fields["album_id"],
-                fields["ai_model_configuration_uuid"], fields["configuration_snapshot_json"], fields["created_at"], fields["created_at"]))
+                (uuid,workspace_uuid,album_id,worker_kind,ai_model_configuration_uuid,configuration_snapshot_json,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?)""", (item_uuid, fields["workspace_uuid"], fields["album_id"],
+                fields.get("worker_kind","album_name_analysis"),fields["ai_model_configuration_uuid"],
+                fields["configuration_snapshot_json"], fields["created_at"], fields["created_at"]))
             conn.commit(); row = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE id=?", (cur.lastrowid,)).fetchone()
         return self._norm(row)
 
@@ -2343,12 +2345,14 @@ class AIWorkItemRepository:
             self._ensure_schema(conn); rows = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE workspace_uuid=? ORDER BY created_at DESC,id DESC", (workspace_uuid,)).fetchall()
         return [self._norm(row) for row in rows]
 
-    def claim_next(self, worker_token_uuid, now, lease_expires_at):
+    def claim_next(self, worker_token_uuid, worker_kinds, now, lease_expires_at):
         with self._db() as conn:
             self._ensure_schema(conn); conn.execute("BEGIN IMMEDIATE")
+            placeholders=",".join("?" for _ in worker_kinds)
             row = conn.execute("""SELECT i.* FROM workspace_album_ai_worker i JOIN ai_workspace w ON w.uuid=i.workspace_uuid
-                WHERE w.lifecycle_state='Open' AND (i.run_state='Pending' OR (i.run_state='Claimed' AND i.lease_expires_at<=?))
-                ORDER BY i.created_at,i.id LIMIT 1""", (now,)).fetchone()
+                WHERE w.lifecycle_state='Open' AND i.worker_kind IN ("""+placeholders+""")
+                AND (i.run_state='Pending' OR (i.run_state='Claimed' AND i.lease_expires_at<=?))
+                ORDER BY i.created_at,i.id LIMIT 1""", (*worker_kinds,now)).fetchone()
             if not row: conn.commit(); return None
             item_uuid, attempt = row["uuid"], row["attempt_count"] + 1
             conn.execute("""UPDATE ai_work_item_attempt SET ended_at=?,outcome='LeaseExpired',error_code='LEASE_EXPIRED'
@@ -2356,8 +2360,10 @@ class AIWorkItemRepository:
             conn.execute("""UPDATE workspace_album_ai_worker SET run_state='Claimed',attempt_count=?,claimed_by_token_uuid=?,
                 lease_expires_at=?,last_error=NULL,version=version+1,updated_at=? WHERE uuid=?""",
                 (attempt, worker_token_uuid, lease_expires_at, now, item_uuid))
-            conn.execute("INSERT INTO ai_work_item_attempt (work_item_uuid,attempt_number,worker_token_uuid,claimed_at,lease_expires_at) VALUES (?,?,?,?,?)",
-                (item_uuid, attempt, worker_token_uuid, now, lease_expires_at)); conn.commit()
+            conn.execute("""INSERT INTO ai_work_item_attempt
+                (work_item_uuid,attempt_number,worker_token_uuid,claimed_at,lease_expires_at,worker_kinds_json)
+                VALUES (?,?,?,?,?,?)""",(item_uuid,attempt,worker_token_uuid,now,lease_expires_at,
+                json.dumps(list(worker_kinds),separators=(",",":"))));conn.commit()
             claimed = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?", (item_uuid,)).fetchone()
         return self._norm(claimed)
 
@@ -2754,9 +2760,9 @@ class AlbumAIWorkDispatchRepository(WorkDispatchRepository):
                         snapshot = {key:value for key,value in config.items() if key not in {"id","created_at","updated_at"}}
                         item_uuid = str(uuid.uuid4())
                         conn.execute("""INSERT INTO workspace_album_ai_worker
-                            (uuid,workspace_uuid,album_id,ai_model_configuration_uuid,configuration_snapshot_json,created_at,updated_at)
-                            VALUES (?,?,?,?,?,?,?)""", (item_uuid,payload["workspace"]["uuid"],album["id"],
-                            config["uuid"],json.dumps(snapshot,sort_keys=True),now,now))
+                            (uuid,workspace_uuid,album_id,worker_kind,ai_model_configuration_uuid,configuration_snapshot_json,created_at,updated_at)
+                            VALUES (?,?,?,?,?,?,?,?)""", (item_uuid,payload["workspace"]["uuid"],album["id"],
+                            payload["worker_kind"],config["uuid"],json.dumps(snapshot,sort_keys=True),now,now))
                         conn.execute("""INSERT INTO work_dispatch_group_item
                             (group_uuid,item_kind,item_uuid,configuration_uuid,created_at) VALUES (?,?,?,?,?)""",
                             (group_uuid,"workspace_album_ai_worker",item_uuid,config["uuid"],now))
@@ -3095,8 +3101,9 @@ class AIReviewRepository:
                     if not link: raise PersistenceConflict({"code":"AI_REWORK_GROUP_REQUIRED"})
                     successor_uuid=str(uuid.uuid4())
                     conn.execute("""INSERT INTO workspace_album_ai_worker
-                        (uuid,workspace_uuid,album_id,ai_model_configuration_uuid,configuration_snapshot_json,created_at,updated_at)
-                        VALUES (?,?,?,?,?,?,?)""",(successor_uuid,item["workspace_uuid"],item["album_id"],item["ai_model_configuration_uuid"],item["configuration_snapshot_json"],now,now))
+                        (uuid,workspace_uuid,album_id,worker_kind,ai_model_configuration_uuid,configuration_snapshot_json,created_at,updated_at)
+                        VALUES (?,?,?,?,?,?,?,?)""",(successor_uuid,item["workspace_uuid"],item["album_id"],item["worker_kind"],
+                        item["ai_model_configuration_uuid"],item["configuration_snapshot_json"],now,now))
                     conn.execute("INSERT INTO work_dispatch_group_item(group_uuid,item_kind,item_uuid,configuration_uuid,created_at) VALUES (?,?,?,?,?)",
                         (link[0],"workspace_album_ai_worker",successor_uuid,item["ai_model_configuration_uuid"],now))
                     conn.execute("INSERT INTO ai_work_item_rework VALUES (?,?,?,?,?)",(item_uuid,successor_uuid,evidence["reason"],actor,now))

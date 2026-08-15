@@ -47,7 +47,7 @@ class AlbumRemarkMigrationTests(unittest.TestCase):
             self.assertEqual((7, "album-7", "Existing Album", "A/Existing", 42, None), row)
             self.assertIn(MIGRATION_ID, versions)
             self.assertEqual("0000_base_catalog", versions[0])
-            self.assertEqual("0015_ui_device_enrollment", versions[-1])
+            self.assertEqual("0016_capability_aware_work_claim", versions[-1])
 
     def test_rerun_is_a_no_op_without_a_second_backup(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -106,6 +106,22 @@ class AIWorkspaceContainerMigrationTests(unittest.TestCase):
             conn.executescript((root / "0005_album_ai_work_item.sql").read_text()); conn.executescript((root / "0005_album_ai_work_item.sql").read_text())
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         self.assertIn("workspace_album_ai_worker", tables); self.assertIn("ai_work_item_attempt", tables)
+
+    def test_0016_backfills_worker_kind_and_adds_attempt_capability_snapshot(self):
+        root=Path(__file__).parents[1]/"migrations"
+        with closing(sqlite3.connect(":memory:")) as conn,conn:
+            conn.execute("PRAGMA foreign_keys=ON");conn.execute("CREATE TABLE album(id INTEGER PRIMARY KEY)")
+            for name in ("0003_ai_workspace_container.sql","0004_ai_model_configuration.sql","0005_album_ai_work_item.sql"):
+                conn.executescript((root/name).read_text())
+            conn.execute("INSERT INTO album VALUES (1)")
+            conn.execute("INSERT INTO ai_dataset_schema VALUES ('album_analysis',1,'Active','{}','n')")
+            conn.execute("INSERT INTO ai_workspace(uuid,dataset_type,schema_version,title,created_at) VALUES ('w','album_analysis',1,'w','n')")
+            conn.execute("INSERT INTO ai_model_configuration(uuid,name,provider_type,model_identifier,model_file,vision_prompt_version,writer_prompt_version,sample_count,context_size,threads,gpu_layers,max_tokens,temperature,image_max_tokens,additional_parameters_json,enabled,version,created_at,updated_at) VALUES ('c','c','llama_cpp','m','f','v','w',8,512,1,0,1,0,1,'{}',1,1,'n','n')")
+            conn.execute("INSERT INTO workspace_album_ai_worker(uuid,workspace_uuid,album_id,ai_model_configuration_uuid,configuration_snapshot_json,created_at,updated_at) VALUES ('i','w',1,'c','{}','n','n')")
+            conn.executescript((root/"0016_capability_aware_work_claim.sql").read_text())
+            row=conn.execute("SELECT worker_kind FROM workspace_album_ai_worker WHERE uuid='i'").fetchone()
+            attempt_columns={column[1] for column in conn.execute("PRAGMA table_info(ai_work_item_attempt)")}
+        self.assertEqual(("album_name_analysis",),row);self.assertIn("worker_kinds_json",attempt_columns)
 
     def test_0006_dispatch_is_repeatable_and_reservation_is_album_unique(self):
         root = Path(__file__).parents[1] / "migrations"
@@ -229,7 +245,7 @@ class CanonicalOrderedMigrationTests(unittest.TestCase):
                 self.assertEqual([], conn.execute("PRAGMA foreign_key_check").fetchall())
                 self.assertEqual("ok", conn.execute("PRAGMA integrity_check").fetchone()[0])
             self.assertTrue(expected <= tables)
-            self.assertEqual(16, len(versions))
+            self.assertEqual(17, len(versions))
             self.assertEqual(tuple(versions), result.applied_migrations)
             self.assertTrue(result.backup and result.backup.is_file())
 
@@ -250,6 +266,22 @@ class CanonicalOrderedMigrationTests(unittest.TestCase):
             )
             self.assertFalse(replay.applied); self.assertIsNone(replay.backup)
             self.assertEqual(2, len(list((root / "backups").glob("*.db"))))
+
+    def test_unrecorded_0015_and_0016_adopt_existing_defensive_columns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);database=root/"adopt.db";migrate(database,root/"backups")
+            with closing(sqlite3.connect(database)) as conn,conn:
+                conn.execute("DELETE FROM schema_migration WHERE migration_id IN ('0015_ui_device_enrollment','0016_capability_aware_work_claim')")
+            result=migrate(database,root/"backups")
+            with closing(sqlite3.connect(database)) as conn:
+                recorded={row[0] for row in conn.execute("SELECT migration_id FROM schema_migration")}
+                registration={row[1] for row in conn.execute("PRAGMA table_info(device_registration)")}
+                work_items={row[1] for row in conn.execute("PRAGMA table_info(workspace_album_ai_worker)")}
+                attempts={row[1] for row in conn.execute("PRAGMA table_info(ai_work_item_attempt)")}
+            self.assertEqual(("0015_ui_device_enrollment","0016_capability_aware_work_claim"),result.applied_migrations)
+            self.assertTrue({"candidate_token_hash","enrollment_proof_hash","enrollment_expires_at","cancelled_at"}<=registration)
+            self.assertIn("worker_kind",work_items);self.assertIn("worker_kinds_json",attempts)
+            self.assertTrue({"0015_ui_device_enrollment","0016_capability_aware_work_claim"}<=recorded)
 
     def test_active_historical_workspace_requires_guarded_mt008_and_rolls_back(self):
         with tempfile.TemporaryDirectory() as tmp:

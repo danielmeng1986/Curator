@@ -27,6 +27,10 @@ brings Authentication and operational workflow tables under migration
 ownership. Repository `CREATE TABLE IF NOT EXISTS` calls remain defensive
 compatibility checks and must match these sources.
 
+`0016` adds the immutable Work Item `worker_kind`, deterministically backfills
+existing Album-analysis Items as `album_name_analysis`, and adds the nullable
+historical attempt capability snapshot used by new claims.
+
 An existing database with active rows in historical `workspace_album` must run
 the guarded MT-008 archive command before the ordered runner can record `0002`:
 

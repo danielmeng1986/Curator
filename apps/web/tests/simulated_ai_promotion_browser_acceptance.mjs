@@ -22,7 +22,7 @@ try{
   const groups=await fixture.request('/work-dispatch/groups?view=active',{role:'admin'});assert.equal(groups.payload.data.length,1);const group=groups.payload.data[0];const detail=await fixture.request(`/work-dispatch/groups/${group.uuid}`,{role:'admin'});const itemUuid=detail.payload.data.group.items[0].item_uuid;
 
   const manifest=await fixture.request(`/ai-work-items/${itemUuid}/evidence-manifest`,{method:'POST',role:'admin',body:{}});assert.equal(manifest.status,201);
-  const claim=await fixture.request('/ai-work-items/claim',{method:'POST',role:'writer',body:{lease_seconds:300}});assert.equal(claim.payload.data.item.uuid,itemUuid);
+  const claim=await fixture.request('/ai-work-items/claim',{method:'POST',role:'writer',body:{worker_kinds:['album_name_analysis'],lease_seconds:300}});assert.equal(claim.payload.data.item.uuid,itemUuid);
   const vision=await fixture.request(`/ai-work-items/${itemUuid}/results/vision`,{method:'POST',role:'writer',body:{schema_version:'curator://album-analysis/vision/v1',payload:{scene:'Deterministic fixture scene',people:{minimum:1,maximum:1},location_environment:'Studio',subjects:['fixture'],objects:['camera'],actions:['standing'],confidence:1,warnings:[]}}});assert.equal(vision.status,200);
   const writer=await fixture.request(`/ai-work-items/${itemUuid}/results/writer`,{method:'POST',role:'writer',body:{schema_version:'curator://album-analysis/writer/v1',payload:{album_summary:'Deterministic workflow-only result.',description:'No model was invoked.',suggested_names:[chosenName,'Simulated Silver Light','Simulated Quiet Studio','Simulated Portrait Study','Simulated Still Moment','Simulated Studio Memory']}}});assert.equal(writer.status,200);
 

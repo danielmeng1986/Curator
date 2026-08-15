@@ -120,6 +120,32 @@ def _apply_0002(conn: sqlite3.Connection) -> None:
             conn.execute(f'ALTER TABLE workspace_album ADD COLUMN "{name}" {declaration}')
 
 
+def _apply_0015(conn: sqlite3.Connection) -> None:
+    """Adopt columns that older defensive repositories may already have added."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS registration_proof_state (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1), proof_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL, rotated_at TEXT, disabled_at TEXT, last_used_at TEXT)""")
+    if not _table_exists(conn,"device_registration"):
+        raise MigrationError("Migration 0015 requires the device_registration table.")
+    required={"candidate_token_hash":"TEXT","enrollment_proof_hash":"TEXT",
+        "enrollment_expires_at":"TEXT","cancelled_at":"TEXT"}
+    existing=_columns(conn,"device_registration")
+    for name,declaration in required.items():
+        if name not in existing:conn.execute(f'ALTER TABLE device_registration ADD COLUMN "{name}" {declaration}')
+
+
+def _apply_0016(conn: sqlite3.Connection) -> None:
+    """Adopt/backfill capability columns without replaying duplicate ALTERs."""
+    if not _table_exists(conn,"workspace_album_ai_worker") or not _table_exists(conn,"ai_work_item_attempt"):
+        raise MigrationError("Migration 0016 requires the AI Work Item and attempt tables.")
+    if "worker_kind" not in _columns(conn,"workspace_album_ai_worker"):
+        conn.execute("ALTER TABLE workspace_album_ai_worker ADD COLUMN worker_kind TEXT NOT NULL DEFAULT 'album_name_analysis'")
+    if "worker_kinds_json" not in _columns(conn,"ai_work_item_attempt"):
+        conn.execute("ALTER TABLE ai_work_item_attempt ADD COLUMN worker_kinds_json TEXT")
+    conn.execute("""CREATE INDEX IF NOT EXISTS idx_ai_work_item_kind_queue
+        ON workspace_album_ai_worker(worker_kind, run_state, created_at, id)""")
+
+
 def _recorded(conn: sqlite3.Connection) -> set[str]:
     if not _table_exists(conn, "schema_migration"):
         return set()
@@ -161,6 +187,10 @@ def migrate(
                     adopted_remark = _apply_0001(conn, source)
                 elif migration_id == "0002_archive_historical_workspace_album":
                     _apply_0002(conn)
+                elif migration_id == "0015_ui_device_enrollment":
+                    _apply_0015(conn)
+                elif migration_id == "0016_capability_aware_work_claim":
+                    _apply_0016(conn)
                 else:
                     _apply_sql(conn, source)
                 _verify_connection(conn)

@@ -20,10 +20,11 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from http.client import HTTPConnection
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -428,7 +429,7 @@ class _TestServerBase(unittest.TestCase):
 
         cls._open_db_patcher.start()
 
-        cls._server = HTTPServer(("127.0.0.1", 0), srv.AppHandler)
+        cls._server = ThreadingHTTPServer(("127.0.0.1", 0), srv.AppHandler)
         cls._port = cls._server.server_address[1]
         cls._thread = threading.Thread(target=cls._server.serve_forever, daemon=True)
         cls._thread.start()
@@ -847,7 +848,7 @@ class TestVersionedApiAuthorization(_TestServerBase):
         status, replay = self._post("/api/v1/work-dispatch/execute", {
             "preview_token":preview_body["data"]["preview"]["preview_token"]}, admin)
         self.assertEqual(409,status); self.assertEqual("DISPATCH_PREVIEW_REPLAYED", replay["error"]["code"])
-        status, claimed = self._post("/api/v1/ai-work-items/claim", {"lease_seconds":60}, first)
+        status, claimed = self._post("/api/v1/ai-work-items/claim", {"worker_kinds":["album_name_analysis"],"lease_seconds":60}, first)
         self.assertEqual(200,status); self.assertEqual(item_uuid, claimed["data"]["item"]["uuid"])
         status, wrong = self._post(f"/api/v1/ai-work-items/{item_uuid}/heartbeat", {"lease_seconds":60}, second)
         self.assertEqual(409,status); self.assertEqual("AI_WORK_ITEM_CLAIM_INVALID", wrong["error"]["code"])
@@ -855,10 +856,37 @@ class TestVersionedApiAuthorization(_TestServerBase):
         self.assertEqual(200,status); failed_item = failed["data"]["item"]
         status, retried = self._post(f"/api/v1/ai-work-items/{item_uuid}/retry", {"expected_version":failed_item["version"]}, admin)
         self.assertEqual(200,status); self.assertEqual("Pending", retried["data"]["item"]["run_state"])
-        status, claimed_again = self._post("/api/v1/ai-work-items/claim", {"lease_seconds":60}, second)
+        status, claimed_again = self._post("/api/v1/ai-work-items/claim", {"worker_kinds":["album_name_analysis"],"lease_seconds":60}, second)
         self.assertEqual(200,status); self.assertEqual(2, claimed_again["data"]["item"]["attempt_count"])
         status, detail = self._get(f"/api/v1/ai-work-items/{item_uuid}", admin)
         self.assertEqual(200,status); self.assertEqual(2, len(detail["data"]["item"]["attempts"]))
+
+    def test_capability_long_poll_wakes_after_compatible_dispatch_commit(self):
+        marker=self._db.execute("SELECT COUNT(*) FROM album").fetchone()[0]
+        self._db.execute("INSERT INTO album (uuid,title,path) VALUES (?,?,?)",(f"wait-album-{marker}","Waiting Album",f"Studio/Wait-{marker}"))
+        album_id=self._db.execute("SELECT last_insert_rowid()").fetchone()[0];self._db.commit()
+        admin=self._bearer(self._issue(role="admin"));writer=self._bearer(self._issue(role="writer"))
+        config={"name":f"Wait Config {marker}","model_identifier":"qwen","model_file":"qwen.gguf",
+            "vision_prompt_version":"v1","writer_prompt_version":"w1","sample_count":8,"context_size":4096,
+            "threads":8,"gpu_layers":40,"max_tokens":800,"temperature":0.2,"image_max_tokens":384}
+        _,created=self._post("/api/v1/ai-model-configurations",config,admin);config_uuid=created["data"]["configuration"]["uuid"]
+        _,created=self._post("/api/v1/ai-workspaces",{"title":f"Wait Workspace {marker}"},admin);workspace_uuid=created["data"]["workspace"]["uuid"]
+        status,invalid=self._post("/api/v1/ai-work-items/claim",{"lease_seconds":60,"wait_seconds":0},writer)
+        self.assertEqual(400,status);self.assertEqual("REQUEST_INVALID",invalid["error"]["code"])
+        result={};started=threading.Event()
+        def waiting_claim():
+            started.set();result["response"]=self._post("/api/v1/ai-work-items/claim",{
+                "worker_kinds":["album_name_analysis"],"lease_seconds":60,"wait_seconds":5},writer)
+        thread=threading.Thread(target=waiting_claim);thread.start();started.wait(1);time.sleep(0.1)
+        _,preview=self._post("/api/v1/work-dispatch/preview",{"worker_kind":"album_name_analysis",
+            "workspace_uuid":workspace_uuid,"configuration_uuids":[config_uuid],"album_ids":[album_id]},admin)
+        _,executed=self._post("/api/v1/work-dispatch/execute",{"preview_token":preview["data"]["preview"]["preview_token"]},admin)
+        thread.join(3);self.assertFalse(thread.is_alive())
+        status,claimed=result["response"];self.assertEqual(200,status)
+        item=claimed["data"]["item"];self.assertEqual(executed["data"]["result"]["groups"][0]["work_item_uuids"][0],item["uuid"])
+        self.assertEqual("album_name_analysis",item["worker_kind"])
+        attempt=self._db.execute("SELECT worker_kinds_json FROM ai_work_item_attempt WHERE work_item_uuid=?",(item["uuid"],)).fetchone()
+        self.assertEqual('["album_name_analysis"]',attempt[0])
 
     def test_work_dispatch_candidates_and_preview_are_admin_only_and_zero_write(self):
         marker = self._db.execute("SELECT COUNT(*) FROM album").fetchone()[0]
@@ -936,7 +964,7 @@ class TestVersionedApiAuthorization(_TestServerBase):
             with patch.object(srv,"APP_CONFIG",{**srv.APP_CONFIG,"archive_root":root}):
                 status, denied = self._get(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",writer)
                 self.assertEqual(403,status)
-                status, claimed = self._post("/api/v1/ai-work-items/claim",{"lease_seconds":300},writer)
+                status, claimed = self._post("/api/v1/ai-work-items/claim",{"worker_kinds":["album_name_analysis"],"lease_seconds":300},writer)
                 self.assertEqual(200,status); self.assertEqual(item_uuid,claimed["data"]["item"]["uuid"])
                 status, created = self._post(f"/api/v1/ai-work-items/{item_uuid}/evidence-manifest",{},writer)
                 self.assertEqual(201,status); manifest = created["data"]["manifest"]
