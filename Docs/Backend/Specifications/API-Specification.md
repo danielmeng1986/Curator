@@ -278,6 +278,35 @@ source-evidence degradation and does not issue or consume a mutation preview.
 All projections are Admin-only and omit claim Tokens, absolute Album paths, and
 sensitive Operation diagnostics.
 
+## Capability-aware Work Item claim contract
+
+`POST /api/v1/ai-work-items/claim` is a Writer-only outbound long-poll request.
+Its request body requires `worker_kinds`, a non-empty array of 1–8 unique
+registered Worker-kind strings; `lease_seconds`, an integer from 60 through
+3600; and `wait_seconds`, an integer from 0 through 30. The declaration is
+normalized in request order. Unknown, duplicate, or malformed kinds and invalid
+bounds return `400 REQUEST_INVALID`. Zero wait performs an immediate claim.
+
+Selection is atomic and considers only Work Items whose immutable
+`worker_kind` is declared by the process, whose Workspace is Open, and whose
+run state is Pending or has an expired claim lease. An incompatible older item
+must not block a later compatible item. Success returns `200` with an already
+owned `data.item`, including its required `worker_kind`. A normal deadline
+returns `200` with `data.item: null` and creates no attempt, Operation, or Work
+Item mutation.
+
+Every successful attempt retains an immutable JSON snapshot of the normalized
+`worker_kinds` declaration. Device registration remains an authorization
+identity only; a runtime declaration is not permanent Device configuration and
+never adds permissions.
+
+Dispatch commit is the wake-up boundary. The Backend may wake multiple
+compatible waiters, but database transaction ownership remains authoritative.
+Durable state is checked before sleeping and after wake or timeout, so
+disconnect, notification loss, and Backend restart cannot lose, duplicate, or
+transfer ownership. Workers expose no inbound callback, webhook, WebSocket, or
+SSE endpoint.
+
 ## Future extensions
 
 - Route/resource catalogs can be added without changing the shared contract.

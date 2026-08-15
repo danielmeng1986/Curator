@@ -52,8 +52,23 @@ one Work Item per selected model configuration.
 ### Work Item
 
 A concrete executable unit owned by the Worker-specific adapter. AI Work Items
-retain the configuration snapshot, attempts, claims, results, review, and
-Promotion evidence defined by the AI Workspace contracts.
+retain an immutable required Worker kind copied from the Dispatch adapter, the
+configuration snapshot, attempts, claims, results, review, and Promotion
+evidence defined by the AI Workspace contracts. Every successful attempt also
+retains the normalized runtime Worker-kind declaration used for matching.
+
+### Runtime capability and waiting
+
+A Device remains a security identity with Writer role, scopes, lifecycle, and
+Token evidence. The running process separately declares a bounded set of
+registered Worker kinds on every claim; capability is neither inferred from a
+Device name nor permanently assigned to a Device.
+
+The first executable capability is `album_name_analysis`. A compatible Worker
+may keep one authenticated outbound claim open for at most 30 seconds. Dispatch
+commit notifies compatible process-local waiters, which recheck the durable
+queue and atomically claim through SQLite. Timeout is a normal empty result.
+No inbound Worker port, callback, webhook, SSE, or WebSocket is required.
 
 ## Candidate and eligibility contract
 
@@ -102,8 +117,14 @@ Execution accepts only the preview token. In one Backend transaction it:
 2. creates the Dispatch Batch;
 3. inserts one unique active Album reservation and Group per Album;
 4. creates the Worker-specific Work Items, including all selected AI model
-   configurations inside the same Album Group; and
+   configurations inside the same Album Group and the adapter's immutable
+   required Worker kind; and
 5. records the durable batch Operation and commits the complete outcome.
+
+Only after commit may the Backend notify waiters for that Worker kind. Rollback
+publishes no runnable work. Notification is an optimization rather than the
+correctness boundary: queue state is checked before sleeping and after wake or
+deadline, preserving Pending work across restart and missed notification.
 
 The first implementation is all-or-nothing. A stale Album, changed Workspace
 or configuration, new reservation, invalid eligibility, replay, or uniqueness
@@ -175,7 +196,9 @@ changed, oversized, or containment-invalid selected image returns
 
 - Candidate, preview, execute, Group cancellation, and release are Admin-only.
 - A Writer may claim and mutate only Work Items allowed by its Worker contract;
-  it cannot create or release Album reservations.
+  it cannot create or release Album reservations. Matching requires the Work
+  Item's immutable kind in the current process declaration, which is
+  snapshotted on the successful attempt.
 - Dispatch execution and release require Operations linked to Batch, Group, and
   affected Album identities. A failed execution never reports success.
 - Persistent anomalies or recovery needs create or link Issues under the
@@ -209,6 +232,10 @@ or sensitive Operation diagnostic.
 - `409 DUPLICATE_ACTIVE_WORK`: equivalent Work Items already exist inside the Group.
 - `409 WORK_GROUP_NOT_RELEASABLE`: active execution, review, rework, or Promotion remains.
 
+Claim validation additionally returns `400 REQUEST_INVALID` for missing,
+empty, duplicate, excessive, malformed, or unregistered `worker_kinds`, or an
+out-of-range `wait_seconds`. A long-poll deadline is not an error.
+
 All conflict outcomes are zero-write outcomes and use the shared API envelope.
 
 ## Verification requirements
@@ -218,6 +245,12 @@ All conflict outcomes are zero-write outcomes and use the shared API envelope.
 - Multi-configuration tests prove one Group can contain comparable Work Items
   without allowing a second Album reservation.
 - Cross-Worker tests prove a different Worker kind cannot reserve the Album.
+- Capability-aware claim tests prove incompatible queue heads do not block
+  compatible work, simultaneous waiters cannot share ownership, timeout is
+  zero-write, and successful attempts preserve their declarations.
+- Real-HTTP acceptance starts a waiting Writer before Dispatch and proves the
+  committed compatible Work Item wakes and is returned without an inbound
+  Worker connection.
 - Release and redispatch tests preserve history and reject premature release.
 - Browser acceptance proves dispatched Albums leave the default candidate list
   and remain discoverable in active/history views.
