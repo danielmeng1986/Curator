@@ -14,10 +14,15 @@ English words; every word must start with an uppercase letter and contain only l
 Never use Photo, Photos, Collection, Session, or Gallery as a word. Vision JSON:\n{vision}"""
 WRITER_JSON_SCHEMA={"type":"object","additionalProperties":False,
     "required":["album_summary","description","suggested_names"],"properties":{
-        "album_summary":{"type":"string","minLength":1,"maxLength":500},
-        "description":{"type":"string","minLength":1,"maxLength":2000},
+        # Keep the generation grammar deliberately structural. llama.cpp expands
+        # large JSON-Schema string bounds into repeated grammar rules and rejects
+        # otherwise valid schemas once that expansion exceeds its sane defaults.
+        # Curator's exact string bounds remain enforced by validate_writer_payload
+        # below and by the Backend before persistence.
+        "album_summary":{"type":"string"},
+        "description":{"type":"string"},
         "suggested_names":{"type":"array","minItems":6,"maxItems":6,"uniqueItems":True,
-            "items":{"type":"string","minLength":3,"maxLength":120}}}}
+            "items":{"type":"string"}}}}
 FORBIDDEN_NAME_WORDS={"photo","photos","collection","session","gallery"}
 
 def _bounded_text(value,name,limit):

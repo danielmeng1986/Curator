@@ -147,8 +147,10 @@ python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /
 
 Worker 在向 Backend 领取任务前会检查两个可执行文件。Vision 必须具备图片/projector 参数；
 Writer 必须具备 `--single-turn`、`--simple-io` 与有界输出参数，确保纯文本 prompt 不会进入
-交互式 chat 循环。Writer 输出会受 JSON Schema 约束，并在提交前按照 Curator 的六个名称
-规则进行本地校验；不合格的模型输出会收到有界纠错重试。
+交互式 chat 循环。Writer 输出会受结构型 JSON Schema 约束，并在提交前按照 Curator 的字段
+长度与六个名称规则进行本地校验；不合格的模型输出会收到有界纠错重试。长度上限不直接写入
+llama.cpp grammar，以避免大范围重复规则超过其复杂度限制，但 Worker 与 Backend 均不会因此
+接受超出 Curator 契约的数据。
 
 仅当所选 llama.cpp/模型组合不要求独立 projector 时才省略 `--mmproj`。正常模式会用最长
 30 秒的 outbound HTTP 请求等待 `album_name_analysis` 任务；Backend Dispatch 提交后会立即

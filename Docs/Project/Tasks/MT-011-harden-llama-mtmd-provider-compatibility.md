@@ -43,6 +43,9 @@ private Evidence paths.
 - Constrain Writer output with a JSON Schema, validate the complete Backend
   Writer contract locally, and retry with bounded corrective feedback before
   any invalid payload can be submitted.
+- Keep the llama.cpp generation Schema structural rather than encoding large
+  string-length repetitions that exceed upstream grammar complexity limits;
+  enforce the complete bounds in the local validator and Backend instead.
 - Decode safe Backend error envelopes so the operator sees the application
   error code and message instead of an unexplained HTTP 400 or 409.
 - Add a startup or smoke-test compatibility check that fails before claiming
@@ -87,6 +90,9 @@ private Evidence paths.
    retaining HTTP status, application code, and transient classification.
 8. Extend the bilingual manual with Qwen2.5-VL sizing guidance, while clearly
    identifying it as model-family guidance rather than a global Curator rule.
+9. Keep Writer grammar generation compatible with llama.cpp sane-default
+   limits by testing that large Curator string bounds are not expanded into the
+   provider-facing JSON Schema.
 
 ## Acceptance Criteria
 
@@ -107,6 +113,9 @@ private Evidence paths.
 - Invalid Writer JSON is rejected locally and retried; Backend validation
   failures identify their application code and message rather than only the
   numeric HTTP status.
+- Writer grammar compilation succeeds without expanding the 500/2000-character
+  Curator bounds; those bounds remain mandatory at both local and Backend
+  validation boundaries.
 - Editing an AI Model Configuration affects only future Dispatch snapshots;
   existing Work Items remain immutable and require deliberate Group closure and
   redispatch when sizing changes.

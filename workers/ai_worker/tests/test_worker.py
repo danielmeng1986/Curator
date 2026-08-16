@@ -200,6 +200,15 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(valid,payload);self.assertEqual(2,len(provider.calls));self.assertIn("failed validation",provider.calls[1][0])
         self.assertIn("json_schema",provider.calls[0][1])
 
+    def test_writer_generation_schema_avoids_expensive_string_repetitions(self):
+        from workers.ai_worker.workflow import WRITER_JSON_SCHEMA
+        properties=WRITER_JSON_SCHEMA["properties"]
+        self.assertEqual({"type":"string"},properties["album_summary"])
+        self.assertEqual({"type":"string"},properties["description"])
+        self.assertEqual({"type":"string"},properties["suggested_names"]["items"])
+        self.assertEqual(6,properties["suggested_names"]["minItems"])
+        self.assertEqual(6,properties["suggested_names"]["maxItems"])
+
     def test_writer_validation_matches_backend_name_rules(self):
         base={"album_summary":"Summary","description":"Description","suggested_names":
             ["Bamboo Garden","Quiet Retreat","Summer Reverie","Golden Afternoon","Gentle Elegance","Serene Moments"]}

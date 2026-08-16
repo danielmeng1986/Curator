@@ -164,9 +164,12 @@ production work (replace all three paths):
 The Worker checks both executables before asking the Backend for work. Vision
 requires the multimodal image/projector options. Writer requires
 `--single-turn`, `--simple-io`, and bounded-output options so a text-only prompt
-cannot enter an interactive chat loop. Writer output is JSON-Schema constrained
-and locally checked against Curator's six-name rules before submission; invalid
-model output receives bounded corrective retries.
+cannot enter an interactive chat loop. Writer output is constrained by a
+structural JSON Schema and locally checked against Curator's field-length and
+six-name rules before submission; invalid model output receives bounded
+corrective retries. Length limits are not expanded into llama.cpp grammar, so
+they cannot exceed its complexity limit, but both Worker and Backend still
+reject data outside the Curator contract.
 
 Omit `--mmproj` only when the chosen llama.cpp/model combination does not
 require a separate projector. Normal mode waits on outbound HTTP requests of at
