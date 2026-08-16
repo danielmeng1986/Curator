@@ -184,7 +184,7 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual({"status":"ok"},payload)
         for option in ("--single-turn","--simple-io","--no-display-prompt","--no-show-timings"):self.assertIn(option,args)
         self.assertIn("--grammar",args);self.assertIn("name2",args[args.index("--grammar")+1])
-        self.assertEqual("writer-v1-gbnf-1",metrics["constrained_decoding"]);self.assertEqual(0,metrics["effective_temperature"])
+        self.assertEqual("writer-v1-gbnf-2-natural-titles",metrics["constrained_decoding"]);self.assertEqual(0,metrics["effective_temperature"])
         self.assertNotIn("--mmproj",args);self.assertNotIn("--image",args)
 
     @patch("workers.ai_worker.provider.subprocess.run")
@@ -281,15 +281,16 @@ class WorkerTests(unittest.TestCase):
             with self.assertRaises(ProviderError):validate_writer_payload({**base,"suggested_names":names})
 
     def test_writer_replaces_roman_and_repeated_letter_four_word_fillers(self):
-        from workers.ai_worker.workflow import normalize_writer_placeholders
+        from workers.ai_worker.workflow import normalize_writer_titles
         payload={"album_summary":"Summary","description":"Description","suggested_names":[
             "Whispering Lilies","Silken Temptation","Moonlit Lovers' Dance","Ethereal Elegance Reimagined",
             "Whispers Between Sheets II","Silken Shadows Unveiled IIIIIIIIIIIIIIIIIIIIIIII"]}
-        normalized,count=normalize_writer_placeholders(payload)
+        normalized,count=normalize_writer_titles(payload)
         self.assertEqual(2,count)
-        self.assertEqual("Needs Human Naming Review",normalized["suggested_names"][4])
-        self.assertEqual("Awaiting Human Naming Review",normalized["suggested_names"][5])
+        self.assertEqual("Whispers Between Sheets",normalized["suggested_names"][4])
+        self.assertEqual("Silken Shadows Unveiled",normalized["suggested_names"][5])
         self.assertEqual("Whispers Between Sheets II",payload["suggested_names"][4])
+        self.assertEqual(normalized,validate_writer_payload(normalized))
 
     def test_runtime_preserves_provider_failure_category(self):
         class Client:

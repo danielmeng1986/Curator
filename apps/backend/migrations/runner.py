@@ -195,19 +195,39 @@ def _apply_0019(conn: sqlite3.Connection, source: Path) -> None:
 def _apply_0020(conn: sqlite3.Connection, source: Path) -> None:
     """Publish deterministic four-word placeholder guidance as Profile v3."""
     _apply_sql(conn, source)
-    from apps.ai_instruction_profile import DEFAULT_PROFILE_UUID, DEFAULT_VERSION_UUID, SENSUAL_EDITORIAL_VERSION_UUID, content_hash, default_content
-    now=datetime.now(timezone.utc).isoformat();content=default_content()
+    from apps.ai_instruction_profile import DEFAULT_PROFILE_UUID, PLACEHOLDER_VERSION_UUID, SENSUAL_EDITORIAL_VERSION_UUID, content_hash, placeholder_content
+    now=datetime.now(timezone.utc).isoformat();content=placeholder_content()
     conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile_version
         (uuid,profile_uuid,version,global_instruction,dataset_instruction,vision_prompt_template,
          writer_prompt_template,output_language,naming_policy_json,vision_schema_version,writer_schema_version,
          validator_policy_version,instruction_transport,composition_version,content_hash,created_at)
-        VALUES (?,?,3,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(DEFAULT_VERSION_UUID,DEFAULT_PROFILE_UUID,
+        VALUES (?,?,3,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(PLACEHOLDER_VERSION_UUID,DEFAULT_PROFILE_UUID,
         content["global_instruction"],content["dataset_instruction"],content["vision_prompt_template"],
         content["writer_prompt_template"],content["output_language"],json.dumps(content["naming_policy"],sort_keys=True),
         content["vision_schema_version"],content["writer_schema_version"],content["validator_policy_version"],
         content["instruction_transport"],content["composition_version"],content_hash(content),now))
     conn.execute("""UPDATE ai_model_configuration SET instruction_profile_version_uuid=?,version=version+1,updated_at=?
-        WHERE instruction_profile_version_uuid=?""",(DEFAULT_VERSION_UUID,now,SENSUAL_EDITORIAL_VERSION_UUID))
+        WHERE instruction_profile_version_uuid=?""",(PLACEHOLDER_VERSION_UUID,now,SENSUAL_EDITORIAL_VERSION_UUID))
+    conn.execute("UPDATE ai_instruction_profile SET lifecycle_state='Published',is_default=1,updated_at=? WHERE uuid=?",
+        (now,DEFAULT_PROFILE_UUID))
+
+
+def _apply_0021(conn: sqlite3.Connection, source: Path) -> None:
+    """Publish natural 3-or-4-word trailing title slots as Profile v4."""
+    _apply_sql(conn, source)
+    from apps.ai_instruction_profile import DEFAULT_PROFILE_UUID, DEFAULT_VERSION_UUID, PLACEHOLDER_VERSION_UUID, content_hash, default_content
+    now=datetime.now(timezone.utc).isoformat();content=default_content()
+    conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile_version
+        (uuid,profile_uuid,version,global_instruction,dataset_instruction,vision_prompt_template,
+         writer_prompt_template,output_language,naming_policy_json,vision_schema_version,writer_schema_version,
+         validator_policy_version,instruction_transport,composition_version,content_hash,created_at)
+        VALUES (?,?,4,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(DEFAULT_VERSION_UUID,DEFAULT_PROFILE_UUID,
+        content["global_instruction"],content["dataset_instruction"],content["vision_prompt_template"],
+        content["writer_prompt_template"],content["output_language"],json.dumps(content["naming_policy"],sort_keys=True),
+        content["vision_schema_version"],content["writer_schema_version"],content["validator_policy_version"],
+        content["instruction_transport"],content["composition_version"],content_hash(content),now))
+    conn.execute("""UPDATE ai_model_configuration SET instruction_profile_version_uuid=?,version=version+1,updated_at=?
+        WHERE instruction_profile_version_uuid=?""",(DEFAULT_VERSION_UUID,now,PLACEHOLDER_VERSION_UUID))
     conn.execute("UPDATE ai_instruction_profile SET lifecycle_state='Published',is_default=1,updated_at=? WHERE uuid=?",
         (now,DEFAULT_PROFILE_UUID))
 
@@ -263,6 +283,8 @@ def migrate(
                     _apply_0019(conn, source)
                 elif migration_id == "0020_writer_four_word_placeholder":
                     _apply_0020(conn, source)
+                elif migration_id == "0021_natural_writer_titles":
+                    _apply_0021(conn, source)
                 else:
                     _apply_sql(conn, source)
                 _verify_connection(conn)

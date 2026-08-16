@@ -2624,15 +2624,15 @@ class AIResultSubmissionService:
             raise ValueError("Writer result fields do not match schema v1.")
         names = payload["suggested_names"]
         if not isinstance(names,list) or len(names)!=6 or len(set(names))!=6: raise ValueError("suggested_names must contain exactly six unique names.")
-        forbidden = {"photo","photos","collection","session","gallery"}; normalized=[]; word_counts=[]
+        forbidden = {"photo","photos","collection","session","gallery"}; normalized=[];word_counts=[]
         for name in names:
             name = self._text(name,"suggested_name",120); words=name.split()
             if len(words) not in {2,3,4} or any(not re.fullmatch(r"[A-Z][A-Za-z'’-]*",word) for word in words) \
                     or any(word.casefold() in forbidden for word in words):
                 raise ValueError("Each suggested name must contain 2-4 capitalized English words and no forbidden term.")
-            normalized.append(name); word_counts.append(len(words))
-        if sorted(word_counts)!=[2,2,3,3,4,4]:
-            raise ValueError("suggested_names must contain exactly two 2-word, two 3-word, and two 4-word names.")
+            normalized.append(name);word_counts.append(len(words))
+        if sorted(word_counts) not in ([2,2,3,3,3,3],[2,2,3,3,3,4],[2,2,3,3,4,4]):
+            raise ValueError("suggested_names must contain two 2-word names, at least two 3-word names, and natural 3-or-4-word remaining names.")
         return {"album_summary":self._text(payload["album_summary"],"album_summary",500),
             "description":self._text(payload["description"],"description",2000),"suggested_names":normalized}
 

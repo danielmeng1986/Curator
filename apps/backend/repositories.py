@@ -17,8 +17,8 @@ import sqlite3
 import hashlib
 from datetime import datetime, timezone
 from apps.ai_instruction_profile import (DEFAULT_PROFILE_UUID, DEFAULT_VERSION_UUID, LEGACY_DEFAULT_VERSION_UUID,
-    SENSUAL_EDITORIAL_VERSION_UUID, content_hash, default_content, legacy_default_content,
-    sensual_editorial_content, snapshot as instruction_snapshot)
+    PLACEHOLDER_VERSION_UUID, SENSUAL_EDITORIAL_VERSION_UUID, content_hash, default_content, legacy_default_content,
+    placeholder_content, sensual_editorial_content, snapshot as instruction_snapshot)
 
 
 # ---------------------------------------------------------------------------
@@ -2241,7 +2241,7 @@ class AIInstructionProfileRepository:
             instruction_transport TEXT NOT NULL,composition_version TEXT NOT NULL,content_hash TEXT NOT NULL,
             created_by_token_uuid TEXT,created_at TEXT NOT NULL,UNIQUE(profile_uuid,version))""")
         now=datetime.now(timezone.utc).isoformat();legacy_content=legacy_default_content()
-        sensual_content=sensual_editorial_content();content=default_content()
+        sensual_content=sensual_editorial_content();placeholder=placeholder_content();content=default_content()
         conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile
             (uuid,name,worker_kind,dataset_type,lifecycle_state,is_default,version,created_at,updated_at)
             VALUES (?,?,?,?,'Published',1,1,?,?)""",(DEFAULT_PROFILE_UUID,"Curator Album Analysis Default","album_name_analysis","album_analysis",now,now))
@@ -2258,7 +2258,7 @@ class AIInstructionProfileRepository:
         conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile_version
             (uuid,profile_uuid,version,global_instruction,dataset_instruction,vision_prompt_template,writer_prompt_template,
             output_language,naming_policy_json,vision_schema_version,writer_schema_version,validator_policy_version,
-            instruction_transport,composition_version,content_hash,created_at) VALUES (?,?,3,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            instruction_transport,composition_version,content_hash,created_at) VALUES (?,?,4,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (DEFAULT_VERSION_UUID,DEFAULT_PROFILE_UUID,content["global_instruction"],content["dataset_instruction"],
              content["vision_prompt_template"],content["writer_prompt_template"],content["output_language"],
              json.dumps(content["naming_policy"],sort_keys=True),content["vision_schema_version"],content["writer_schema_version"],
@@ -2271,6 +2271,14 @@ class AIInstructionProfileRepository:
              sensual_content["vision_prompt_template"],sensual_content["writer_prompt_template"],sensual_content["output_language"],
              json.dumps(sensual_content["naming_policy"],sort_keys=True),sensual_content["vision_schema_version"],sensual_content["writer_schema_version"],
              sensual_content["validator_policy_version"],sensual_content["instruction_transport"],sensual_content["composition_version"],content_hash(sensual_content),now))
+        conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile_version
+            (uuid,profile_uuid,version,global_instruction,dataset_instruction,vision_prompt_template,writer_prompt_template,
+            output_language,naming_policy_json,vision_schema_version,writer_schema_version,validator_policy_version,
+            instruction_transport,composition_version,content_hash,created_at) VALUES (?,?,3,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (PLACEHOLDER_VERSION_UUID,DEFAULT_PROFILE_UUID,placeholder["global_instruction"],placeholder["dataset_instruction"],
+             placeholder["vision_prompt_template"],placeholder["writer_prompt_template"],placeholder["output_language"],
+             json.dumps(placeholder["naming_policy"],sort_keys=True),placeholder["vision_schema_version"],placeholder["writer_schema_version"],
+             placeholder["validator_policy_version"],placeholder["instruction_transport"],placeholder["composition_version"],content_hash(placeholder),now))
         conn.commit()
 
     @staticmethod

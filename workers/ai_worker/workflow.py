@@ -21,8 +21,7 @@ combinations of clothing, pose, room, media-category, or shooting terms. Avoid t
 Content, Shoot, Shoots, Posing, Displaying, Genital, Area, Interior, Photo, Photos, Collection, Session, or
 Gallery. Do not describe explicit sexual acts or identify a person. Vision JSON:\n{vision}"""
 FORBIDDEN_NAME_WORDS={"photo","photos","collection","session","gallery"}
-FOUR_WORD_PLACEHOLDERS=("Needs Human Naming Review","Awaiting Human Naming Review")
-PLACEHOLDER_POLICY_VERSION="writer-four-word-placeholder-v1"
+NATURAL_TITLE_POLICY_VERSION="writer-natural-title-v1"
 
 def _bounded_array(payload,key,maximum,text_limit):
     values=payload[key]
@@ -66,13 +65,13 @@ def validate_writer_payload(payload):
                 or any(word.casefold() in FORBIDDEN_NAME_WORDS for word in words):
             raise ProviderError("Each suggested name must contain 2-4 capitalized English words and no forbidden term.",error_code="MODEL_OUTPUT_INVALID")
         normalized.append(name);word_counts.append(len(words))
-    if sorted(word_counts)!=[2,2,3,3,4,4]:
-        raise ProviderError("Writer suggested_names must contain exactly two 2-word, two 3-word, and two 4-word names.",error_code="MODEL_OUTPUT_INVALID")
+    if sorted(word_counts) not in ([2,2,3,3,3,3],[2,2,3,3,3,4],[2,2,3,3,4,4]):
+        raise ProviderError("Writer names must contain two 2-word names, at least two 3-word names, and natural 3-or-4-word remaining names.",error_code="MODEL_OUTPUT_INVALID")
     return {"album_summary":_bounded_text(payload["album_summary"],"album_summary",500),
         "description":_bounded_text(payload["description"],"description",2000),"suggested_names":normalized}
 
-def normalize_writer_placeholders(payload):
-    """Replace obvious constrained-decoding filler in four-word title slots."""
+def normalize_writer_titles(payload):
+    """Remove obvious constrained-decoding filler while preserving natural titles."""
     if not isinstance(payload,dict) or not isinstance(payload.get("suggested_names"),list):return payload,0
     result=dict(payload);names=list(payload["suggested_names"]);replacements=0
     for index in (4,5):
@@ -80,8 +79,8 @@ def normalize_writer_placeholders(payload):
         words=names[index].split();tail=words[-1] if words else ""
         roman_filler=bool(re.fullmatch(r"[IVXLCDM]{2,}",tail))
         repeated_filler=bool(re.fullmatch(r"(.)\1{3,}",tail,re.IGNORECASE))
-        if roman_filler or repeated_filler:
-            names[index]=FOUR_WORD_PLACEHOLDERS[index-4];replacements+=1
+        if (roman_filler or repeated_filler) and len(words)==4:
+            names[index]=" ".join(words[:-1]);replacements+=1
     result["suggested_names"]=names
     return result,replacements
 
@@ -124,11 +123,11 @@ class AnalysisWorkflow:
                 if attempt==self.retries:raise
                 self.sleep(2**attempt);continue
             try:
-                payload,replacements=normalize_writer_placeholders(payload)
+                payload,replacements=normalize_writer_titles(payload)
                 validated=validate_writer_payload(payload)
                 if replacements:
-                    metrics=dict(metrics or {});metrics["writer_placeholder_policy"]=PLACEHOLDER_POLICY_VERSION
-                    metrics["writer_placeholder_replacements"]=replacements
+                    metrics=dict(metrics or {});metrics["writer_natural_title_policy"]=NATURAL_TITLE_POLICY_VERSION
+                    metrics["writer_filler_words_removed"]=replacements
                 return validated,metrics
             except ProviderError as exc:
                 if attempt==self.retries:raise
