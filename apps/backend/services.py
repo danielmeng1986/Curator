@@ -26,6 +26,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from apps.ai_instruction_profile import DEFAULT_VERSION_UUID, snapshot as instruction_snapshot, validate_content
 
 try:  # Package execution: python3 -m apps.backend
     from . import canonical_path as cpath
@@ -1837,6 +1838,7 @@ class AIModelConfigurationService:
         if any(any(word in str(key).lower() for word in forbidden) for key in extra):
             raise ValueError("additional_parameters contains a host path or secret field.")
         fields["provider_type"] = "llama_cpp"; fields["additional_parameters_json"] = json.dumps(extra, sort_keys=True)
+        fields["instruction_profile_version_uuid"] = fields.get("instruction_profile_version_uuid") or DEFAULT_VERSION_UUID
         fields["updated_at"] = _utc_now_iso()
         return fields
 
@@ -1855,7 +1857,7 @@ class AIModelConfigurationService:
     def update(self, config_uuid, expected_version, fields):
         current = self.get(config_uuid, admin=True)
         if current["version"] != expected_version: raise ServiceConflict("AI_MODEL_CONFIGURATION_STALE", "The configuration changed after it was read.")
-        merged = {key: current.get(key) for key in self.REQUIRED + ("model_repository",)}
+        merged = {key: current.get(key) for key in self.REQUIRED + ("model_repository","instruction_profile_version_uuid")}
         merged["additional_parameters"] = current["additional_parameters"]; merged.update(fields)
         updated = self._repo.update(config_uuid, expected_version, self._validated(merged))
         if not updated: raise ServiceConflict("AI_MODEL_CONFIGURATION_STALE", "The configuration changed during update.")
@@ -1871,12 +1873,60 @@ class AIModelConfigurationService:
 
     def snapshot(self, config_uuid):
         item = self.get(config_uuid)
-        return {key: value for key, value in item.items() if key not in {"id", "created_at", "updated_at"}}
+        version=self._repo.profile_version(item.get("instruction_profile_version_uuid"))
+        if not version or version.get("lifecycle_state") != "Published":
+            raise ServiceConflict("AI_INSTRUCTION_PROFILE_UNAVAILABLE","The selected AI Instruction Profile version is not published.")
+        result={key: value for key, value in item.items() if key not in {"id", "created_at", "updated_at"}}
+        result["instruction_profile"]=instruction_snapshot(version)
+        return result
 
     def _record(self, operation_type, item, summary):
         if self._operations:
             op = self._operations.begin(operation_type, OP_INITIATOR_WEB_UI, entity_uuid=item["uuid"], summary=summary)
             self._operations.succeed(op["uuid"], summary=summary)
+
+
+class AIInstructionProfileService:
+    """Create and publish immutable model-control profiles."""
+    def __init__(self,repo,operation_service=None):self._repo,self._operations=repo,operation_service
+    def list(self):return self._repo.list()
+    def get_version(self,version_uuid):
+        item=self._repo.get_version(version_uuid)
+        if not item:raise ServiceNotFound("AI Instruction Profile version not found.")
+        return item
+    def create(self,fields,actor=None):
+        name=str(fields.get("name") or "").strip()
+        if not name or len(name)>120:raise ValueError("name is required and must be at most 120 characters.")
+        worker_kind=fields.get("worker_kind","album_name_analysis");dataset_type=fields.get("dataset_type","album")
+        if worker_kind!="album_name_analysis" or dataset_type!="album":raise ValueError("Only album_name_analysis/album is currently supported.")
+        content=validate_content(fields.get("content") or {})
+        item=self._repo.create(name,worker_kind,dataset_type,content,actor,_utc_now_iso());self._record("ai_instruction_profile_create",item,"AI Instruction Profile draft created");return item
+    def create_version(self,profile_uuid,expected_version,fields,actor=None):
+        try:item=self._repo.create_version(profile_uuid,expected_version,validate_content(fields.get("content") or {}),actor,_utc_now_iso())
+        except Exception as exc:
+            if getattr(exc,"details",{}).get("code")=="AI_INSTRUCTION_PROFILE_STALE":raise ServiceConflict("AI_INSTRUCTION_PROFILE_STALE","The Profile changed after it was read.")
+            raise
+        if not item:raise ServiceNotFound("AI Instruction Profile not found.")
+        self._record("ai_instruction_profile_version_create",item,"AI Instruction Profile version created");return item
+    def publish(self,profile_uuid,expected_version,make_default=False):
+        try:item=self._repo.publish(profile_uuid,expected_version,make_default,_utc_now_iso())
+        except Exception as exc:
+            if getattr(exc,"details",{}).get("code")=="AI_INSTRUCTION_PROFILE_STALE":
+                raise ServiceConflict("AI_INSTRUCTION_PROFILE_STALE","The Profile changed after it was read.")
+            raise
+        if not item:raise ServiceNotFound("AI Instruction Profile not found.")
+        self._record("ai_instruction_profile_publish",item,"AI Instruction Profile published");return item
+    def disable(self,profile_uuid,expected_version):
+        try:item=self._repo.disable(profile_uuid,expected_version,_utc_now_iso())
+        except Exception as exc:
+            if getattr(exc,"details",{}).get("code")=="AI_INSTRUCTION_PROFILE_STALE":raise ServiceConflict("AI_INSTRUCTION_PROFILE_STALE","The Profile changed after it was read.")
+            if getattr(exc,"details",{}).get("code")=="AI_INSTRUCTION_PROFILE_DEFAULT_REQUIRED":raise ServiceConflict("AI_INSTRUCTION_PROFILE_DEFAULT_REQUIRED","Publish another default Profile before disabling this one.")
+            raise
+        self._record("ai_instruction_profile_disable",item,"AI Instruction Profile disabled");return item
+    def _record(self,operation_type,item,summary):
+        if self._operations:
+            entity=item.get("profile_uuid") or item.get("uuid");op=self._operations.begin(operation_type,OP_INITIATOR_WEB_UI,entity_uuid=entity,summary=summary)
+            self._operations.succeed(op["uuid"],summary=summary)
 
 
 class WorkClaimCoordinator:

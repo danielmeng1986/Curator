@@ -1,5 +1,6 @@
 const AIModelConfigurationsPage = {
   _items: [],
+  _profiles: [],
 
   async render() {
     const el=document.getElementById('page-content');
@@ -12,7 +13,8 @@ const AIModelConfigurationsPage = {
   async load() {
     const el=document.getElementById('page-content');
     try {
-      const result=await api.get('/ai-model-configurations');this._items=result.items||[];
+      const [result,profiles]=await Promise.all([api.get('/ai-model-configurations'),api.get('/ai-instruction-profiles')]);
+      this._items=result.items||[];this._profiles=(profiles.items||[]).filter(item=>item.lifecycle_state==='Published');
       el.innerHTML=`<div class="page-header"><div><a href="#/admin">← Administrator Center</a><h1 class="page-title">AI Model Configurations</h1>
         <p class="page-subtitle">Portable llama.cpp settings captured with every dispatched Work Item.</p></div></div>
         <div class="alert alert-warning"><code>model_file</code> is relative to each Worker's <code>--model-root</code>. Curator does not browse or validate files on a Worker host, and configurations must not contain Tokens or host-local secrets.</div>
@@ -20,7 +22,7 @@ const AIModelConfigurationsPage = {
         ${this._items.map(item=>`<tr><td><strong>${esc(item.name)}</strong><div class="table-secondary">Version ${item.version}</div></td>
           <td>${esc(item.model_identifier)}<div class="table-secondary"><code>${esc(item.model_file)}</code></div>${item.model_repository?`<div class="table-secondary">${esc(item.model_repository)}</div>`:''}</td>
           <td>${item.sample_count} images · context ${item.context_size}<div class="table-secondary">${item.threads} threads · ${item.gpu_layers} GPU layers · max ${item.max_tokens} · temp ${item.temperature}</div></td>
-          <td>Vision ${esc(item.vision_prompt_version)}<div class="table-secondary">Writer ${esc(item.writer_prompt_version)}</div></td>
+          <td>Vision ${esc(item.vision_prompt_version)}<div class="table-secondary">Writer ${esc(item.writer_prompt_version)}</div><div class="table-secondary">Profile ${esc((this._profiles.find(p=>p.current_version_uuid===item.instruction_profile_version_uuid)||{}).name||'Default')}</div></td>
           <td><span class="chip ${item.enabled?'chip-ok':'chip-warn'}">${item.enabled?'Enabled':'Disabled'}</span></td>
           <td>${esc(new Date(item.updated_at).toLocaleString())}</td><td><button class="btn btn-sm btn-secondary" onclick="AIModelConfigurationsPage.openForm('${esc(item.uuid)}')">Edit</button>
           <button class="btn btn-sm ${item.enabled?'btn-danger':'btn-primary'}" onclick="AIModelConfigurationsPage.toggle('${esc(item.uuid)}')">${item.enabled?'Disable':'Enable'}</button></td></tr>`).join('')||'<tr><td colspan="7"><div class="empty-state">No AI Model Configuration exists. Create one before Preview dispatch.</div></td></tr>'}
@@ -38,6 +40,7 @@ const AIModelConfigurationsPage = {
       <div class="form-field form-field-full"><label for="aiConfigRepository">Model repository</label><input id="aiConfigRepository" maxlength="300" value="${esc(item.model_repository||'')}" placeholder="ggml-org/Qwen2.5-VL-7B-Instruct-GGUF"></div>
       <div class="form-field"><label for="aiConfigVisionPrompt">Vision prompt version *</label><input id="aiConfigVisionPrompt" maxlength="100" value="${esc(item.vision_prompt_version||'vision-v1')}"></div>
       <div class="form-field"><label for="aiConfigWriterPrompt">Writer prompt version *</label><input id="aiConfigWriterPrompt" maxlength="100" value="${esc(item.writer_prompt_version||'writer-v1')}"></div>
+      <div class="form-field form-field-full"><label for="aiConfigProfile">AI Instruction Profile *</label><select id="aiConfigProfile">${this._profiles.map(profile=>`<option value="${esc(profile.current_version_uuid)}" ${profile.current_version_uuid===(item.instruction_profile_version_uuid||this._profiles.find(p=>p.is_default)?.current_version_uuid)?'selected':''}>${esc(profile.name)} · v${profile.current_version}</option>`).join('')}</select><p class="field-help">The complete immutable Profile version is copied into every new Work Item.</p></div>
       <div class="form-field"><label for="aiConfigSamples">Sample count (1–32)</label><input id="aiConfigSamples" type="number" min="1" max="32" value="${number('sample_count',8)}"></div>
       <div class="form-field"><label for="aiConfigContext">Context size (512–262144)</label><input id="aiConfigContext" type="number" min="512" max="262144" value="${number('context_size',8192)}"></div>
       <div class="form-field"><label for="aiConfigThreads">Threads (1–256)</label><input id="aiConfigThreads" type="number" min="1" max="256" value="${number('threads',8)}"></div>
@@ -62,6 +65,7 @@ const AIModelConfigurationsPage = {
     return {name:document.getElementById('aiConfigName').value.trim(),model_identifier:document.getElementById('aiConfigIdentifier').value.trim(),
       model_file:document.getElementById('aiConfigFile').value.trim(),model_repository:document.getElementById('aiConfigRepository').value.trim()||null,
       vision_prompt_version:document.getElementById('aiConfigVisionPrompt').value.trim(),writer_prompt_version:document.getElementById('aiConfigWriterPrompt').value.trim(),
+      instruction_profile_version_uuid:document.getElementById('aiConfigProfile').value,
       sample_count:this._number('aiConfigSamples'),context_size:this._number('aiConfigContext'),threads:this._number('aiConfigThreads'),
       gpu_layers:this._number('aiConfigGpuLayers'),max_tokens:this._number('aiConfigMaxTokens'),temperature:this._number('aiConfigTemperature'),
       image_max_tokens:this._number('aiConfigImageTokens'),additional_parameters};

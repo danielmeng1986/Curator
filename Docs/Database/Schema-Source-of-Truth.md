@@ -73,6 +73,7 @@ of the default runner.
 | `0011` | `workspace_album_name_promotion`, `ai_promotion_preview_claim` |
 | `0012` | `work_dispatch_group_closure` |
 | `0013` | `ai_workspace_retention` |
+| `0017` | `ai_instruction_profile`, `ai_instruction_profile_version`; Profile binding on `ai_model_configuration` |
 
 Repositories contain matching defensive DDL for several of these tables. The
 versioned SQL migration is the declared design authority where it exists; the

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
@@ -146,6 +147,30 @@ def _apply_0016(conn: sqlite3.Connection) -> None:
         ON workspace_album_ai_worker(worker_kind, run_state, created_at, id)""")
 
 
+def _apply_0017(conn: sqlite3.Connection, source: Path) -> None:
+    """Install Profile storage, bind configurations, and seed the published default."""
+    _apply_sql(conn, source)
+    if "instruction_profile_version_uuid" not in _columns(conn,"ai_model_configuration"):
+        conn.execute("ALTER TABLE ai_model_configuration ADD COLUMN instruction_profile_version_uuid TEXT")
+    from apps.ai_instruction_profile import DEFAULT_PROFILE_UUID, DEFAULT_VERSION_UUID, content_hash, default_content
+    now=datetime.now(timezone.utc).isoformat();content=default_content()
+    conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile
+        (uuid,name,worker_kind,dataset_type,lifecycle_state,is_default,version,created_at,updated_at)
+        VALUES (?,?,?,?,'Published',1,1,?,?)""",
+        (DEFAULT_PROFILE_UUID,"Curator Album Analysis Default","album_name_analysis","album",now,now))
+    conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile_version
+        (uuid,profile_uuid,version,global_instruction,dataset_instruction,vision_prompt_template,
+         writer_prompt_template,output_language,naming_policy_json,vision_schema_version,writer_schema_version,
+         validator_policy_version,instruction_transport,composition_version,content_hash,created_at)
+        VALUES (?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(DEFAULT_VERSION_UUID,DEFAULT_PROFILE_UUID,
+        content["global_instruction"],content["dataset_instruction"],content["vision_prompt_template"],
+        content["writer_prompt_template"],content["output_language"],json.dumps(content["naming_policy"],sort_keys=True),
+        content["vision_schema_version"],content["writer_schema_version"],content["validator_policy_version"],
+        content["instruction_transport"],content["composition_version"],content_hash(content),now))
+    conn.execute("""UPDATE ai_model_configuration SET instruction_profile_version_uuid=?
+        WHERE instruction_profile_version_uuid IS NULL""",(DEFAULT_VERSION_UUID,))
+
+
 def _recorded(conn: sqlite3.Connection) -> set[str]:
     if not _table_exists(conn, "schema_migration"):
         return set()
@@ -191,6 +216,8 @@ def migrate(
                     _apply_0015(conn)
                 elif migration_id == "0016_capability_aware_work_claim":
                     _apply_0016(conn)
+                elif migration_id == "0017_ai_instruction_profile":
+                    _apply_0017(conn, source)
                 else:
                     _apply_sql(conn, source)
                 _verify_connection(conn)

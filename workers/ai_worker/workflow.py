@@ -4,6 +4,7 @@ import json
 import re
 import time
 from .provider import ProviderError
+from apps.ai_instruction_profile import compose
 
 VISION_PROMPT="""Analyze all supplied Album evidence images together. Return exactly one JSON object and no other
 fields, using this shape: {"scene":"...","people":{"minimum":0,"maximum":0},
@@ -80,7 +81,9 @@ class AnalysisWorkflow:
                 if attempt==self.retries: raise
                 self.sleep(2**attempt)
     def vision(self,images,settings):
-        prompt=VISION_PROMPT
+        profile=settings.get("instruction_profile")
+        prompt=compose(profile,"vision") if profile else VISION_PROMPT
+        base=prompt
         for attempt in range(self.retries+1):
             try:payload,metrics=self.provider.complete(prompt,images=images,settings=settings)
             except ProviderError:
@@ -89,10 +92,11 @@ class AnalysisWorkflow:
             try:return validate_vision_payload(payload),metrics
             except ProviderError as exc:
                 if attempt==self.retries:raise
-                prompt=f"{VISION_PROMPT}\nYour previous response failed validation: {exc} Regenerate the complete JSON object and obey every rule."
+                prompt=f"{base}\nYour previous response failed validation: {exc} Regenerate the complete JSON object and obey every rule."
                 self.sleep(2**attempt)
     def writer(self,vision,settings):
-        base=WRITER_PROMPT.format(vision=json.dumps(vision,sort_keys=True))
+        profile=settings.get("instruction_profile")
+        base=compose(profile,"writer",vision=vision) if profile else WRITER_PROMPT.format(vision=json.dumps(vision,sort_keys=True))
         prompt=base
         for attempt in range(self.retries+1):
             try:payload,metrics=self.writer_provider.complete(prompt,settings=settings)

@@ -17,6 +17,8 @@ const WorkspaceReviewPage = {
 
   async renderWorkspaces() {
     this._stopRuntime();
+    const configSnapshot=typeof d.item.configuration_snapshot_json==='string'?JSON.parse(d.item.configuration_snapshot_json):{};
+    const instructionProfile=configSnapshot.instruction_profile;
     const el = document.getElementById('page-content');
     el.innerHTML = '<div class="loading">Loading AI Workspaces…</div>';
     try {
@@ -142,6 +144,7 @@ const WorkspaceReviewPage = {
         ${review.state === 'Approved' && !d.promotions.some(item => item.outcome === 'Promoted') ? '<button class="btn btn-danger" onclick="WorkspaceReviewPage.previewPromotion(this)">Review Promotion</button>' : ''}</div></section></div>
       <section class="card review-panel system-evidence"><div class="form-section-title">System evidence and provenance</div>
         <p>Work Item: <code>${esc(review.work_item_uuid)}</code> · Group: <a href="#/work-dispatch/groups/${esc(d.group_uuid)}">${esc(d.group_uuid || '—')}</a></p>
+        <p>AI Instruction Profile: ${instructionProfile?`<strong>${esc(instructionProfile.profile_name)}</strong> · v${esc(instructionProfile.version)} · <code>${esc(instructionProfile.content_hash.slice(0,16))}…</code>`:'Legacy code-owned prompt (no Profile snapshot)'}</p>
         ${previewRetired?'<div class="alert alert-info">Image preview ended after Promotion. Immutable Manifest metadata remains available.</div>':''}
         <div class="evidence-grid">${evidence.map(item => `<button type="button" class="evidence-card evidence-preview" data-evidence-uuid="${esc(item.uuid)}" data-evidence-filename="${esc(item.filename)}" ${item.availability!=='Available'||previewRetired?'disabled':''} onclick="WorkspaceReviewPage.openEvidencePreview('${esc(item.uuid)}','${esc(item.filename)}')"><span class="evidence-image-placeholder">${previewRetired?'Preview retired':item.availability==='Available'?'Loading preview…':'Preview unavailable'}</span><strong>${esc(item.filename)}</strong><span class="chip ${item.availability === 'Available' ? 'chip-ok' : 'chip-error'}">${esc(item.availability)}</span><small>${esc(item.mime_type)} · ${item.size_bytes} bytes</small></button>`).join('') || 'No evidence Manifest available.'}</div>
         <p>Decisions: ${d.decisions.length} · Promotions: ${d.promotions.length} · Operations: ${d.operations.map(item => `<a href="#/operations/${esc(item.uuid)}">${esc(item.operation_type)}</a>`).join(' · ') || '—'} · Issues: ${d.issues.map(item => `<a href="#/issues/${esc(item.uuid)}">${esc(item.category)}</a>`).join(' · ') || '—'}</p>

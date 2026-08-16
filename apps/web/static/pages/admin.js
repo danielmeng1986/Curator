@@ -15,6 +15,7 @@ const AdminCenterPage = {
         ['Operation History', 'Read durable administrative and workflow outcomes.', '#/operations?operation_type=backup', 'Available'],
         ['AI Work Dispatch', 'Select available Albums and assign exclusive Worker Groups.', '#/work-dispatch', 'Available'],
         ['AI Model Configurations', 'Create and manage portable llama.cpp runtime configurations.', '#/admin/ai-model-configurations', 'Available'],
+        ['AI Instruction Profiles', 'Version and publish the instructions supplied to AI Workers.', '#/admin/ai-instruction-profiles', 'Available'],
         ['AI Workspaces and Review', 'Review immutable AI analysis, evidence, decisions, and Promotions.', '#/ai-workspaces', 'Available'],
       ];
       el.innerHTML = `<div class="page-header"><h1 class="page-title">Administrator Center</h1></div>

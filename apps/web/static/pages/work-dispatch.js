@@ -24,7 +24,7 @@ const WorkDispatchPage = {
   _configurationSummary(item) {
     return `<strong>${esc(item.name)}</strong><span class="config-model">${esc(item.model_identifier)} · <code>${esc(item.model_file)}</code></span>
       <span class="config-parameters">${item.sample_count} images · context ${item.context_size} · max ${item.max_tokens} tokens · image ${item.image_max_tokens} · temp ${item.temperature} · ${item.threads} threads · ${item.gpu_layers} GPU layers</span>
-      <span class="config-prompts">Vision ${esc(item.vision_prompt_version)} · Writer ${esc(item.writer_prompt_version)}</span>`;
+      <span class="config-prompts">Vision ${esc(item.vision_prompt_version)} · Writer ${esc(item.writer_prompt_version)} · Profile version ${esc(item.instruction_profile_version_uuid||'default')}</span>`;
   },
 
   _stage(item) {
@@ -43,7 +43,7 @@ const WorkDispatchPage = {
       const retry=item.run_state === 'Failed'
         ? `<button class="btn btn-primary" onclick="WorkDispatchPage.retryItem('${esc(item.item_uuid)}',${item.version},this)">Retry</button>`
         : '';
-      return `<tr><td>${esc(albumTitle || '—')}</td><td><strong>${esc(config.name || 'Unknown configuration')}</strong><div class="table-secondary"><code>${esc(config.model_file || '—')}</code></div></td>
+      return `<tr><td>${esc(albumTitle || '—')}</td><td><strong>${esc(config.name || 'Unknown configuration')}</strong><div class="table-secondary"><code>${esc(config.model_file || '—')}</code></div><div class="table-secondary">${esc(config.instruction_profile?.profile_name||'Legacy prompt')} · v${esc(config.instruction_profile?.version||'—')}</div></td>
         <td><span class="chip ${item.run_state === 'Failed' ? 'chip-error' : item.run_state === 'Completed' ? 'chip-ok' : 'chip-warn'}">${esc(this._stage(item))}</span><div class="table-secondary">Run ${esc(item.run_state)}${item.result_state ? ` · Result ${esc(item.result_state)}` : ''}</div></td>
         <td>${item.attempt_count}</td><td>${item.updated_at ? esc(new Date(item.updated_at).toLocaleString()) : '—'}${item.lease_expires_at ? `<div class="table-secondary">Lease until ${esc(new Date(item.lease_expires_at).toLocaleString())}</div>` : ''}</td>
         <td>${item.last_error ? `<span class="text-error">${esc(item.last_error)}</span>` : '—'}</td><td><div class="detail-actions"><a class="btn btn-secondary" href="#/ai-work-items/${esc(item.item_uuid)}/review">Open</a>${retry}</div></td></tr>`;

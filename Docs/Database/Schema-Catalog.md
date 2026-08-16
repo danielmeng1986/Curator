@@ -83,7 +83,9 @@ Snapshot table. Their listing and validation are Backend-controlled.
 | `ai_dataset_schema` | Configuration/contract registry | composite PK `(dataset_type, schema_version)`; definition JSON; Active/Retired | referenced by AI Workspace | migration `0003`; BT-044 |
 | `ai_workspace` | Current container, later retained history | integer `id`, unique UUID; dataset identity, title, Open/Closed/Archived state, version | composite FK → dataset schema; retention record extends closure/archive evidence | migration `0003`; UI-011A/B |
 | `ai_workspace_retention` | Immutable lifecycle/audit evidence | Workspace UUID PK; outcome, reasons, actor/time/Operation fields | FK → AI Workspace; indefinite audit classification | migration `0013`; BT-052 |
-| `ai_model_configuration` | Managed versioned execution configuration | integer `id`, unique UUID and name; model/prompt IDs, sampling/runtime parameters, enabled/version | Work Items snapshot and reference configuration; provider currently `llama_cpp` | migration `0004`; BT-045 |
+| `ai_model_configuration` | Managed versioned execution configuration | integer `id`, unique UUID and name; model/prompt IDs, selected Instruction Profile version, sampling/runtime parameters, enabled/version | Work Items snapshot and reference configuration; provider currently `llama_cpp` | migrations `0004`, `0017`; BT-045/AIC-001 |
+| `ai_instruction_profile` | Stable Administrator-managed AI instruction identity and lifecycle | integer `id`, unique UUID/name; Worker kind, Dataset type, Draft/Published/Disabled state, default/version | Owns immutable Profile versions; one published default per Worker kind/Dataset | migration `0017`; AIC-001 |
+| `ai_instruction_profile_version` | Immutable executable AI instruction content | integer `id`, unique UUID; Profile/version, Global/Dataset/ Vision/Writer text, schemas, transport/composition and SHA-256 hash | FK → Instruction Profile; unique Profile/version | migration `0017`; AIC-001 |
 
 ## Work Dispatch
 

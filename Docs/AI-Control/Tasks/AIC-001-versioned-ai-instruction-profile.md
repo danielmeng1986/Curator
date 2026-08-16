@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`AIC-001` — Status: `Ready`
+`AIC-001` — Status: `Complete`
 
 ## Title
 
@@ -214,3 +214,21 @@ The migration/bootstrap Profile must reproduce current supported behavior:
   versioning plus evaluation rather than in-place editing.
 - `chat_template_system` remains a separate future adapter capability because
   behavior varies by model family, GGUF metadata, and llama.cpp build.
+
+## Implementation Evidence
+
+- Migration `0017_ai_instruction_profile.sql` creates Profile identity/version
+  storage, seeds the deterministic published Album-analysis default, and binds
+  existing Model Configurations to that version.
+- New Work Items snapshot the complete effective Profile plus its canonical
+  SHA-256 content hash. Existing historical items remain readable and use the
+  explicitly bounded legacy Worker compatibility path.
+- The Worker validates supported schema, validator, transport, composition and
+  hash fields before composing stage prompts. Corrective retries reuse the same
+  frozen snapshot.
+- Administrator APIs and UI cover draft creation, immutable successor versions,
+  publication/default selection, disabling, and Model Configuration selection.
+- Dispatch and Review disclose Profile identity/version; Review also shows the
+  executed content hash.
+- Migration, lifecycle, deterministic composition, tamper rejection, Backend
+  service, concurrent Dispatch, and Worker regression tests pass.

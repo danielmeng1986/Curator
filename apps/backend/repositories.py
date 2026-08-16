@@ -16,6 +16,7 @@ import json
 import sqlite3
 import hashlib
 from datetime import datetime, timezone
+from apps.ai_instruction_profile import DEFAULT_PROFILE_UUID, DEFAULT_VERSION_UUID, content_hash, default_content
 
 
 # ---------------------------------------------------------------------------
@@ -2219,15 +2220,128 @@ class AIWorkspaceRepository:
         result=self._norm(workspace); result["retention"]=dict(retention) if retention else None; return result
 
 
+class AIInstructionProfileRepository:
+    """Immutable Profile versions with an explicitly published default."""
+
+    def __init__(self, db_factory): self._db=db_factory
+
+    @staticmethod
+    def _ensure_schema(conn):
+        conn.execute("""CREATE TABLE IF NOT EXISTS ai_instruction_profile (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,uuid TEXT NOT NULL UNIQUE,name TEXT NOT NULL UNIQUE,
+            worker_kind TEXT NOT NULL,dataset_type TEXT NOT NULL,lifecycle_state TEXT NOT NULL DEFAULT 'Draft',
+            is_default INTEGER NOT NULL DEFAULT 0,version INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS ai_instruction_profile_version (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,uuid TEXT NOT NULL UNIQUE,profile_uuid TEXT NOT NULL,version INTEGER NOT NULL,
+            global_instruction TEXT NOT NULL,dataset_instruction TEXT NOT NULL,vision_prompt_template TEXT NOT NULL,
+            writer_prompt_template TEXT NOT NULL,output_language TEXT NOT NULL,naming_policy_json TEXT NOT NULL,
+            vision_schema_version TEXT NOT NULL,writer_schema_version TEXT NOT NULL,validator_policy_version TEXT NOT NULL,
+            instruction_transport TEXT NOT NULL,composition_version TEXT NOT NULL,content_hash TEXT NOT NULL,
+            created_by_token_uuid TEXT,created_at TEXT NOT NULL,UNIQUE(profile_uuid,version))""")
+        now=datetime.now(timezone.utc).isoformat();content=default_content()
+        conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile
+            (uuid,name,worker_kind,dataset_type,lifecycle_state,is_default,version,created_at,updated_at)
+            VALUES (?,?,?,?,'Published',1,1,?,?)""",(DEFAULT_PROFILE_UUID,"Curator Album Analysis Default","album_name_analysis","album",now,now))
+        conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile_version
+            (uuid,profile_uuid,version,global_instruction,dataset_instruction,vision_prompt_template,writer_prompt_template,
+            output_language,naming_policy_json,vision_schema_version,writer_schema_version,validator_policy_version,
+            instruction_transport,composition_version,content_hash,created_at) VALUES (?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (DEFAULT_VERSION_UUID,DEFAULT_PROFILE_UUID,content["global_instruction"],content["dataset_instruction"],
+             content["vision_prompt_template"],content["writer_prompt_template"],content["output_language"],
+             json.dumps(content["naming_policy"],sort_keys=True),content["vision_schema_version"],content["writer_schema_version"],
+             content["validator_policy_version"],content["instruction_transport"],content["composition_version"],content_hash(content),now))
+        conn.commit()
+
+    @staticmethod
+    def _version(row, profile_name=None):
+        value=dict(row);value["naming_policy"]=json.loads(value.pop("naming_policy_json"))
+        value["version_uuid"]=value.pop("uuid");value["profile_name"]=profile_name or value.get("profile_name")
+        return value
+
+    def list(self):
+        with self._db() as conn:
+            self._ensure_schema(conn);rows=conn.execute("""SELECT p.*,v.uuid AS current_version_uuid,v.version AS current_version,
+                v.content_hash FROM ai_instruction_profile p JOIN ai_instruction_profile_version v ON v.profile_uuid=p.uuid
+                WHERE v.version=(SELECT MAX(version) FROM ai_instruction_profile_version WHERE profile_uuid=p.uuid)
+                ORDER BY p.name""").fetchall()
+        return [dict(row) for row in rows]
+
+    def get_version(self, version_uuid=None):
+        version_uuid=version_uuid or DEFAULT_VERSION_UUID
+        with self._db() as conn:
+            self._ensure_schema(conn);row=conn.execute("""SELECT v.*,p.name AS profile_name,p.lifecycle_state,p.worker_kind,p.dataset_type
+                FROM ai_instruction_profile_version v JOIN ai_instruction_profile p ON p.uuid=v.profile_uuid WHERE v.uuid=?""",
+                (version_uuid,)).fetchone()
+        return self._version(row) if row else None
+
+    def create(self,name,worker_kind,dataset_type,content,actor,now):
+        profile_uuid,version_uuid=str(uuid.uuid4()),str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn);conn.execute("""INSERT INTO ai_instruction_profile
+                (uuid,name,worker_kind,dataset_type,lifecycle_state,is_default,version,created_at,updated_at)
+                VALUES (?,?,?,?,'Draft',0,1,?,?)""",(profile_uuid,name,worker_kind,dataset_type,now,now))
+            conn.execute("""INSERT INTO ai_instruction_profile_version
+                (uuid,profile_uuid,version,global_instruction,dataset_instruction,vision_prompt_template,writer_prompt_template,
+                output_language,naming_policy_json,vision_schema_version,writer_schema_version,validator_policy_version,
+                instruction_transport,composition_version,content_hash,created_by_token_uuid,created_at)
+                VALUES (?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(version_uuid,profile_uuid,content["global_instruction"],
+                content["dataset_instruction"],content["vision_prompt_template"],content["writer_prompt_template"],content["output_language"],
+                json.dumps(content["naming_policy"],sort_keys=True),content["vision_schema_version"],content["writer_schema_version"],
+                content["validator_policy_version"],content["instruction_transport"],content["composition_version"],content_hash(content),actor,now));conn.commit()
+        return self.get_version(version_uuid)
+
+    def create_version(self,profile_uuid,expected_version,content,actor,now):
+        version_uuid=str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn);conn.execute("BEGIN IMMEDIATE")
+            profile=conn.execute("SELECT * FROM ai_instruction_profile WHERE uuid=?",(profile_uuid,)).fetchone()
+            if not profile:return None
+            if profile["version"]!=expected_version:raise PersistenceConflict({"code":"AI_INSTRUCTION_PROFILE_STALE"})
+            next_version=conn.execute("SELECT COALESCE(MAX(version),0)+1 FROM ai_instruction_profile_version WHERE profile_uuid=?",(profile_uuid,)).fetchone()[0]
+            conn.execute("""INSERT INTO ai_instruction_profile_version
+                (uuid,profile_uuid,version,global_instruction,dataset_instruction,vision_prompt_template,writer_prompt_template,
+                output_language,naming_policy_json,vision_schema_version,writer_schema_version,validator_policy_version,
+                instruction_transport,composition_version,content_hash,created_by_token_uuid,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(version_uuid,profile_uuid,next_version,content["global_instruction"],
+                content["dataset_instruction"],content["vision_prompt_template"],content["writer_prompt_template"],content["output_language"],
+                json.dumps(content["naming_policy"],sort_keys=True),content["vision_schema_version"],content["writer_schema_version"],
+                content["validator_policy_version"],content["instruction_transport"],content["composition_version"],content_hash(content),actor,now))
+            conn.execute("UPDATE ai_instruction_profile SET lifecycle_state='Draft',is_default=0,version=version+1,updated_at=? WHERE uuid=?",(now,profile_uuid));conn.commit()
+        return self.get_version(version_uuid)
+
+    def publish(self,profile_uuid,expected_version,make_default,now):
+        with self._db() as conn:
+            self._ensure_schema(conn);conn.execute("BEGIN IMMEDIATE")
+            row=conn.execute("SELECT * FROM ai_instruction_profile WHERE uuid=?",(profile_uuid,)).fetchone()
+            if not row: return None
+            if row["version"]!=expected_version: raise PersistenceConflict({"code":"AI_INSTRUCTION_PROFILE_STALE"})
+            if make_default: conn.execute("UPDATE ai_instruction_profile SET is_default=0 WHERE worker_kind=? AND dataset_type=?",(row["worker_kind"],row["dataset_type"]))
+            conn.execute("UPDATE ai_instruction_profile SET lifecycle_state='Published',is_default=?,version=version+1,updated_at=? WHERE uuid=?",
+                (int(make_default),now,profile_uuid));conn.commit()
+        return next((item for item in self.list() if item["uuid"]==profile_uuid),None)
+
+    def disable(self,profile_uuid,expected_version,now):
+        with self._db() as conn:
+            self._ensure_schema(conn);profile=conn.execute("SELECT is_default FROM ai_instruction_profile WHERE uuid=?",(profile_uuid,)).fetchone()
+            if profile and profile["is_default"]:raise PersistenceConflict({"code":"AI_INSTRUCTION_PROFILE_DEFAULT_REQUIRED"})
+            cur=conn.execute("""UPDATE ai_instruction_profile SET lifecycle_state='Disabled',is_default=0,
+                version=version+1,updated_at=? WHERE uuid=? AND version=?""",(now,profile_uuid,expected_version));conn.commit()
+        if cur.rowcount!=1:raise PersistenceConflict({"code":"AI_INSTRUCTION_PROFILE_STALE"})
+        return next((item for item in self.list() if item["uuid"]==profile_uuid),None)
+
+
 class AIModelConfigurationRepository:
     """Portable llama.cpp configuration persistence with versioned updates."""
 
     FIELDS = ("name", "provider_type", "model_identifier", "model_repository", "model_file",
               "vision_prompt_version", "writer_prompt_version", "sample_count", "context_size",
               "threads", "gpu_layers", "max_tokens", "temperature", "image_max_tokens",
-              "additional_parameters_json")
+              "additional_parameters_json", "instruction_profile_version_uuid")
 
     def __init__(self, db_factory): self._db = db_factory
+
+    def profile_version(self,version_uuid):
+        return AIInstructionProfileRepository(self._db).get_version(version_uuid)
 
     @staticmethod
     def _ensure_schema(conn):
@@ -2240,7 +2354,12 @@ class AIModelConfigurationRepository:
             gpu_layers INTEGER NOT NULL, max_tokens INTEGER NOT NULL, temperature REAL NOT NULL,
             image_max_tokens INTEGER NOT NULL, additional_parameters_json TEXT NOT NULL DEFAULT '{}',
             enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)), version INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"""); conn.commit()
+            instruction_profile_version_uuid TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+        if "instruction_profile_version_uuid" not in {row[1] for row in conn.execute("PRAGMA table_info(ai_model_configuration)")}:
+            try: conn.execute("ALTER TABLE ai_model_configuration ADD COLUMN instruction_profile_version_uuid TEXT")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower(): raise
+        AIInstructionProfileRepository._ensure_schema(conn);conn.commit()
 
     @staticmethod
     def _norm(row):

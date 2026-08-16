@@ -807,6 +807,12 @@ class AppHandler(SimpleHTTPRequestHandler):
                     evidence_uuid,self._principal["role"],self._principal.get("token_uuid")))
             elif path == "/api/ai-model-configurations":
                 self._get_ai_model_configurations()
+            elif path == "/api/ai-instruction-profiles":
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"items":self._ai_instruction_profile_service().list()})
+            elif re.match(r"^/api/ai-instruction-profiles/versions/[^/]+$",path):
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"version":self._ai_instruction_profile_service().get_version(path.split("/")[-1])})
             elif re.match(r"^/api/ai-model-configurations/[^/]+$", path):
                 self._get_ai_model_configuration(path.split("/")[-1])
             elif path == "/api/work-dispatch/candidates":
@@ -1022,6 +1028,12 @@ class AppHandler(SimpleHTTPRequestHandler):
     def _ai_model_configuration_service(self):
         return svc.AIModelConfigurationService(
             repo.AIModelConfigurationRepository(open_db),
+            svc.OperationService(repo.OperationRepository(open_db)),
+        )
+
+    def _ai_instruction_profile_service(self):
+        return svc.AIInstructionProfileService(
+            repo.AIInstructionProfileRepository(open_db),
             svc.OperationService(repo.OperationRepository(open_db)),
         )
 
@@ -1355,6 +1367,26 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif path == "/api/ai-model-configurations":
                 if not self._require_admin_principal(): return
                 self._send_success(201, {"configuration": self._ai_model_configuration_service().create(body)})
+            elif path == "/api/ai-instruction-profiles":
+                if not self._require_admin_principal(): return
+                self._send_success(201,{"version":self._ai_instruction_profile_service().create(body,self._principal.get("token_uuid"))})
+            elif re.match(r"^/api/ai-instruction-profiles/[^/]+/versions$",path):
+                if not self._require_admin_principal(): return
+                expected=body.get("expected_version")
+                if not isinstance(expected,int):raise ValueError("expected_version is required and must be an integer.")
+                self._send_success(201,{"version":self._ai_instruction_profile_service().create_version(
+                    path.split("/")[3],expected,body,self._principal.get("token_uuid"))})
+            elif re.match(r"^/api/ai-instruction-profiles/[^/]+/publish$",path):
+                if not self._require_admin_principal(): return
+                expected=body.get("expected_version")
+                if not isinstance(expected,int):raise ValueError("expected_version is required and must be an integer.")
+                self._send_success(200,{"profile":self._ai_instruction_profile_service().publish(
+                    path.split("/")[3],expected,body.get("make_default") is True)})
+            elif re.match(r"^/api/ai-instruction-profiles/[^/]+/disable$",path):
+                if not self._require_admin_principal(): return
+                expected=body.get("expected_version")
+                if not isinstance(expected,int):raise ValueError("expected_version is required and must be an integer.")
+                self._send_success(200,{"profile":self._ai_instruction_profile_service().disable(path.split("/")[3],expected)})
             elif re.match(r"^/api/ai-model-configurations/[^/]+/(enable|disable)$", path):
                 if not self._require_admin_principal(): return
                 parts = path.split("/"); expected = body.get("expected_version")

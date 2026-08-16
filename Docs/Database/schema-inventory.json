@@ -16,7 +16,9 @@
     "0012_work_dispatch_group_closure",
     "0013_ai_workspace_retention",
     "0014_authentication_and_operations",
-    "0015_ui_device_enrollment"
+    "0015_ui_device_enrollment",
+    "0016_capability_aware_work_claim",
+    "0017_ai_instruction_profile"
   ],
   "excluded_tables": [
     "sqlite_sequence"
@@ -147,6 +149,271 @@
           ],
           "unique": true,
           "origin": "pk",
+          "partial": false
+        }
+      ]
+    },
+    "ai_instruction_profile": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "worker_kind",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "dataset_type",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "lifecycle_state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'Draft'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "is_default",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "0",
+          "primary_key_position": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "name"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": "ux_ai_instruction_profile_default",
+          "columns": [
+            "worker_kind",
+            "dataset_type"
+          ],
+          "unique": true,
+          "origin": "c",
+          "partial": true
+        }
+      ]
+    },
+    "ai_instruction_profile_version": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "profile_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "global_instruction",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "dataset_instruction",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "vision_prompt_template",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "writer_prompt_template",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "output_language",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "naming_policy_json",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "vision_schema_version",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "writer_schema_version",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "validator_policy_version",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "instruction_transport",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'composed_prompt'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "composition_version",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'composed-v1'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "content_hash",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_by_token_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "profile_uuid",
+          "table": "ai_instruction_profile",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "profile_uuid",
+            "version"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
           "partial": false
         }
       ]
@@ -297,6 +564,13 @@
           "name": "updated_at",
           "type": "TEXT",
           "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "instruction_profile_version_uuid",
+          "type": "TEXT",
+          "not_null": false,
           "default": null,
           "primary_key_position": 0
         }
@@ -560,6 +834,13 @@
         },
         {
           "name": "error_message",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "worker_kinds_json",
           "type": "TEXT",
           "not_null": false,
           "default": null,
@@ -3877,6 +4158,13 @@
           "not_null": true,
           "default": null,
           "primary_key_position": 0
+        },
+        {
+          "name": "worker_kind",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'album_name_analysis'",
+          "primary_key_position": 0
         }
       ],
       "foreign_keys": [
@@ -3910,6 +4198,18 @@
           ],
           "unique": true,
           "origin": "u",
+          "partial": false
+        },
+        {
+          "name": "idx_ai_work_item_kind_queue",
+          "columns": [
+            "worker_kind",
+            "run_state",
+            "created_at",
+            "id"
+          ],
+          "unique": false,
+          "origin": "c",
           "partial": false
         },
         {
