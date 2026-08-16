@@ -181,12 +181,40 @@ class WorkerTests(unittest.TestCase):
             def complete(self,prompt,**kwargs):self.calls.append((prompt,kwargs));return self.result,{"duration_ms":1}
         valid={"album_summary":"Garden scene","description":"A garden setting.","suggested_names":
             ["Bamboo Garden","Quiet Retreat","Summer Reverie","Golden Afternoon","Gentle Elegance","Serene Moments"]}
-        vision=Provider({"scene":"garden"});writer=Provider(valid)
+        vision_payload={"scene":"garden","people":{"minimum":1,"maximum":1},
+            "location_environment":"Outdoor garden","subjects":["person"],"objects":["bamboo"],
+            "actions":["posing"],"confidence":0.9,"warnings":[]}
+        vision=Provider(vision_payload);writer=Provider(valid)
         workflow=AnalysisWorkflow(vision,writer)
         vision_result,_=workflow.vision([Path("one.jpg")],{"max_tokens":128})
         workflow.writer(vision_result,{"max_tokens":128})
         self.assertEqual([Path("one.jpg")],vision.calls[0][1]["images"])
         self.assertNotIn("images",writer.calls[0][1])
+
+    def test_vision_validation_retries_before_backend_submission(self):
+        valid={"scene":"garden","people":{"minimum":1,"maximum":1},
+            "location_environment":"Outdoor garden","subjects":["person"],"objects":["bamboo"],
+            "actions":["posing"],"confidence":0.9,"warnings":[]}
+        class Provider:
+            def __init__(self):self.calls=[]
+            def complete(self,prompt,**kwargs):
+                self.calls.append((prompt,kwargs))
+                return ({"scene":"garden"} if len(self.calls)==1 else valid),{"duration_ms":1}
+        provider=Provider();payload,_=AnalysisWorkflow(provider,sleep=lambda _:None).vision([Path("one.jpg")],{})
+        self.assertEqual(valid,payload);self.assertEqual(2,len(provider.calls))
+        self.assertIn("failed validation",provider.calls[1][0])
+        self.assertEqual([Path("one.jpg")],provider.calls[1][1]["images"])
+
+    def test_vision_validation_matches_backend_v1_rules(self):
+        from workers.ai_worker.workflow import validate_vision_payload
+        valid={"scene":"garden","people":{"minimum":1,"maximum":2},
+            "location_environment":"Outdoor garden","subjects":[],"objects":[],"actions":[],
+            "confidence":0.8,"warnings":[]}
+        self.assertEqual(valid,validate_vision_payload(valid))
+        invalid=({**valid,"extra":True},{**valid,"people":{"minimum":2,"maximum":1}},
+            {**valid,"confidence":True},{**valid,"subjects":"person"})
+        for payload in invalid:
+            with self.assertRaises(ProviderError):validate_vision_payload(payload)
 
     def test_writer_validation_retries_with_feedback_before_submission(self):
         valid={"album_summary":"Garden scene","description":"A garden setting.","suggested_names":

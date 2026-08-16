@@ -170,6 +170,9 @@ six-name rules before submission; invalid model output receives bounded
 corrective retries. Length limits are not expanded into llama.cpp grammar, so
 they cannot exceed its complexity limit, but both Worker and Backend still
 reject data outside the Curator contract.
+Vision output is also checked locally against the exact v1 fields, people
+range, arrays, confidence, and text limits. Format drift receives bounded
+corrective retries instead of being submitted as an HTTP 400.
 
 Omit `--mmproj` only when the chosen llama.cpp/model combination does not
 require a separate projector. Normal mode waits on outbound HTTP requests of at

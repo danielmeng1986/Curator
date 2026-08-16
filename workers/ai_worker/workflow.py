@@ -5,9 +5,11 @@ import re
 import time
 from .provider import ProviderError
 
-VISION_PROMPT="""Analyze all supplied Album evidence images together. Return JSON only with exactly these fields:
-scene (string), people ({minimum, maximum} integers), location_environment (string), subjects (string array),
-objects (string array), actions (string array), confidence (0..1), warnings (string array). Do not identify people."""
+VISION_PROMPT="""Analyze all supplied Album evidence images together. Return exactly one JSON object and no other
+fields, using this shape: {"scene":"...","people":{"minimum":0,"maximum":0},
+"location_environment":"...","subjects":[],"objects":[],"actions":[],"confidence":0.0,"warnings":[]}.
+minimum and maximum must be integers from 0 to 100, confidence must be a number from 0 to 1, and the four list
+fields must contain strings. Do not identify people."""
 WRITER_PROMPT="""Using the following Vision JSON, return one JSON object only with album_summary (string),
 description (string), and suggested_names (exactly six unique names). Every suggested name must contain 2-5
 English words; every word must start with an uppercase letter and contain only letters, apostrophes, or hyphens.
@@ -24,6 +26,30 @@ WRITER_JSON_SCHEMA={"type":"object","additionalProperties":False,
         "suggested_names":{"type":"array","minItems":6,"maxItems":6,"uniqueItems":True,
             "items":{"type":"string"}}}}
 FORBIDDEN_NAME_WORDS={"photo","photos","collection","session","gallery"}
+
+def _bounded_array(payload,key,maximum,text_limit):
+    values=payload[key]
+    if not isinstance(values,list) or len(values)>maximum:
+        raise ProviderError(f"Vision {key} must be a bounded array.",error_code="MODEL_OUTPUT_INVALID")
+    return [_bounded_text(value,key,text_limit) for value in values]
+
+def validate_vision_payload(payload):
+    required={"scene","people","location_environment","subjects","objects","actions","confidence","warnings"}
+    if not isinstance(payload,dict) or set(payload)!=required:
+        raise ProviderError("Vision fields must exactly match schema v1.",error_code="MODEL_OUTPUT_INVALID")
+    people=payload["people"]
+    if not isinstance(people,dict) or set(people)!={"minimum","maximum"} \
+            or any(isinstance(people[key],bool) or not isinstance(people[key],int) or not 0<=people[key]<=100 for key in people) \
+            or people["minimum"]>people["maximum"]:
+        raise ProviderError("Vision people must contain a valid integer minimum/maximum range.",error_code="MODEL_OUTPUT_INVALID")
+    confidence=payload["confidence"]
+    if isinstance(confidence,bool) or not isinstance(confidence,(int,float)) or not 0<=confidence<=1:
+        raise ProviderError("Vision confidence must be a number from 0 to 1.",error_code="MODEL_OUTPUT_INVALID")
+    return {"scene":_bounded_text(payload["scene"],"scene",500),"people":people,
+        "location_environment":_bounded_text(payload["location_environment"],"location_environment",500),
+        "subjects":_bounded_array(payload,"subjects",50,120),"objects":_bounded_array(payload,"objects",50,120),
+        "actions":_bounded_array(payload,"actions",50,120),"confidence":confidence,
+        "warnings":_bounded_array(payload,"warnings",20,300)}
 
 def _bounded_text(value,name,limit):
     if not isinstance(value,str) or not value.strip() or len(value)>limit or any(ord(char)<32 and char not in "\n\t" for char in value):
@@ -61,7 +87,18 @@ class AnalysisWorkflow:
             except ProviderError:
                 if attempt==self.retries: raise
                 self.sleep(2**attempt)
-    def vision(self,images,settings): return self._complete(self.provider,VISION_PROMPT,images=images,settings=settings)
+    def vision(self,images,settings):
+        prompt=VISION_PROMPT
+        for attempt in range(self.retries+1):
+            try:payload,metrics=self.provider.complete(prompt,images=images,settings=settings)
+            except ProviderError:
+                if attempt==self.retries:raise
+                self.sleep(2**attempt);continue
+            try:return validate_vision_payload(payload),metrics
+            except ProviderError as exc:
+                if attempt==self.retries:raise
+                prompt=f"{VISION_PROMPT}\nYour previous response failed validation: {exc} Regenerate the complete JSON object and obey every rule."
+                self.sleep(2**attempt)
     def writer(self,vision,settings):
         base=WRITER_PROMPT.format(vision=json.dumps(vision,sort_keys=True))
         prompt=base

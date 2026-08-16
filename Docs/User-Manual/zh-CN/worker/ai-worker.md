@@ -151,6 +151,8 @@ Writer 必须具备 `--single-turn`、`--simple-io` 与有界输出参数，确�
 长度与六个名称规则进行本地校验；不合格的模型输出会收到有界纠错重试。长度上限不直接写入
 llama.cpp grammar，以避免大范围重复规则超过其复杂度限制，但 Worker 与 Backend 均不会因此
 接受超出 Curator 契约的数据。
+Vision 输出同样会在提交前按照 schema v1 的精确字段、人数范围、数组、置信度和文本上限进行
+本地校验；模型格式发生偏移时，Worker 会先进行有界纠错重试，而不是把无效结果提交成 HTTP 400。
 
 仅当所选 llama.cpp/模型组合不要求独立 projector 时才省略 `--mmproj`。正常模式会用最长
 30 秒的 outbound HTTP 请求等待 `album_name_analysis` 任务；Backend Dispatch 提交后会立即

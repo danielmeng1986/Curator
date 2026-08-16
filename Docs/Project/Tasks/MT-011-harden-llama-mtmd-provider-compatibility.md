@@ -43,6 +43,8 @@ private Evidence paths.
 - Constrain Writer output with a JSON Schema, validate the complete Backend
   Writer contract locally, and retry with bounded corrective feedback before
   any invalid payload can be submitted.
+- Validate the complete Vision v1 contract locally and retry malformed model
+  output with bounded corrective feedback before Backend submission.
 - Keep the llama.cpp generation Schema structural rather than encoding large
   string-length repetitions that exceed upstream grammar complexity limits;
   enforce the complete bounds in the local validator and Backend instead.
@@ -93,6 +95,8 @@ private Evidence paths.
 9. Keep Writer grammar generation compatible with llama.cpp sane-default
    limits by testing that large Curator string bounds are not expanded into the
    provider-facing JSON Schema.
+10. Mirror the Vision v1 exact fields, people range, bounded arrays, confidence,
+    and text limits locally so model format drift cannot become an HTTP 400.
 
 ## Acceptance Criteria
 
@@ -110,6 +114,8 @@ private Evidence paths.
   Device Token, prompt body, private Evidence path, or retained Evidence bytes.
 - Provider failure never submits a partial Vision or Writer result and still
   truthfully ends the owned attempt as Failed.
+- Invalid Vision JSON is rejected and retried locally before any result reaches
+  the Backend.
 - Invalid Writer JSON is rejected locally and retried; Backend validation
   failures identify their application code and message rather than only the
   numeric HTTP status.
