@@ -1,12 +1,13 @@
 import unittest
 import json
 import hashlib
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 from workers.ai_worker.client import CuratorClient,EnrollmentClient
 from workers.ai_worker.workflow import AnalysisWorkflow
-from workers.ai_worker.provider import LlamaCliProvider,ProviderError,parse_json_object
+from workers.ai_worker.provider import LlamaCliProvider,ProviderError,parse_json_object,validate_mtmd_cli
 from workers.ai_worker.runtime import WorkerRuntime
 from workers.ai_worker.cli import parser
 from workers.ai_worker import config
@@ -122,4 +123,38 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual("one.jpg,two.jpg",args[args.index("--image")+1])
         self.assertEqual("256",args[args.index("--image-max-tokens")+1])
         self.assertEqual("mmproj.gguf",args[args.index("--mmproj")+1])
+        self.assertNotIn("--no-display-prompt",args)
         self.assertTrue(run.call_args.kwargs["check"]);self.assertNotIn("shell",run.call_args.kwargs)
+
+    @patch("workers.ai_worker.provider.subprocess.run")
+    def test_llama_provider_reports_bounded_redacted_stderr_and_category(self,run):
+        error=subprocess.CalledProcessError(1,["llama-mtmd-cli"],stderr="unknown argument --bad /private/model.gguf curator-ai-worker-secret/evidence-1.jpg")
+        run.side_effect=error
+        with self.assertRaises(ProviderError) as raised:
+            LlamaCliProvider("llama-mtmd-cli","/private/model.gguf").complete("private prompt",images=[Path("curator-ai-worker-secret/evidence-1.jpg")])
+        self.assertEqual("MODEL_PROVIDER_ARGUMENT_INVALID",raised.exception.error_code)
+        self.assertNotIn("/private/model.gguf",str(raised.exception));self.assertNotIn("evidence-1.jpg",str(raised.exception))
+        self.assertLessEqual(len(str(raised.exception)),1000)
+
+    @patch("workers.ai_worker.provider.subprocess.run")
+    def test_llama_provider_reports_timeout(self,run):
+        run.side_effect=subprocess.TimeoutExpired(["llama-mtmd-cli"],1)
+        with self.assertRaises(ProviderError) as raised:LlamaCliProvider("llama-mtmd-cli","model.gguf",timeout_seconds=1).complete("inspect")
+        self.assertEqual("MODEL_PROVIDER_TIMEOUT",raised.exception.error_code)
+
+    @patch("workers.ai_worker.provider.subprocess.run")
+    def test_mtmd_preflight_requires_multimodal_options(self,run):
+        run.return_value.stdout="--mmproj --image --image-max-tokens --gpu-layers";run.return_value.stderr=""
+        validate_mtmd_cli("llama-mtmd-cli")
+        run.return_value.stdout="--image"
+        with self.assertRaisesRegex(ProviderError,"missing required options"):validate_mtmd_cli("llama-mtmd-cli")
+
+    def test_runtime_preserves_provider_failure_category(self):
+        class Client:
+            def __init__(self):self.failure=None
+            def prepare_manifest(self,*_):raise ProviderError("safe failure",error_code="MODEL_PROVIDER_CONTEXT_FAILED")
+            def heartbeat(self,*_):pass
+            def fail_work(self,*args):self.failure=args
+        client=Client();claimed={"uuid":"item-1","worker_kind":"album_name_analysis","configuration_snapshot":{}}
+        with self.assertRaises(ProviderError):WorkerRuntime(client,object()).run_once(claimed)
+        self.assertEqual("MODEL_PROVIDER_CONTEXT_FAILED",client.failure[1])

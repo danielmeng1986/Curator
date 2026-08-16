@@ -111,6 +111,11 @@ Worker 以 `--model-root /opt/curator-models` 启动时，配置中的
 当前 `--mmproj` 是 Worker 进程级参数。一次受控验证只选择与该 projector 匹配的模型
 配置；不要让同一个 Worker 进程用一个 projector 混合运行不同多模态模型家族。
 
+模型家族限制不是 Curator 的全局默认值。Qwen2.5-VL 7B 的受控测试可先使用
+`sample_count=8`、`context_size=16384`、`image_max_tokens=1024`；context 必须同时为全部
+选中图片、prompt 和生成结果留出空间。编辑配置只会为未来 Dispatch snapshot 产生新版本，
+不会改写现有 Work Item。
+
 - Device Token 绝不能进入源码、Git、命令参数、截图、日志、聊天、模型 prompt，或与无关
   进程共享的 Windows 环境。
 - 模型文件应位于仓库之外，也不能位于 Backend 管理的路径中。
@@ -126,6 +131,20 @@ Worker 以 `--model-root /opt/curator-models` 启动时，配置中的
 ```bash
 python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /opt/llama.cpp/build/bin/llama-mtmd-cli --model-root /opt/curator-models --mmproj /opt/curator-models/mmproj.gguf
 ```
+
+更新 llama.cpp 后，先用一张不敏感的本地图片验证，再领取生产任务（替换以下三个路径）：
+
+```bash
+/opt/llama.cpp/build/bin/llama-mtmd-cli \
+  -m /opt/curator-models/MODEL/model.gguf \
+  --mmproj /opt/curator-models/MODEL/mmproj.gguf \
+  --image /path/to/test.jpg \
+  --image-max-tokens 1024 \
+  -c 16384 -ngl 999 -n 128 \
+  -p 'Return one JSON object describing this image.'
+```
+
+Worker 在向 Backend 领取任务之前，也会确认所选可执行文件声明了必需的多模态参数。
 
 仅当所选 llama.cpp/模型组合不要求独立 projector 时才省略 `--mmproj`。正常模式会用最长
 30 秒的 outbound HTTP 请求等待 `album_name_analysis` 任务；Backend Dispatch 提交后会立即
@@ -171,7 +190,7 @@ Admin policy 让 item 可重试。
 | `401` | 凭据缺失、过期、已撤销、已替换或尚未批准；排障时绝不要打印它。 |
 | `403` | 确认专用 Worker 设备已按所需 scopes 批准为 Writer；不要提升为 Admin。 |
 | 没有领取 Work Item | 确认进程使用 `--worker-kind album_name_analysis`，Admin 已派发相同 Worker kind 的 Album 与配置；队列为空时 `--once` 会正常退出。 |
-| 模型/provider 失败 | 保留脱敏诊断，保持 Review/Promotion 不变；Worker 会依照 lease policy 上报失败或重试推理。 |
+| 模型/provider 失败 | 查看 Worker 输出与 Work Item 中限长、脱敏后的 llama.cpp 诊断；核对参数、模型/mmproj、GPU、context 与 image token。保持 Review/Promotion 不变。 |
 
 <!-- manual-section: security -->
 ## 10. 安全与数据边界

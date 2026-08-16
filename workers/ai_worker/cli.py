@@ -9,7 +9,7 @@ import random
 from pathlib import Path
 from . import config
 from .client import CuratorClient,EnrollmentClient,CuratorApiError
-from .provider import LlamaCliProvider
+from .provider import LlamaCliProvider,validate_mtmd_cli
 from .runtime import WorkerRuntime,payload_data
 from .workflow import AnalysisWorkflow
 
@@ -61,6 +61,7 @@ def run(args):
     root=args.model_root.expanduser().resolve()
     if not root.is_dir():raise ValueError("Model root was not found.")
     if args.mmproj and not args.mmproj.expanduser().is_file():raise ValueError("Multimodal projector was not found.")
+    validate_mtmd_cli(cli)
     client=CuratorClient(state["backend_url"],state["token"])
     principal=payload_data(client.principal())["principal"]
     if principal.get("role")!="writer":raise ValueError("AI Worker requires an approved Writer identity.")

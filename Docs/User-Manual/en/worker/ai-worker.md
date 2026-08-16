@@ -124,6 +124,12 @@ Work Dispatch** after creation to select the configuration.
 only model configurations compatible with that projector; do not use one
 projector to mix unrelated multimodal model families in one Worker process.
 
+Model-family limits are not global Curator defaults. For the controlled
+Qwen2.5-VL 7B run, start with `sample_count=8`, `context_size=16384`, and
+`image_max_tokens=1024`; the context must leave room for all selected images,
+the prompt, and generated output. Editing a configuration creates a new version
+for future Dispatch snapshots and never rewrites existing Work Items.
+
 - Never put a Device Token in source, Git, a command argument, screenshot, log,
   chat, model prompt, or Windows environment shared with unrelated processes.
 - Keep model files outside the repository and outside Backend-managed paths.
@@ -140,6 +146,22 @@ root, then start the Worker:
 ```bash
 python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /opt/llama.cpp/build/bin/llama-mtmd-cli --model-root /opt/curator-models --mmproj /opt/curator-models/mmproj.gguf
 ```
+
+After updating llama.cpp, verify one non-sensitive local image before claiming
+production work (replace all three paths):
+
+```bash
+/opt/llama.cpp/build/bin/llama-mtmd-cli \
+  -m /opt/curator-models/MODEL/model.gguf \
+  --mmproj /opt/curator-models/MODEL/mmproj.gguf \
+  --image /path/to/test.jpg \
+  --image-max-tokens 1024 \
+  -c 16384 -ngl 999 -n 128 \
+  -p 'Return one JSON object describing this image.'
+```
+
+The Worker also checks that the selected executable advertises the required
+multimodal options before it asks the Backend for work.
 
 Omit `--mmproj` only when the chosen llama.cpp/model combination does not
 require a separate projector. Normal mode waits on outbound HTTP requests of at

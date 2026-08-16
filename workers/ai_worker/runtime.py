@@ -52,6 +52,7 @@ class WorkerRuntime:
             return item_uuid
         except KeyboardInterrupt: raise
         except Exception as exc:
-            try:self.client.fail_work(item_uuid,"WORKER_EXECUTION_FAILED",str(exc)[:1000] or "Worker execution failed")
+            error_code=getattr(exc,"error_code","WORKER_EXECUTION_FAILED")
+            try:self.client.fail_work(item_uuid,error_code,str(exc)[:1000] or "Worker execution failed")
             except Exception:pass
             raise
