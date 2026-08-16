@@ -21,6 +21,8 @@ combinations of clothing, pose, room, media-category, or shooting terms. Avoid t
 Content, Shoot, Shoots, Posing, Displaying, Genital, Area, Interior, Photo, Photos, Collection, Session, or
 Gallery. Do not describe explicit sexual acts or identify a person. Vision JSON:\n{vision}"""
 FORBIDDEN_NAME_WORDS={"photo","photos","collection","session","gallery"}
+FOUR_WORD_PLACEHOLDERS=("Needs Human Naming Review","Awaiting Human Naming Review")
+PLACEHOLDER_POLICY_VERSION="writer-four-word-placeholder-v1"
 
 def _bounded_array(payload,key,maximum,text_limit):
     values=payload[key]
@@ -69,6 +71,20 @@ def validate_writer_payload(payload):
     return {"album_summary":_bounded_text(payload["album_summary"],"album_summary",500),
         "description":_bounded_text(payload["description"],"description",2000),"suggested_names":normalized}
 
+def normalize_writer_placeholders(payload):
+    """Replace obvious constrained-decoding filler in four-word title slots."""
+    if not isinstance(payload,dict) or not isinstance(payload.get("suggested_names"),list):return payload,0
+    result=dict(payload);names=list(payload["suggested_names"]);replacements=0
+    for index in (4,5):
+        if index>=len(names) or not isinstance(names[index],str):continue
+        words=names[index].split();tail=words[-1] if words else ""
+        roman_filler=bool(re.fullmatch(r"[IVXLCDM]{2,}",tail))
+        repeated_filler=bool(re.fullmatch(r"(.)\1{3,}",tail,re.IGNORECASE))
+        if roman_filler or repeated_filler:
+            names[index]=FOUR_WORD_PLACEHOLDERS[index-4];replacements+=1
+    result["suggested_names"]=names
+    return result,replacements
+
 class AnalysisWorkflow:
     def __init__(self, provider, writer_provider=None, retries:int=2, sleep=time.sleep):
         self.provider,self.writer_provider=provider,writer_provider or provider;self.retries,self.sleep=retries,sleep
@@ -107,7 +123,13 @@ class AnalysisWorkflow:
             except ProviderError:
                 if attempt==self.retries:raise
                 self.sleep(2**attempt);continue
-            try:return validate_writer_payload(payload),metrics
+            try:
+                payload,replacements=normalize_writer_placeholders(payload)
+                validated=validate_writer_payload(payload)
+                if replacements:
+                    metrics=dict(metrics or {});metrics["writer_placeholder_policy"]=PLACEHOLDER_POLICY_VERSION
+                    metrics["writer_placeholder_replacements"]=replacements
+                return validated,metrics
             except ProviderError as exc:
                 if attempt==self.retries:raise
                 prompt=f"{base}\nYour previous response failed validation: {exc} Regenerate the complete JSON object and obey every rule."

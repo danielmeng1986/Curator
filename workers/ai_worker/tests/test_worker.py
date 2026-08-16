@@ -280,6 +280,17 @@ class WorkerTests(unittest.TestCase):
                 ["Bamboo Garden","Quiet Retreat","Summer Reverie","Golden Afternoon","Gentle Elegance","Serene Moments"]):
             with self.assertRaises(ProviderError):validate_writer_payload({**base,"suggested_names":names})
 
+    def test_writer_replaces_roman_and_repeated_letter_four_word_fillers(self):
+        from workers.ai_worker.workflow import normalize_writer_placeholders
+        payload={"album_summary":"Summary","description":"Description","suggested_names":[
+            "Whispering Lilies","Silken Temptation","Moonlit Lovers' Dance","Ethereal Elegance Reimagined",
+            "Whispers Between Sheets II","Silken Shadows Unveiled IIIIIIIIIIIIIIIIIIIIIIII"]}
+        normalized,count=normalize_writer_placeholders(payload)
+        self.assertEqual(2,count)
+        self.assertEqual("Needs Human Naming Review",normalized["suggested_names"][4])
+        self.assertEqual("Awaiting Human Naming Review",normalized["suggested_names"][5])
+        self.assertEqual("Whispers Between Sheets II",payload["suggested_names"][4])
+
     def test_runtime_preserves_provider_failure_category(self):
         class Client:
             def __init__(self):self.failure=None
