@@ -53,6 +53,10 @@ With the Backend stopped and a verified backup available, run the canonical migr
 python3 -m apps.backend.migrations
 ```
 
+Restarting the Backend does not run migrations automatically. Run this explicit
+maintenance command after every update that adds a migration, then verify the
+reported applied version before starting or restarting the Backend.
+
 Use the same configured database path that the Server will use. Do not open SQLite and
 apply ad-hoc schema changes. Normal startup refuses a missing database rather than
 silently creating a replacement catalog.

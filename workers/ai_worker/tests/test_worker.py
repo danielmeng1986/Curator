@@ -179,19 +179,26 @@ class WorkerTests(unittest.TestCase):
     @patch("workers.ai_worker.provider.subprocess.run")
     def test_text_provider_is_single_turn_and_non_interactive(self,run):
         run.return_value.stdout='```json\n{"status":"ok"}\n```';run.return_value.stderr=""
-        payload,_=LlamaTextCliProvider("llama-cli","model.gguf").complete("write",settings={"max_tokens":128})
+        payload,metrics=LlamaTextCliProvider("llama-cli","model.gguf").complete("write",settings={"max_tokens":128})
         args=run.call_args.args[0]
         self.assertEqual({"status":"ok"},payload)
         for option in ("--single-turn","--simple-io","--no-display-prompt","--no-show-timings"):self.assertIn(option,args)
-        self.assertNotIn("--json-schema",args)
+        self.assertIn("--grammar",args);self.assertIn("name2",args[args.index("--grammar")+1])
+        self.assertEqual("writer-v1-gbnf-1",metrics["constrained_decoding"]);self.assertEqual(0,metrics["effective_temperature"])
         self.assertNotIn("--mmproj",args);self.assertNotIn("--image",args)
 
     @patch("workers.ai_worker.provider.subprocess.run")
     def test_text_preflight_requires_single_turn_options(self,run):
-        run.return_value.stdout="--single-turn --simple-io --no-display-prompt --no-show-timings --gpu-layers";run.return_value.stderr=""
+        run.return_value.stdout="--single-turn --simple-io --no-display-prompt --no-show-timings --gpu-layers --grammar";run.return_value.stderr=""
         validate_text_cli("llama-cli")
         run.return_value.stdout="--gpu-layers"
         with self.assertRaisesRegex(ProviderError,"missing required options"):validate_text_cli("llama-cli")
+
+    @patch("workers.ai_worker.provider.subprocess.run")
+    def test_writer_rejects_unreviewed_temperature_before_execution(self,run):
+        with self.assertRaises(ProviderError) as raised:
+            LlamaTextCliProvider("llama-cli","model.gguf").complete("write",settings={"writer_temperature":0.5})
+        self.assertEqual("MODEL_PROVIDER_ARGUMENT_INVALID",raised.exception.error_code);run.assert_not_called()
 
     def test_analysis_routes_images_only_to_vision_provider(self):
         class Provider:

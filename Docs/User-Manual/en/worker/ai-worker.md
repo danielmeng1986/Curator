@@ -163,14 +163,16 @@ production work (replace all three paths):
 
 The Worker checks both executables before asking the Backend for work. Vision
 requires the multimodal image/projector options. Writer requires
-`--single-turn`, `--simple-io`, and bounded-output options so a text-only prompt
+`--single-turn`, `--simple-io`, `--grammar`, and bounded-output options so a text-only prompt
 cannot enter an interactive chat loop. The prompt requests Writer JSON, which
 is locally checked against Curator's field-length and six-name distribution
 (two 2-word, two 3-word, and two 4-word names) before
-submission; invalid output receives bounded corrective retries. The supported
-llama.cpp build cannot reliably initialize its JSON grammar sampler, so the
-Worker does not pass `--json-schema`; Worker and Backend validation still
-reject data outside the Curator contract.
+submission; invalid output receives bounded corrective retries. Curator passes
+its reviewed `writer-v1-gbnf-1` grammar on every Writer invocation and uses an
+effective Writer temperature of zero. A llama.cpp build without grammar support
+is rejected before claim, and sampler failure never falls back to unconstrained
+generation. Worker and Backend validation remain authoritative for semantic
+rules such as uniqueness and forbidden words.
 Vision output is also checked locally against the exact v1 fields, people
 range, arrays, confidence, and text limits. Format drift receives bounded
 corrective retries instead of being submitted as an HTTP 400.

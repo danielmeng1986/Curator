@@ -6,13 +6,14 @@ import re
 import subprocess
 import time
 from pathlib import Path
+from .constraints import WRITER_GBNF,WRITER_GRAMMAR_VERSION
 
 class ProviderError(RuntimeError):
     def __init__(self,message: str,*,error_code: str="MODEL_PROVIDER_FAILED"):
         super().__init__(message);self.error_code=error_code
 
 REQUIRED_MTMD_OPTIONS=("--mmproj","--image","--image-max-tokens","--gpu-layers")
-REQUIRED_TEXT_OPTIONS=("--single-turn","--simple-io","--no-display-prompt","--no-show-timings","--gpu-layers")
+REQUIRED_TEXT_OPTIONS=("--single-turn","--simple-io","--no-display-prompt","--no-show-timings","--gpu-layers","--grammar")
 DIAGNOSTIC_LIMIT=700
 
 def _validate_cli(cli: str,required_options,display_name: str) -> None:
@@ -131,10 +132,13 @@ class LlamaTextCliProvider(LlamaCliProvider):
         super().__init__(cli,model,timeout_seconds=timeout_seconds,debug_dir=debug_dir,stage=stage)
     def complete(self,prompt: str,*,images=(),settings=None) -> tuple[dict,dict]:
         if images:raise ProviderError("Text model provider does not accept images.",error_code="MODEL_PROVIDER_ARGUMENT_INVALID")
-        settings=settings or {};args=[self.cli,"-m",self.model,"-p",prompt,
+        settings=settings or {};writer_temperature=settings.get("writer_temperature",0)
+        if isinstance(writer_temperature,bool) or not isinstance(writer_temperature,(int,float)) or not 0<=writer_temperature<=0.2:
+            raise ProviderError("Writer temperature must be between 0 and 0.2.",error_code="MODEL_PROVIDER_ARGUMENT_INVALID")
+        args=[self.cli,"-m",self.model,"-p",prompt,
             "-c",str(settings.get("context_size",4096)),"-t",str(settings.get("threads",1)),
             "-ngl",str(settings.get("gpu_layers",0)),"-n",str(settings.get("max_tokens",512)),
-            "--temp",str(settings.get("temperature",0)),"--single-turn","--simple-io",
+            "--temp",str(writer_temperature),"--grammar",WRITER_GBNF,"--single-turn","--simple-io",
             "--no-display-prompt","--no-show-timings"]
         started=time.monotonic()
         try:
@@ -159,4 +163,5 @@ class LlamaTextCliProvider(LlamaCliProvider):
                 raise ProviderError("Text model provider failed to initialize its sampler; no Curator result was submitted.",
                     error_code="MODEL_PROVIDER_ARGUMENT_INVALID") from exc
             raise
-        return payload,{"duration_ms":round((time.monotonic()-started)*1000),"provider":"llama_cpp"}
+        return payload,{"duration_ms":round((time.monotonic()-started)*1000),"provider":"llama_cpp",
+            "constrained_decoding":WRITER_GRAMMAR_VERSION,"effective_temperature":writer_temperature}

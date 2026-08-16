@@ -41,4 +41,5 @@ BT, UI, or MT implementation tasks.
 
 | Task | Outcome | Status |
 | --- | --- | --- |
-| [AIC-001](Tasks/AIC-001-versioned-ai-instruction-profile.md) | Versioned Instruction Profile, prompt resolution, immutable run snapshots, and administration | Ready |
+| [AIC-001](Tasks/AIC-001-versioned-ai-instruction-profile.md) | Versioned Instruction Profile, prompt resolution, immutable run snapshots, and administration | Complete |
+| [AIC-002](Tasks/AIC-002-constrained-writer-decoding.md) | Grammar-constrained Writer JSON and deterministic naming slots | Complete |
