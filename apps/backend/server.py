@@ -1336,9 +1336,9 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._send_success(200,{"preview":preview})
             elif path == "/api/ai-promotions/execute":
                 if not self._require_admin_principal(): return
-                token,confirmation=body.get("preview_token"),body.get("confirmation")
-                if not token or confirmation is None: raise ValueError("preview_token and confirmation are required.")
-                result=self._ai_promotion_service().execute(token,confirmation,self._principal["token_uuid"])
+                token,acknowledged=body.get("preview_token"),body.get("acknowledged")
+                if not token or acknowledged is not True: raise ValueError("preview_token and acknowledged=true are required.")
+                result=self._ai_promotion_service().execute(token,acknowledged,self._principal["token_uuid"])
                 self._send_success(200,{"promotion":result})
             elif re.match(r"^/api/ai-work-items/[^/]+/(retry|cancel)$", path):
                 if not self._require_admin_principal(): return

@@ -1017,8 +1017,16 @@ class TestVersionedApiAuthorization(_TestServerBase):
                 status, promotion_preview = self._post(f"/api/v1/ai-work-items/{item_uuid}/promotion/preview",{},admin)
                 self.assertEqual(200,status); promotion_preview=promotion_preview["data"]["preview"]
                 self.assertEqual("Lakeside Family Walk",promotion_preview["resulting"]["title"])
+                self.assertIs(promotion_preview["acknowledgement_required"],True)
+                self.assertNotIn("confirmation",promotion_preview)
+                for acknowledgement in (False,None,1,"true"):
+                    status, rejected = self._post("/api/v1/ai-promotions/execute",{
+                        "preview_token":promotion_preview["preview_token"],"acknowledged":acknowledgement},admin)
+                    self.assertEqual(400,status); self.assertEqual("REQUEST_INVALID",rejected["error"]["code"])
+                    self.assertNotEqual("Lakeside Family Walk",self._db.execute(
+                        "SELECT title FROM album WHERE id=?",(album_id,)).fetchone()[0])
                 status, promoted = self._post("/api/v1/ai-promotions/execute",{
-                    "preview_token":promotion_preview["preview_token"],"confirmation":promotion_preview["confirmation"]},admin)
+                    "preview_token":promotion_preview["preview_token"],"acknowledged":True},admin)
                 self.assertEqual(200,status); self.assertEqual("Promoted",promoted["data"]["promotion"]["outcome"])
                 self.assertEqual("Lakeside Family Walk",self._db.execute("SELECT title FROM album WHERE id=?",(album_id,)).fetchone()[0])
                 status, promotion_history = self._get(f"/api/v1/ai-work-items/{item_uuid}/promotion",admin)

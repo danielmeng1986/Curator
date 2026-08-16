@@ -2728,7 +2728,7 @@ class AIAlbumNamePromotionService:
         return {"preview_uuid":payload["preview_uuid"],"preview_token":self._sign(payload),"expires_at":payload["expires_at"],
             "current":{"title":context["album_title"],"status_id":context["status_id"],"status_name":context["status_name"]},
             "resulting":{"title":context["selected_name"],"status_id":resulting_status_id,"status_name":resulting_status_name},
-            "confirmation":context["selected_name"]}
+            "acknowledgement_required":True}
 
     def history(self,item_uuid):
         context=self._repo.context(item_uuid)
@@ -2736,10 +2736,10 @@ class AIAlbumNamePromotionService:
         return {"work_item_uuid":item_uuid,"workspace_uuid":context["workspace_uuid"],"album_id":context["album_id"],
             "selected_name":context["selected_name"],"items":self._repo.history(item_uuid)}
 
-    def execute(self,token,confirmation,actor):
+    def execute(self,token,acknowledged,actor):
         payload=self._read(token)
         if payload["created_by_token_uuid"]!=actor: raise ServiceConflict("AI_PROMOTION_PREVIEW_INVALID","Promotion preview belongs to another Admin.")
-        if confirmation!=payload["context"]["selected_name"]: raise ValueError("confirmation must exactly match the selected Album name.")
+        if acknowledged is not True: raise ValueError("acknowledged must be true.")
         snapshot_reference=None
         required,_=assess_operation_risk(SNAP_OP_WORKSPACE_PROMOTION,1)
         if required:

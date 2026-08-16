@@ -99,11 +99,11 @@ class TestAIWorkspaceWorkflowAcceptance(unittest.TestCase):
                 f.reviews.decide(item_uuid,2,"approve","admin-token",{"rating":5-index,
                     "selection_source":"Recommendation","selected_name":chosen})
             first=f.promotions.preview(f.item_uuids[0],"admin-token")
-            promoted=f.promotions.execute(first["preview_token"],first["confirmation"],"admin-token")
-            self.assertTrue(f.promotions.execute(first["preview_token"],first["confirmation"],"admin-token")["idempotent"])
+            promoted=f.promotions.execute(first["preview_token"],True,"admin-token")
+            self.assertTrue(f.promotions.execute(first["preview_token"],True,"admin-token")["idempotent"])
             second=f.promotions.preview(f.item_uuids[1],"admin-token")
             with self.assertRaises(svc.ServiceConflict) as conflict:
-                f.promotions.execute(second["preview_token"],second["confirmation"],"admin-token")
+                f.promotions.execute(second["preview_token"],True,"admin-token")
             self.assertEqual("AI_PROMOTION_WINNER_EXISTS",conflict.exception.code)
             detail=f.dispatch.group_detail(f.group_uuid); self.assertIn("release",detail["allowed_actions"])
             f.dispatch.close_group(f.group_uuid,1,"release","Winner promoted","admin-token")

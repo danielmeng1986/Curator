@@ -89,11 +89,13 @@ decisions.
 ## Promotion and completion
 
 Approval and Promotion are separate. After approval, the Admin reviews the
-exact selected name and executes a Backend-bound Promotion. A successful
-Promotion updates the existing permanent Album's `album.title`, changes its
-Status according to the Backend contract (currently `NAME_GENERATED`), records
-one Promotion winner and Operation evidence, and prevents a duplicate winner.
-It does not create a new Album and AI output is never promoted automatically.
+exact selected name and Status change, explicitly acknowledges the displayed
+change, and executes a Backend-bound Promotion without retyping the approved
+name. A successful Promotion updates the existing permanent Album's
+`album.title`, changes its Status according to the Backend contract (currently
+`NAME_GENERATED`), records one Promotion winner and Operation evidence, and
+prevents a duplicate winner. It does not create a new Album and AI output is
+never promoted automatically.
 
 The Album reservation remains active after Promotion until the Dispatch Group
 is explicitly released. Workspace closure and archive require their own

@@ -264,13 +264,15 @@ with the same configuration snapshot and preserves all prior evidence.
 
 `POST /api/v1/ai-work-items/{uuid}/promotion/preview` is Admin-only and requires
 an Approved frozen selection. It returns current/resulting Album title and
-Status, exact confirmation text, and a signed ten-minute token bound to review,
-Album, Workspace, and Admin versions. `POST /api/v1/ai-promotions/execute`
-accepts only that token and exact selected-name confirmation. Execution is
-single-use and idempotent, atomically records the unique Workspace/Album winner,
-Operation, title change, and `TEMPORARY → NAME_GENERATED` policy; other Statuses
-are retained. Stale and competing previews return structured `409` without an
-Album mutation. Failed materialization retains `PromotionFailed` evidence.
+Status, `acknowledgement_required: true`, and a signed ten-minute token bound to
+review, Album, Workspace, and Admin versions. `POST
+/api/v1/ai-promotions/execute` accepts only that token and the literal JSON
+boolean `acknowledged: true`; a missing, false, or malformed acknowledgement is
+rejected without side effects. Execution is single-use and idempotent,
+atomically records the unique Workspace/Album winner, Operation, title change,
+and `TEMPORARY → NAME_GENERATED` policy; other Statuses are retained. Stale and
+competing previews return structured `409` without an Album mutation. Failed
+materialization retains `PromotionFailed` evidence.
 
 `GET /api/v1/ai-work-items/{uuid}/promotion` is the read-only Promotion-history
 projection. It remains available after release, Workspace close/archive, or

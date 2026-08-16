@@ -132,6 +132,9 @@ must be designed as asynchronous workflows even if they often complete quickly.
   confirmation specified by the Backend workflow.
 - Confirmation text names the action and consequences. A generic **OK** is not
   sufficient for a high-risk action.
+- A reviewed single-entity action may use an explicit acknowledgement of the
+  displayed current/resulting values instead of requiring the user to retype an
+  authoritative value already bound by a signed Backend Preview.
 - Cancel is always safe and never represented as a failure.
 
 ### 4.7 Accessibility and comprehensibility
