@@ -129,7 +129,8 @@ class WorkerTests(unittest.TestCase):
             "inspect",images=[Path("one.jpg"),Path("two.jpg")],settings={"image_max_tokens":256})
         args=run.call_args.args[0]
         self.assertEqual({"scene":"lake"},payload);self.assertEqual("llama_cpp",metrics["provider"])
-        self.assertEqual("one.jpg,two.jpg",args[args.index("--image")+1])
+        self.assertEqual(2,args.count("--image"))
+        self.assertEqual(["one.jpg","two.jpg"],[args[index+1] for index,value in enumerate(args) if value=="--image"])
         self.assertEqual("256",args[args.index("--image-max-tokens")+1])
         self.assertEqual("mmproj.gguf",args[args.index("--mmproj")+1])
         self.assertNotIn("--no-display-prompt",args)

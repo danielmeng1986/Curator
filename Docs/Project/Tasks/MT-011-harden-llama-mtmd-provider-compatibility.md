@@ -34,6 +34,8 @@ private Evidence paths.
 - Keep bounded multimodal arguments for the model, projector, context,
   threads, GPU layers, output tokens, temperature, images, and image-token
   budget.
+- Pass each Evidence image as its own `--image FILE` pair; never encode
+  multiple filesystem paths as one comma-separated filename.
 - Preserve bounded JSON-object extraction when llama.cpp emits ordinary
   informational output around the model response.
 - Capture process exit status and a bounded, sanitized stderr diagnostic for
@@ -97,6 +99,8 @@ private Evidence paths.
    provider-facing JSON Schema.
 10. Mirror the Vision v1 exact fields, people range, bounded arrays, confidence,
     and text limits locally so model format drift cannot become an HTTP 400.
+11. Verify that multi-image Albums produce one llama-mtmd `--image` option per
+    Evidence file in deterministic Manifest order.
 
 ## Acceptance Criteria
 
@@ -106,6 +110,8 @@ private Evidence paths.
   response instead of waiting in an interactive chat loop.
 - A one-image Qwen2.5-VL smoke run can load the configured main model and
   projector and return a JSON object through the Worker provider.
+- Multi-image Album Evidence is supplied as repeated `--image FILE` arguments,
+  preserving Manifest order without constructing an invalid combined path.
 - A non-zero llama.cpp exit tells the local operator whether the failure was
   caused by argument parsing, model/projector loading, GPU initialization,
   timeout, context pressure, or an unknown provider error when that distinction

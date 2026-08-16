@@ -77,8 +77,8 @@ class LlamaCliProvider:
             "--temp",str(settings.get("temperature",0))]
         if self.mmproj: args += ["--mmproj",self.mmproj]
         if images:
-            args += ["--image",",".join(str(path) for path in images),
-                "--image-max-tokens",str(settings.get("image_max_tokens",384))]
+            for path in images:args += ["--image",str(path)]
+            args += ["--image-max-tokens",str(settings.get("image_max_tokens",384))]
         started=time.monotonic()
         try:
             result=subprocess.run(args,check=True,capture_output=True,text=True,timeout=self.timeout_seconds)

@@ -173,6 +173,8 @@ reject data outside the Curator contract.
 Vision output is also checked locally against the exact v1 fields, people
 range, arrays, confidence, and text limits. Format drift receives bounded
 corrective retries instead of being submitted as an HTTP 400.
+Multiple Evidence images are passed to llama-mtmd in Manifest order as separate
+`--image FILE` arguments, never as one nonexistent comma-separated path.
 
 Omit `--mmproj` only when the chosen llama.cpp/model combination does not
 require a separate projector. Normal mode waits on outbound HTTP requests of at
