@@ -2,6 +2,9 @@ const WorkspaceReviewPage = {
   _detail: null,
   _draft: {},
   _draftStale: false,
+  _queueItems: [],
+  _queueHash: '#/ai-reviews',
+  _promotionSuccess: null,
 
   async renderWorkspaces() {
     const el = document.getElementById('page-content');
@@ -61,9 +64,12 @@ const WorkspaceReviewPage = {
     const el = document.getElementById('page-content'); el.innerHTML = '<div class="loading">Loading AI review queue…</div>';
     const params = new URLSearchParams((window.location.hash.split('?')[1] || ''));
     const state = params.get('state') || ''; const workspace = params.get('workspace_uuid') || ''; const q = params.get('q') || '';
+    this._queueHash=window.location.hash || '#/ai-reviews';
+    try { window.sessionStorage.setItem('curator.ai-review.queue',this._queueHash); } catch { /* in-memory fallback */ }
     try {
       const query = new URLSearchParams({ limit:'100' }); if (state) query.set('state',state); if (workspace) query.set('workspace_uuid',workspace); if (q) query.set('q',q);
       const rows = await api.get(`/ai-reviews?${query}`);
+      this._queueItems=Array.isArray(rows)?rows:[];
       el.innerHTML = `<div class="page-header"><h1 class="page-title">AI Review Queue</h1><a class="btn btn-secondary" href="#/ai-workspaces">Workspaces</a></div>
         <div class="filter-bar"><label>State <select id="reviewState"><option value="">All</option>${['ReadyForReview','InReview','Approved','Rejected','ReworkRequested'].map(value => `<option ${value === state ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
         <label>Search <input id="reviewSearch" value="${esc(q)}" placeholder="Album or configuration"></label><button class="btn btn-secondary" onclick="WorkspaceReviewPage.applyQueueFilters('${esc(workspace)}')">Apply</button></div>
@@ -83,6 +89,7 @@ const WorkspaceReviewPage = {
 
   async renderDetail({ uuid }) {
     const el = document.getElementById('page-content'); el.innerHTML = '<div class="loading">Loading review evidence…</div>';
+    if(this._promotionSuccess?.completedUuid!==uuid)this._promotionSuccess=null;
     try { const result = await api.get(`/ai-work-items/${encodeURIComponent(uuid)}/review`); this._detail = result.review; this._renderDetail(); }
     catch (error) { ui.renderPageError(el,error,'AI review'); }
   },
@@ -100,7 +107,9 @@ const WorkspaceReviewPage = {
     const draft = this._draft[review.work_item_uuid] || { selected_name:review.selected_name || recommendations[0] || '', selection_source:'Recommendation', rating:review.rating || 5, notes:review.notes || '', reason:'' };
     this._draft[review.work_item_uuid] = draft;
     const el = document.getElementById('page-content');
-    el.innerHTML = `<div class="page-header"><div><a href="#/ai-reviews">← Review Queue</a><h1 class="page-title">${esc(d.item.album_title)}</h1></div><span class="chip">${esc(review.state)}</span></div>
+    const queueHref=this._savedQueueHash(); const success=this._promotionSuccess?.completedUuid===review.work_item_uuid?this._promotionSuccess:null;
+    el.innerHTML = `<div class="page-header"><div><a href="${esc(queueHref)}">← Review Queue</a><h1 class="page-title">${esc(d.item.album_title)}</h1></div><span class="chip">${esc(review.state)}</span></div>
+      ${success?`<section class="card alert alert-success" aria-live="polite"><strong>Album name Promotion completed.</strong><p>Durable result: <strong>${esc(d.item.album_title)}</strong> · ${d.promotions.length} Promotion record(s) · ${d.operations.length} linked Operation(s).</p><div class="detail-actions">${success.nextUuid?`<button class="btn btn-primary" onclick="WorkspaceReviewPage.openNextReview('${esc(success.nextUuid)}')">Next review</button>`:'<span>There are no more eligible reviews in the current queue.</span>'}<a class="btn btn-secondary" href="${esc(queueHref)}">Return to queue</a></div></section>`:''}
       <div class="review-grid"><section class="card review-panel ai-output"><div class="form-section-title">AI analysis · immutable</div>
         <p><strong>Configuration:</strong> ${esc(d.item.configuration_name)}</p><p><strong>Scene:</strong> ${esc(vision?.payload?.scene || '—')}</p>
         <p><strong>People:</strong> ${esc(JSON.stringify(vision?.payload?.people || {}))}</p><p><strong>Location:</strong> ${esc(vision?.payload?.location_environment || '—')}</p>
@@ -141,9 +150,22 @@ const WorkspaceReviewPage = {
     if(result.ok){delete this._draft[r.work_item_uuid];ui.clearDraft(this._draftKey(r.work_item_uuid));ui.clearDirty();this._draftStale=false;this._detail=result.value.review;this._renderDetail();}
   },
   async previewPromotion(trigger) {
-    const uuid=this._detail.review.work_item_uuid; const result=await ui.runAction('promotion-preview',()=>api.post(`/ai-work-items/${uuid}/promotion/preview`,{}),{trigger,context:'preview Album name Promotion'}); if(!result.ok)return;
+    const uuid=this._detail.review.work_item_uuid; const nextUuid=await this._resolveNextReview(uuid); const result=await ui.runAction('promotion-preview',()=>api.post(`/ai-work-items/${uuid}/promotion/preview`,{}),{trigger,context:'preview Album name Promotion'}); if(!result.ok)return;
     const preview=result.value.preview; ui.showReviewedAction(`<h3 id="modal-title" class="modal-title">Confirm Album Name Promotion</h3><p>Current: <strong>${esc(preview.current.title)}</strong></p><p>Result: <strong>${esc(preview.resulting.title)}</strong> · Status ${esc(preview.resulting.status_name || preview.resulting.status_id)}</p>
-      <label class="acknowledgement"><input id="promotionAcknowledgement" type="checkbox" onchange="document.getElementById('executePromotionBtn').disabled=!this.checked"> I confirm this Album name and Status change.</label><div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button id="executePromotionBtn" class="btn btn-danger" disabled onclick="WorkspaceReviewPage.executePromotion('${esc(preview.preview_token)}',this)">Confirm & Rename</button></div>`, { key:`ai-promotion-${uuid}`, label:'Album name Promotion review' });
+      <label class="acknowledgement"><input id="promotionAcknowledgement" type="checkbox" onchange="document.getElementById('executePromotionBtn').disabled=!this.checked"> I confirm this Album name and Status change.</label><div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button id="executePromotionBtn" class="btn btn-danger" disabled onclick="WorkspaceReviewPage.executePromotion('${esc(preview.preview_token)}','${esc(nextUuid||'')}',this)">Confirm & Rename</button></div>`, { key:`ai-promotion-${uuid}`, label:'Album name Promotion review' });
   },
-  async executePromotion(token,trigger) { const result=await ui.runAction('promotion-execute',()=>api.post('/ai-promotions/execute',{preview_token:token,acknowledged:true}),{trigger,context:'promote Album name'}); if(result.ok){closeModal();toast('Album name Promotion completed.');await this.renderDetail({uuid:this._detail.review.work_item_uuid});} },
+  _savedQueueHash(){try{return window.sessionStorage.getItem('curator.ai-review.queue')||this._queueHash||'#/ai-reviews';}catch{return this._queueHash||'#/ai-reviews';}},
+  async _resolveNextReview(currentUuid){
+    let rows=this._queueItems;
+    if(!rows.some(item=>item.work_item_uuid===currentUuid)){
+      const params=new URLSearchParams((this._savedQueueHash().split('?')[1]||''));params.set('limit','100');
+      try{const result=await api.get(`/ai-reviews?${params}`);rows=Array.isArray(result)?result:[];}catch{return null;}
+    }
+    const eligible=item=>item.work_item_uuid!==currentUuid&&['ReadyForReview','InReview','Approved'].includes(item.state);
+    const index=rows.findIndex(item=>item.work_item_uuid===currentUuid);
+    const ordered=index<0?rows:[...rows.slice(index+1),...rows.slice(0,index)];
+    return ordered.find(eligible)?.work_item_uuid||null;
+  },
+  openNextReview(uuid){this._promotionSuccess=null;window.location.hash=`#/ai-work-items/${encodeURIComponent(uuid)}/review`;},
+  async executePromotion(token,nextUuid,trigger) { const completedUuid=this._detail.review.work_item_uuid; const result=await ui.runAction('promotion-execute',()=>api.post('/ai-promotions/execute',{preview_token:token,acknowledged:true}),{trigger,context:'promote Album name'}); if(result.ok){closeModal();this._promotionSuccess={completedUuid,nextUuid:nextUuid||null};await this.renderDetail({uuid:completedUuid});} },
 };

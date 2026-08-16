@@ -25,6 +25,9 @@ assert.match(source,/expected_version:r\.version/);
 assert.match(source,/promotion\/preview/);
 assert.match(source,/preview_token:token,acknowledged:true/);
 assert.match(source,/promotionAcknowledgement/);
+assert.match(source,/Next review/);
+assert.match(source,/curator\.ai-review\.queue/);
+assert.match(source,/_resolveNextReview/);
 assert.match(source,/\+ New Workspace/);
 assert.match(source,/api\.post\('\/ai-workspaces',\{title\}\)/);
 assert.match(source,/album_analysis/);
@@ -35,5 +38,8 @@ assert.equal(page._draft['item-1'].selected_name,'Golden Forest Morning');
 assert.equal(page._draft['item-1'].selection_source,'HumanRevision');
 assert.equal(page._draft['item-1'].rating,4);
 assert.equal(page._draft['item-1'].reason,'Needs another sample');
+
+page._queueItems=[{work_item_uuid:'item-1',state:'Approved'},{work_item_uuid:'item-2',state:'ReadyForReview'}];
+assert.equal(await page._resolveNextReview('item-1'),'item-2');
 
 console.log('apps/web Workspace Review UI contract: OK');

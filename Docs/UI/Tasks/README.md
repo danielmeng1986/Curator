@@ -75,6 +75,7 @@ snapshot, archive, and output resources.
 | [UI-030](UI-030-expose-ai-configuration-and-run-progress.md) | Model configuration summaries and per-Album run progress | Complete |
 | [UI-031](UI-031-administer-ai-model-configurations.md) | Administrator AI Model Configuration management | Complete |
 | [UI-032](UI-032-complete-work-dispatch-filtering-and-pagination.md) | Status-centered Dispatch filtering and bounded pagination | Complete |
+| [UI-033](UI-033-streamline-ai-review-and-live-dispatch-progress.md) | Fast sequential Album review and automatically refreshed run progress | Complete |
 
 ## Dependency outline
 
@@ -110,3 +111,8 @@ UI-031 closes the first-run configuration gap by exposing the existing managed
 model configuration contract to Administrators. UI-032 completes the Dispatch
 list behavior promised by UI-011E by wiring the existing Status, Studio, Model,
 and pagination contracts into the browser workflow.
+
+UI-033 optimizes the completed end-to-end workflow for a large Review Queue. It
+keeps one-Album audit and Promotion boundaries, replaces repeated name entry
+only after the Backend confirmation contract is amended, adds stable next-review
+navigation, and uses bounded native-JavaScript polling for live Dispatch progress.

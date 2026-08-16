@@ -16,6 +16,10 @@ const WorkDispatchPage = {
   _selectionMode: 'ids',
   _firstN: null,
   _preview: null,
+  _pollTimer: null,
+  _pollGeneration: 0,
+  _pollDelay: 5000,
+  _pollInFlight: false,
 
   _configurationSummary(item) {
     return `<strong>${esc(item.name)}</strong><span class="config-model">${esc(item.model_identifier)} · <code>${esc(item.model_file)}</code></span>
@@ -75,16 +79,33 @@ const WorkDispatchPage = {
   },
 
   async renderGroup({ uuid }) {
+    this._stopPolling();
     const el=document.getElementById('page-content'); el.innerHTML='<div class="loading">Loading Dispatch Group…</div>';
     try {
       const result=await api.get(`/work-dispatch/groups/${encodeURIComponent(uuid)}`); const detail=result.group; const group=detail.group;
-      el.innerHTML=`<div class="page-header"><div><a href="#/work-dispatch">← Work Dispatch</a><h1 class="page-title">Dispatch Group</h1></div><div><button class="btn btn-secondary" onclick="WorkDispatchPage.renderGroup({uuid:'${esc(group.uuid)}'})">Refresh progress</button> <span class="chip">${esc(group.group_state)}</span></div></div>
+      el.innerHTML=`<div class="page-header"><div><a href="#/work-dispatch">← Work Dispatch</a><h1 class="page-title">Dispatch Group</h1></div><div><button class="btn btn-secondary" onclick="WorkDispatchPage.refreshGroup('${esc(group.uuid)}',true)">Refresh progress</button> <span id="dispatchGroupState" class="chip">${esc(group.group_state)}</span><div id="dispatchAutoRefreshStatus" class="table-secondary" role="status">Auto refresh on</div></div></div>
         <div class="card workspace-summary"><p>Group: <code>${esc(group.uuid)}</code></p><p>Album #${group.album_id} · Worker ${esc(group.worker_kind)} · Version ${group.version}</p>
-        ${detail.blockers.length ? `<div class="alert alert-warning">${detail.blockers.map(item=>esc(item.reason)).join(' · ')}</div>` : ''}
-        <div class="table-wrap"><table class="work-progress"><thead><tr><th>Album</th><th>Configuration</th><th>Current stage</th><th>Attempts</th><th>Last activity</th><th>Failure</th><th>Details</th></tr></thead><tbody>${this._itemRows(detail.items, `Album #${group.album_id}`)}</tbody></table></div>
-        <div class="detail-actions">
-        ${detail.allowed_actions.map(action=>`<button class="btn ${action==='release'?'btn-primary':'btn-danger'}" onclick="WorkDispatchPage.closeGroup('${esc(group.uuid)}','${action}',${group.version},this)">${action}</button>`).join('')}</div></div>`;
+        <div id="dispatchGroupBlockers">${this._groupBlockersHtml(detail)}</div>
+        <div class="table-wrap"><table class="work-progress"><thead><tr><th>Album</th><th>Configuration</th><th>Current stage</th><th>Attempts</th><th>Last activity</th><th>Failure</th><th>Details</th></tr></thead><tbody id="dispatchGroupProgressRows">${this._itemRows(detail.items, `Album #${group.album_id}`)}</tbody></table></div>
+        <div id="dispatchGroupActions" class="detail-actions">${this._groupActionsHtml(detail)}</div></div>`;
+      if(group.group_state==='Active')this._startPolling(`group:${group.uuid}`,()=>this.refreshGroup(group.uuid,false),()=>window.location.hash===`#/work-dispatch/groups/${group.uuid}`);
     } catch(error){ui.renderPageError(el,error,'Dispatch Group');}
+  },
+
+  _groupBlockersHtml(detail){return detail.blockers.length?`<div class="alert alert-warning">${detail.blockers.map(item=>esc(item.reason)).join(' · ')}</div>`:'';},
+  _groupActionsHtml(detail){const group=detail.group;return detail.allowed_actions.map(action=>`<button class="btn ${action==='release'?'btn-primary':'btn-danger'}" onclick="WorkDispatchPage.closeGroup('${esc(group.uuid)}','${action}',${group.version},this)">${action}</button>`).join('');},
+  async refreshGroup(uuid,manual=false){
+    const result=await api.get(`/work-dispatch/groups/${encodeURIComponent(uuid)}`);const detail=result.group;const group=detail.group;
+    const rows=document.getElementById('dispatchGroupProgressRows');if(!rows)return false;
+    const focused=document.activeElement;const deferred=Boolean(focused&&rows.contains(focused));
+    if(!deferred)rows.innerHTML=this._itemRows(detail.items,`Album #${group.album_id}`);
+    const state=document.getElementById('dispatchGroupState');if(state)state.textContent=group.group_state;
+    for(const [id,html] of [['dispatchGroupBlockers',this._groupBlockersHtml(detail)],['dispatchGroupActions',this._groupActionsHtml(detail)]]){
+      const target=document.getElementById(id);if(target&&(!focused||!target.contains(focused)))target.innerHTML=html;
+    }
+    if(manual)this._setPollStatus('Progress refreshed manually.');
+    if(group.group_state!=='Active')this._stopPolling();
+    return group.group_state==='Active'?(deferred?'deferred':true):false;
   },
 
   async closeGroup(uuid,action,version,trigger){
@@ -115,14 +136,46 @@ const WorkDispatchPage = {
     const el = document.getElementById('page-content');
     const tabs = [['available','Available'],['active','Active'],['history','History']];
     el.innerHTML = `<div class="page-header"><div><h1 class="page-title">Album Work Dispatch</h1>
-      <p class="page-subtitle">Assign selected Albums to a Worker without changing Album Status.</p></div>${this._view !== 'available' ? '<button class="btn btn-secondary" onclick="WorkDispatchPage.loadView()">Refresh progress</button>' : ''}</div>
+      <p class="page-subtitle">Assign selected Albums to a Worker without changing Album Status.</p></div>${this._view !== 'available' ? `<div><button class="btn btn-secondary" onclick="WorkDispatchPage.refreshProgress(true)">Refresh progress</button>${this._view==='active'?'<div id="dispatchAutoRefreshStatus" class="table-secondary" role="status">Auto refresh on</div>':''}</div>` : ''}</div>
       <div class="dispatch-tabs" role="tablist">${tabs.map(([key,label]) => `<button class="btn ${this._view === key ? 'btn-primary' : 'btn-secondary'}" onclick="WorkDispatchPage.changeView('${key}')">${label}</button>`).join('')}</div>
       <div class="filter-bar">
         <label>Worker <select id="dispatchWorkerKind" onchange="WorkDispatchPage.workerChanged()">${this._workerKinds.map(kind => `<option value="${esc(kind.worker_kind)}" ${kind.worker_kind === workerKind ? 'selected' : ''}>${esc(kind.worker_kind)}</option>`).join('')}</select></label>
         ${this._view === 'available' ? this._filterHtml() : ''}
         <label>Per page <select id="dispatchPageSize" onchange="WorkDispatchPage.pageSizeChanged(this.value)">${[25,50,100].map(value=>`<option value="${value}" ${this._meta.limit===value?'selected':''}>${value}</option>`).join('')}</select></label>
       </div>
-      ${this._view === 'available' ? this._availableHtml() : this._groupsHtml()}${this._paginationHtml()}`;
+      <div id="dispatchViewContent">${this._view === 'available' ? this._availableHtml() : this._groupsHtml()}</div><div id="dispatchPagination">${this._paginationHtml()}</div>`;
+    if(this._view==='active')this._startPolling('active',()=>this.refreshProgress(false),()=>window.location.hash.startsWith('#/work-dispatch')&&this._view==='active');
+    else this._stopPolling();
+  },
+
+  async refreshProgress(manual=false){
+    if(this._view!=='active'){if(manual)await this.loadView();return false;}
+    const workerKind=document.getElementById('dispatchWorkerKind')?.value||this._workerKinds[0]?.worker_kind||'';const state=this._state.active;
+    const result=await api.get(`/work-dispatch/groups?view=active&worker_kind=${encodeURIComponent(workerKind)}&limit=${state.limit}&offset=${state.offset}`);
+    this._candidates=result.items||[];this._meta={total:result.total||0,limit:result.limit||state.limit,offset:state.offset};
+    const content=document.getElementById('dispatchViewContent');const pagination=document.getElementById('dispatchPagination');
+    if(!content||!pagination)return false;
+    if(document.activeElement&&content.contains(document.activeElement))return 'deferred';
+    const scrollX=window.scrollX,scrollY=window.scrollY;
+    content.innerHTML=this._groupsHtml();pagination.innerHTML=this._paginationHtml();window.scrollTo(scrollX,scrollY);
+    if(manual)this._setPollStatus('Progress refreshed manually.');
+    return this._candidates.some(group=>group.group_state==='Active');
+  },
+
+  _setPollStatus(message){const status=document.getElementById('dispatchAutoRefreshStatus');if(status)status.textContent=message;},
+  _stopPolling(){this._pollGeneration+=1;if(this._pollTimer)clearTimeout(this._pollTimer);this._pollTimer=null;this._pollInFlight=false;},
+  _startPolling(key,refresh,isCurrent){
+    this._stopPolling();const generation=this._pollGeneration;this._pollDelay=5000;
+    const schedule=()=>{if(generation!==this._pollGeneration)return;this._pollTimer=setTimeout(tick,this._pollDelay);};
+    const tick=async()=>{
+      if(generation!==this._pollGeneration||!isCurrent())return this._stopPolling();
+      if(document.hidden){this._setPollStatus('Auto refresh paused while this tab is hidden.');this._pollDelay=5000;schedule();return;}
+      if(this._pollInFlight){schedule();return;}this._pollInFlight=true;
+      try{const keepPolling=await refresh();this._pollDelay=5000;this._setPollStatus(keepPolling==='deferred'?'Progress update waiting until the active control loses focus.':`Auto refresh on · updated ${new Date().toLocaleTimeString()}`);if(!keepPolling)return this._stopPolling();}
+      catch{this._pollDelay=Math.min(this._pollDelay===5000?10000:this._pollDelay*2,30000);this._setPollStatus(`Auto refresh delayed · retrying in ${this._pollDelay/1000}s`);}
+      finally{this._pollInFlight=false;}schedule();
+    };
+    this._setPollStatus('Auto refresh on');schedule();
   },
 
   _filterHtml(){const state=this._state.available;const options=(items,value,label)=>`<option value="">All ${label}</option>${items.map(item=>`<option value="${item.id}" ${String(value)===String(item.id)?'selected':''}>${esc(item.name||item.display_name||item.primary_name)}</option>`).join('')}`;

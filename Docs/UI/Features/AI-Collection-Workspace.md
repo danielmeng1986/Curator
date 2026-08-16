@@ -60,6 +60,11 @@ Active and History render every Album/configuration run separately with a
 human-readable stage, durable run/result states, attempt count, last activity,
 active lease deadline, redacted failure, and a stable detail route. The stage is
 a projection of authoritative Backend state, not a browser-owned progress bar.
+While Active or an Active Group detail route is visible, bounded native-JavaScript
+polling refreshes only the progress region every five seconds. It pauses in a
+hidden tab, avoids overlapping requests, backs off after failure, preserves an
+active control and scroll position, stops on route exit or terminal Group state,
+and retains manual refresh as recovery.
 
 ## Worker boundary and evidence
 
@@ -96,6 +101,11 @@ name. A successful Promotion updates the existing permanent Album's
 `NAME_GENERATED`), records one Promotion winner and Operation evidence, and
 prevents a duplicate winner. It does not create a new Album and AI output is
 never promoted automatically.
+
+After Promotion, the completed detail remains visible with the durable resulting
+name and linked evidence. A **Next review** action advances to one eligible item
+from the same remembered Queue order; the Queue link retains its filters. Every
+advance remains a separate human Review and Promotion rather than a batch action.
 
 The Album reservation remains active after Promotion until the Dispatch Group
 is explicitly released. Workspace closure and archive require their own

@@ -33,6 +33,7 @@ try{
   await page.getByLabel('Final Album name').fill('invalid name');await page.getByLabel('Selection source').selectOption('HumanRevision');await page.getByRole('button',{name:'Approve selection'}).click();await page.getByText(/Check the highlighted information/).waitFor();assert.equal(await page.getByLabel('Final Album name').inputValue(),'invalid name');
   await page.getByLabel('Final Album name').fill('Golden Forest Morning');await page.getByRole('button',{name:'Approve selection'}).click();await page.getByText('Approved',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Review Promotion'}).click();await page.getByRole('heading',{name:'Confirm Album Name Promotion'}).waitFor();await page.getByLabel('I confirm this Album name and Status change.').check();await page.getByRole('button',{name:'Confirm & Rename'}).click();await page.getByText('Album name Promotion completed.').waitFor();
+  await page.getByRole('button',{name:'Next review'}).click();await page.waitForFunction(()=>document.querySelector('h1.page-title')?.textContent!=='Golden Forest Morning');assert.notEqual(await page.locator('h1.page-title').textContent(),'Golden Forest Morning');
   const promotedAlbum=await admin({path:'/albums/1'});assert.equal(promotedAlbum.payload.data.album.title,'Golden Forest Morning');assert.equal(promotedAlbum.payload.data.album.status_name,'NAME_GENERATED');
   const promotionHistory=await admin({path:`/ai-work-items/${items[0]}/promotion`});assert.equal(promotionHistory.payload.data.promotion_history.items.length,1);
 

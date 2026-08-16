@@ -69,14 +69,18 @@ try{
   await page.getByText('Waiting for Worker').first().waitFor();
   await page.getByText('Fixture Balanced').first().waitFor();
   await page.getByText('Fixture Fast').first().waitFor();
+  await page.getByText(/Auto refresh on/).waitFor();
+  const polledGroup=active.payload.data[0];
+  for(const item of polledGroup.items){const cancelled=await fixture.request(`/ai-work-items/${item.item_uuid}/cancel`,{method:'POST',role:'admin',body:{expected_version:item.version}});assert.equal(cancelled.status,200);}
+  await page.getByText('Cancelled',{exact:true}).first().waitFor({timeout:10000});
   const after=(await fixture.request('/albums',{role:'admin'})).payload.data.map(item=>[item.id,item.status_id]); assert.deepEqual(after,before);
 
   for(const group of active.payload.data){
     await page.goto(`${fixture.origin}/#/work-dispatch/groups/${group.uuid}`); await page.getByRole('heading',{name:'Dispatch Group'}).waitFor();
     assert.equal(await page.getByRole('columnheader',{name:'Current stage'}).isVisible(),true);
-    assert.equal(await page.getByText('Waiting for Worker').count(),2);
+    assert.equal(await page.getByText('Waiting for Worker').count(),group.uuid===polledGroup.uuid?0:2);
     page.once('dialog',dialog=>dialog.accept('Browser acceptance terminal cancellation'));
-    await page.getByRole('button',{name:'cancel',exact:true}).click(); await page.getByText('Released').waitFor();
+    const cancel=page.getByRole('button',{name:'cancel',exact:true});if(await cancel.count())await cancel.click();else await page.getByRole('button',{name:'release',exact:true}).click();await page.getByText('Released').waitFor();
   }
   await page.goto(`${fixture.origin}/#/work-dispatch`); await page.getByRole('heading',{name:'Album Work Dispatch'}).waitFor();
   assert.equal(await page.locator('[data-dispatch-album]').count(),3);
