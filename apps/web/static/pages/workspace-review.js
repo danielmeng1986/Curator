@@ -5,8 +5,18 @@ const WorkspaceReviewPage = {
   _queueItems: [],
   _queueHash: '#/ai-reviews',
   _promotionSuccess: null,
+  _runtimeGeneration: 0,
+  _pollTimer: null,
+  _pollDelay: 5000,
+  _pollInFlight: false,
+  _evidenceObserver: null,
+  _evidenceQueue: [],
+  _evidenceActive: 0,
+  _evidenceUrls: new Map(),
+  _previewUrl: null,
 
   async renderWorkspaces() {
+    this._stopRuntime();
     const el = document.getElementById('page-content');
     el.innerHTML = '<div class="loading">Loading AI Workspaces…</div>';
     try {
@@ -36,6 +46,7 @@ const WorkspaceReviewPage = {
   },
 
   async renderWorkspace({ uuid }) {
+    this._stopRuntime();
     const el = document.getElementById('page-content'); el.innerHTML = '<div class="loading">Loading Workspace overview…</div>';
     try {
       const result = await api.get(`/ai-workspaces/${encodeURIComponent(uuid)}/overview`); const view = result.overview;
@@ -61,6 +72,7 @@ const WorkspaceReviewPage = {
   },
 
   async renderQueue() {
+    this._stopRuntime();
     const el = document.getElementById('page-content'); el.innerHTML = '<div class="loading">Loading AI review queue…</div>';
     const params = new URLSearchParams((window.location.hash.split('?')[1] || ''));
     const state = params.get('state') || ''; const workspace = params.get('workspace_uuid') || ''; const q = params.get('q') || '';
@@ -70,14 +82,11 @@ const WorkspaceReviewPage = {
       const query = new URLSearchParams({ limit:'100' }); if (state) query.set('state',state); if (workspace) query.set('workspace_uuid',workspace); if (q) query.set('q',q);
       const rows = await api.get(`/ai-reviews?${query}`);
       this._queueItems=Array.isArray(rows)?rows:[];
-      el.innerHTML = `<div class="page-header"><h1 class="page-title">AI Review Queue</h1><a class="btn btn-secondary" href="#/ai-workspaces">Workspaces</a></div>
+      el.innerHTML = `<div class="page-header"><h1 class="page-title">AI Review Queue</h1><div><a class="btn btn-secondary" href="#/ai-workspaces">Workspaces</a><div id="reviewAutoRefreshStatus" class="table-secondary" role="status">Auto refresh on</div></div></div>
         <div class="filter-bar"><label>State <select id="reviewState"><option value="">All</option>${['ReadyForReview','InReview','Approved','Rejected','ReworkRequested'].map(value => `<option ${value === state ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
         <label>Search <input id="reviewSearch" value="${esc(q)}" placeholder="Album or configuration"></label><button class="btn btn-secondary" onclick="WorkspaceReviewPage.applyQueueFilters('${esc(workspace)}')">Apply</button></div>
-        <div class="card table-wrap"><table><thead><tr><th>Album</th><th>Configuration</th><th>State</th><th>Updated</th><th>Action</th></tr></thead><tbody>
-        ${(Array.isArray(rows) ? rows : []).map(item => `<tr><td><a href="#/albums/${item.album_id}">${esc(item.album_title)}</a></td><td>${esc(item.configuration_name)}</td>
-          <td><span class="chip ${item.state === 'Approved' ? 'chip-ok' : item.state === 'Rejected' ? 'chip-error' : 'chip-warn'}">${esc(item.state)}</span></td><td>${esc(item.updated_at)}</td>
-          <td><a class="btn btn-sm btn-primary" href="#/ai-work-items/${esc(item.work_item_uuid)}/review">Review details</a></td></tr>`).join('') || '<tr><td colspan="5">No reviews match these filters.</td></tr>'}
-        </tbody></table></div>`;
+        <div class="card table-wrap"><table><thead><tr><th>Album</th><th>Configuration</th><th>State</th><th>Updated</th><th>Action</th></tr></thead><tbody id="reviewQueueRows">${this._queueRowsHtml(this._queueItems)}</tbody></table></div>`;
+      this._startPolling(()=>this._refreshQueue(query),()=>window.location.hash.startsWith('#/ai-reviews'));
     } catch (error) { ui.renderPageError(el,error,'AI review queue'); }
   },
 
@@ -88,6 +97,7 @@ const WorkspaceReviewPage = {
   },
 
   async renderDetail({ uuid }) {
+    this._stopRuntime();
     const el = document.getElementById('page-content'); el.innerHTML = '<div class="loading">Loading review evidence…</div>';
     if(this._promotionSuccess?.completedUuid!==uuid)this._promotionSuccess=null;
     try { const result = await api.get(`/ai-work-items/${encodeURIComponent(uuid)}/review`); this._detail = result.review; this._renderDetail(); }
@@ -96,7 +106,11 @@ const WorkspaceReviewPage = {
 
   _writer() { return this._detail.results.find(stage => stage.stage === 'Writer'); },
   _vision() { return this._detail.results.find(stage => stage.stage === 'Vision'); },
+  _queueRowsHtml(rows){return rows.map(item => `<tr><td><a href="#/albums/${item.album_id}">${esc(item.album_title)}</a></td><td>${esc(item.configuration_name)}</td>
+    <td><span class="chip ${item.state === 'Approved' ? 'chip-ok' : item.state === 'Rejected' ? 'chip-error' : 'chip-warn'}">${esc(item.state)}</span></td><td>${esc(item.updated_at)}</td>
+    <td><a class="btn btn-sm btn-primary" href="#/ai-work-items/${esc(item.work_item_uuid)}/review">Review details</a></td></tr>`).join('')||'<tr><td colspan="5">No reviews match these filters.</td></tr>';},
   _renderDetail() {
+    this._stopRuntime();
     const d = this._detail; const review = d.review; const writer = this._writer(); const vision = this._vision();
     const recommendations = writer?.payload?.suggested_names || [];
     const evidence = d.evidence_history?.evidence || [];
@@ -108,7 +122,8 @@ const WorkspaceReviewPage = {
     this._draft[review.work_item_uuid] = draft;
     const el = document.getElementById('page-content');
     const queueHref=this._savedQueueHash(); const success=this._promotionSuccess?.completedUuid===review.work_item_uuid?this._promotionSuccess:null;
-    el.innerHTML = `<div class="page-header"><div><a href="${esc(queueHref)}">← Review Queue</a><h1 class="page-title">${esc(d.item.album_title)}</h1></div><span class="chip">${esc(review.state)}</span></div>
+    const previewRetired=d.promotions.some(item=>item.outcome==='Promoted');
+    el.innerHTML = `<div class="page-header"><div><a href="${esc(queueHref)}">← Review Queue</a><h1 class="page-title">${esc(d.item.album_title)}</h1></div><div><span class="chip">${esc(review.state)}</span><div id="reviewAutoRefreshStatus" class="table-secondary" role="status">Auto refresh on</div></div></div>
       ${success?`<section class="card alert alert-success" aria-live="polite"><strong>Album name Promotion completed.</strong><p>Durable result: <strong>${esc(d.item.album_title)}</strong> · ${d.promotions.length} Promotion record(s) · ${d.operations.length} linked Operation(s).</p><div class="detail-actions">${success.nextUuid?`<button class="btn btn-primary" onclick="WorkspaceReviewPage.openNextReview('${esc(success.nextUuid)}')">Next review</button>`:'<span>There are no more eligible reviews in the current queue.</span>'}<a class="btn btn-secondary" href="${esc(queueHref)}">Return to queue</a></div></section>`:''}
       <div class="review-grid"><section class="card review-panel ai-output"><div class="form-section-title">AI analysis · immutable</div>
         <p><strong>Configuration:</strong> ${esc(d.item.configuration_name)}</p><p><strong>Scene:</strong> ${esc(vision?.payload?.scene || '—')}</p>
@@ -127,9 +142,12 @@ const WorkspaceReviewPage = {
         ${review.state === 'Approved' && !d.promotions.some(item => item.outcome === 'Promoted') ? '<button class="btn btn-danger" onclick="WorkspaceReviewPage.previewPromotion(this)">Review Promotion</button>' : ''}</div></section></div>
       <section class="card review-panel system-evidence"><div class="form-section-title">System evidence and provenance</div>
         <p>Work Item: <code>${esc(review.work_item_uuid)}</code> · Group: <a href="#/work-dispatch/groups/${esc(d.group_uuid)}">${esc(d.group_uuid || '—')}</a></p>
-        <div class="evidence-grid">${evidence.map(item => `<div class="evidence-card"><strong>${esc(item.filename)}</strong><span class="chip ${item.availability === 'Available' ? 'chip-ok' : 'chip-error'}">${esc(item.availability)}</span><small>${esc(item.mime_type)} · ${item.size_bytes} bytes</small></div>`).join('') || 'No evidence Manifest available.'}</div>
+        ${previewRetired?'<div class="alert alert-info">Image preview ended after Promotion. Immutable Manifest metadata remains available.</div>':''}
+        <div class="evidence-grid">${evidence.map(item => `<button type="button" class="evidence-card evidence-preview" data-evidence-uuid="${esc(item.uuid)}" data-evidence-filename="${esc(item.filename)}" ${item.availability!=='Available'||previewRetired?'disabled':''} onclick="WorkspaceReviewPage.openEvidencePreview('${esc(item.uuid)}','${esc(item.filename)}')"><span class="evidence-image-placeholder">${previewRetired?'Preview retired':item.availability==='Available'?'Loading preview…':'Preview unavailable'}</span><strong>${esc(item.filename)}</strong><span class="chip ${item.availability === 'Available' ? 'chip-ok' : 'chip-error'}">${esc(item.availability)}</span><small>${esc(item.mime_type)} · ${item.size_bytes} bytes</small></button>`).join('') || 'No evidence Manifest available.'}</div>
         <p>Decisions: ${d.decisions.length} · Promotions: ${d.promotions.length} · Operations: ${d.operations.map(item => `<a href="#/operations/${esc(item.uuid)}">${esc(item.operation_type)}</a>`).join(' · ') || '—'} · Issues: ${d.issues.map(item => `<a href="#/issues/${esc(item.uuid)}">${esc(item.category)}</a>`).join(' · ') || '—'}</p>
         ${d.successor_work_item_uuid ? `<p>Rework successor: <a href="#/ai-work-items/${esc(d.successor_work_item_uuid)}/review">${esc(d.successor_work_item_uuid)}</a></p>` : ''}</section>`;
+    if(!previewRetired)this._startEvidenceLoading();
+    this._startPolling(()=>this._refreshDetail(review.work_item_uuid),()=>window.location.hash===`#/ai-work-items/${review.work_item_uuid}/review`);
   },
 
   chooseRecommendation(value) { const input = document.getElementById('reviewSelectedName'); input.value = value; document.getElementById('reviewSelectionSource').value = 'Recommendation'; this.saveDraft(); },
@@ -141,6 +159,60 @@ const WorkspaceReviewPage = {
   },
   rebaseDraft(){this._draftStale=false;this.saveDraft();this._renderDetail();},
   discardDraft(){const uuid=this._detail.review.work_item_uuid;delete this._draft[uuid];this._draftStale=false;ui.clearDraft(this._draftKey(uuid));ui.clearDirty();this._renderDetail();},
+  routeChanged(hash){if(!hash.startsWith('#/ai-reviews')&&!/^#\/ai-work-items\/[^/]+\/review$/.test(hash))this._stopRuntime();},
+  _setRuntimeStatus(message){const status=document.getElementById('reviewAutoRefreshStatus');if(status)status.textContent=message;},
+  _stopRuntime(){
+    this._runtimeGeneration+=1;if(this._pollTimer)clearTimeout(this._pollTimer);this._pollTimer=null;this._pollInFlight=false;
+    this._evidenceObserver?.disconnect();this._evidenceObserver=null;this._evidenceQueue=[];this._evidenceActive=0;
+    for(const url of this._evidenceUrls.values())URL.revokeObjectURL(url);this._evidenceUrls.clear();
+    if(this._previewUrl){URL.revokeObjectURL(this._previewUrl);this._previewUrl=null;}
+  },
+  _startPolling(refresh,isCurrent){
+    const generation=this._runtimeGeneration;this._pollDelay=5000;
+    const schedule=()=>{if(generation===this._runtimeGeneration)this._pollTimer=setTimeout(tick,this._pollDelay);};
+    const tick=async()=>{
+      if(generation!==this._runtimeGeneration||!isCurrent())return;
+      if(document.hidden){this._setRuntimeStatus('Auto refresh paused while this tab is hidden.');schedule();return;}
+      if(this._pollInFlight){schedule();return;}this._pollInFlight=true;
+      try{const outcome=await refresh();this._pollDelay=5000;this._setRuntimeStatus(outcome==='deferred'?'New state is waiting until editing focus leaves the form.':`Auto refresh on · updated ${new Date().toLocaleTimeString()}`);}
+      catch{this._pollDelay=Math.min(this._pollDelay===5000?10000:this._pollDelay*2,30000);this._setRuntimeStatus(`Auto refresh delayed · retrying in ${this._pollDelay/1000}s`);}
+      finally{this._pollInFlight=false;}schedule();
+    };
+    this._setRuntimeStatus('Auto refresh on');schedule();
+  },
+  async _refreshQueue(query){
+    const rows=await api.get(`/ai-reviews?${query}`);const next=Array.isArray(rows)?rows:[];const target=document.getElementById('reviewQueueRows');if(!target)return;
+    this._queueItems=next;if(document.activeElement&&target.contains(document.activeElement))return 'deferred';target.innerHTML=this._queueRowsHtml(next);
+  },
+  async _refreshDetail(uuid){
+    const result=await api.get(`/ai-work-items/${encodeURIComponent(uuid)}/review`);const next=result.review;
+    const before=this._detail;const unchanged=before&&before.review.version===next.review.version&&before.item.version===next.item.version&&before.results.length===next.results.length&&before.promotions.length===next.promotions.length;
+    if(unchanged)return;
+    const editor=document.querySelector('.human-decision');if(editor&&document.activeElement&&editor.contains(document.activeElement))return 'deferred';
+    this._detail=next;this._renderDetail();
+  },
+  _startEvidenceLoading(){
+    const cards=[...document.querySelectorAll('.evidence-preview:not(:disabled)')];
+    const enqueue=card=>{if(card.dataset.evidenceQueued)return;card.dataset.evidenceQueued='true';this._evidenceQueue.push(card);this._drainEvidenceQueue();};
+    if('IntersectionObserver' in window){this._evidenceObserver=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting){this._evidenceObserver.unobserve(entry.target);enqueue(entry.target);}}),{rootMargin:'240px'});cards.forEach(card=>this._evidenceObserver.observe(card));}
+    else cards.forEach(enqueue);
+  },
+  _drainEvidenceQueue(){while(this._evidenceActive<3&&this._evidenceQueue.length){const card=this._evidenceQueue.shift();this._evidenceActive+=1;this._loadEvidenceThumbnail(card).finally(()=>{this._evidenceActive-=1;this._drainEvidenceQueue();});}},
+  async _loadEvidenceThumbnail(card){
+    const generation=this._runtimeGeneration,uuid=card.dataset.evidenceUuid;
+    try{const source=await api.getBlob(`/ai-evidence/${encodeURIComponent(uuid)}/content`);const thumb=await this._makeThumbnail(source);if(generation!==this._runtimeGeneration)return;
+      const url=URL.createObjectURL(thumb);this._evidenceUrls.set(uuid,url);const placeholder=card.querySelector('.evidence-image-placeholder');if(placeholder)placeholder.innerHTML=`<img src="${url}" alt="Preview of ${esc(card.dataset.evidenceFilename)}" loading="lazy">`;
+    }catch(error){if(generation!==this._runtimeGeneration)return;const placeholder=card.querySelector('.evidence-image-placeholder');if(placeholder)placeholder.textContent=error.code==='EVIDENCE_CONTENT_RETIRED'?'Preview retired':'Preview unavailable';card.disabled=true;}
+  },
+  async _makeThumbnail(blob){
+    if(typeof createImageBitmap!=='function')return blob;const bitmap=await createImageBitmap(blob);const scale=Math.min(1,640/bitmap.width,420/bitmap.height);const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));const context=canvas.getContext('2d');context.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();return await new Promise(resolve=>canvas.toBlob(value=>resolve(value||blob),'image/jpeg',0.82));
+  },
+  async openEvidencePreview(uuid,filename){
+    if(this._previewUrl){URL.revokeObjectURL(this._previewUrl);this._previewUrl=null;}
+    try{const blob=await api.getBlob(`/ai-evidence/${encodeURIComponent(uuid)}/content`);this._previewUrl=URL.createObjectURL(blob);showModal(`<h3 id="modal-title" class="modal-title">${esc(filename)}</h3><div class="evidence-full-preview"><img src="${this._previewUrl}" alt="Full preview of ${esc(filename)}"></div><div class="modal-footer"><button class="btn btn-primary" onclick="WorkspaceReviewPage.closeEvidencePreview()">Close preview</button></div>`);}
+    catch(error){toast(error.message||'Image preview is unavailable.','error');}
+  },
+  closeEvidencePreview(){if(this._previewUrl){URL.revokeObjectURL(this._previewUrl);this._previewUrl=null;}closeModal();},
   async startReview(trigger) { const r=this._detail.review; const result=await ui.runAction('review-start',()=>api.post(`/ai-work-items/${r.work_item_uuid}/review/start`,{expected_version:r.version}),{trigger,context:'begin AI review'}); if(result.ok){this._detail=result.value.review;this.saveDraft();this._renderDetail();} },
   async decide(action,trigger) {
     this.saveDraft(); const r=this._detail.review; const draft=this._draft[r.work_item_uuid];

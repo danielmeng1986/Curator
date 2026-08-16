@@ -91,6 +91,13 @@ and browser restart, then reconcile with authoritative Backend versions. Stale
 drafts offer rebase or discard behavior instead of silently overwriting newer
 decisions.
 
+Queue and Review Detail refresh authoritative state while visible without
+overwriting an active draft. Manifest images are fetched with Admin authorization
+only as their gallery cards approach the viewport, converted to browser-memory
+thumbnails, and released on route exit. Opening a thumbnail temporarily fetches
+the original for inspection; no image is copied into the Web workspace or stored
+as a database blob.
+
 ## Promotion and completion
 
 Approval and Promotion are separate. After approval, the Admin reviews the
@@ -106,6 +113,8 @@ After Promotion, the completed detail remains visible with the durable resulting
 name and linked evidence. A **Next review** action advances to one eligible item
 from the same remembered Queue order; the Queue link retains its filters. Every
 advance remains a separate human Review and Promotion rather than a batch action.
+After successful Promotion, image content preview ends and only the immutable
+Manifest metadata and its availability/audit lineage remain in the Review view.
 
 The Album reservation remains active after Promotion until the Dispatch Group
 is explicitly released. Workspace closure and archive require their own

@@ -76,6 +76,7 @@ snapshot, archive, and output resources.
 | [UI-031](UI-031-administer-ai-model-configurations.md) | Administrator AI Model Configuration management | Complete |
 | [UI-032](UI-032-complete-work-dispatch-filtering-and-pagination.md) | Status-centered Dispatch filtering and bounded pagination | Complete |
 | [UI-033](UI-033-streamline-ai-review-and-live-dispatch-progress.md) | Fast sequential Album review and automatically refreshed run progress | Complete |
+| [UI-034](UI-034-live-review-and-ephemeral-evidence-preview.md) | Live AI Review state and ephemeral lazy-loaded evidence preview | Complete |
 
 ## Dependency outline
 

@@ -165,7 +165,8 @@ The Worker checks both executables before asking the Backend for work. Vision
 requires the multimodal image/projector options. Writer requires
 `--single-turn`, `--simple-io`, and bounded-output options so a text-only prompt
 cannot enter an interactive chat loop. The prompt requests Writer JSON, which
-is locally checked against Curator's field-length and six-name rules before
+is locally checked against Curator's field-length and six-name distribution
+(two 2-word, two 3-word, and two 4-word names) before
 submission; invalid output receives bounded corrective retries. The supported
 llama.cpp build cannot reliably initialize its JSON grammar sampler, so the
 Worker does not pass `--json-schema`; Worker and Backend validation still
@@ -200,7 +201,8 @@ The runtime performs this sequence:
 3. Maintain the lease with heartbeats while processing.
 4. Download only the immutable Evidence Manifest items through the API.
 5. Run Vision processing and submit the versioned Vision result.
-6. Run Writer processing and submit exactly six valid name suggestions.
+6. Run Writer processing and submit exactly six valid name suggestions: two
+   2-word, two 3-word, and two 4-word names.
 7. Remove temporary evidence and wait for the next item.
 8. Report a truthful failure if safe completion is impossible.
 

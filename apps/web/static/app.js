@@ -40,6 +40,7 @@ function navigate(hash) {
 
 function route() {
   const hash = window.location.hash || '#/';
+  WorkspaceReviewPage.routeChanged?.(hash);
 
   for (const r of ROUTES) {
     const m = hash.match(r.pattern);

@@ -14,7 +14,7 @@ async function submitResult(itemUuid,index){
   const manifest=await admin({path:`/ai-work-items/${itemUuid}/evidence-manifest`,method:'POST',body:{}});assert.equal(manifest.status,201);assert.equal(manifest.payload.data.manifest.evidence.length,8);
   const claim=await fixture.request('/ai-work-items/claim',{method:'POST',role:'writer',body:{worker_kinds:['album_name_analysis'],lease_seconds:300}});assert.equal(claim.payload.data.item.uuid,itemUuid);
   const vision=await fixture.request(`/ai-work-items/${itemUuid}/results/vision`,{method:'POST',role:'writer',body:{schema_version:'curator://album-analysis/vision/v1',payload:{scene:`Curated outdoor scene ${index}`,people:{minimum:2,maximum:4},location_environment:'Forest lakeside',subjects:['friends'],objects:['trees'],actions:['walking'],confidence:0.91,warnings:[]}}});assert.equal(vision.status,200);
-  const names=['Golden Forest Morning','Quiet Lakeside Walk','Summer Friends Journey','Gentle Woodland Light','Memories Beside Water','Together Through Nature'];
+  const names=['Golden Forest Morning','Quiet Lakeside','Summer Journey','Gentle Woodland Light','Memories Beside Quiet Water','Together Through Morning Nature'];
   const writer=await fixture.request(`/ai-work-items/${itemUuid}/results/writer`,{method:'POST',role:'writer',body:{schema_version:'curator://album-analysis/writer/v1',payload:{album_summary:`Friends explore a forest lakeside ${index}.`,description:'A calm outdoor journey with friends among trees and water.',suggested_names:names}}});assert.equal(writer.status,200);return names;
 }
 async function openReview(page,itemUuid){await page.goto(`${fixture.origin}/#/ai-work-items/${itemUuid}/review`);await page.locator('h1.page-title').waitFor();}
@@ -27,12 +27,16 @@ try{
   const items=groups.map(group=>group.work_item_uuids[0]);const recommendations=[];for(let index=0;index<items.length;index+=1)recommendations.push(await submitResult(items[index],index+1));
 
   const page=await browser.newPage();await connect(page);await page.getByRole('link',{name:/AI Review/}).click();await page.getByRole('heading',{name:'AI Review Queue'}).waitFor();assert.equal(await page.getByRole('link',{name:'Review details'}).count(),3);
+  const externallyStarted=await admin({path:`/ai-work-items/${items[2]}/review/start`,method:'POST',body:{expected_version:1}});assert.equal(externallyStarted.status,200);
+  const liveRow=page.locator('tr',{has:page.locator(`a[href="#/ai-work-items/${items[2]}/review"]`)});await liveRow.getByText('InReview',{exact:true}).waitFor({timeout:10000});
 
   await openReview(page,items[0]);await page.getByText('AI analysis · immutable').waitFor();await page.getByText('Human review · editable draft').waitFor();await page.getByText('System evidence and provenance').waitFor();assert.equal(await page.locator('.evidence-card').count(),8);
+  await page.locator('.evidence-preview').first().scrollIntoViewIfNeeded();await page.locator('.evidence-preview img').first().waitFor({timeout:10000});await page.locator('.evidence-preview').first().click();await page.locator('.evidence-full-preview img').waitFor();await page.getByRole('button',{name:'Close preview'}).click();
   await page.getByRole('button',{name:'Begin review'}).click();await page.getByRole('button',{name:'Approve selection'}).waitFor();
   await page.getByLabel('Final Album name').fill('invalid name');await page.getByLabel('Selection source').selectOption('HumanRevision');await page.getByRole('button',{name:'Approve selection'}).click();await page.getByText(/Check the highlighted information/).waitFor();assert.equal(await page.getByLabel('Final Album name').inputValue(),'invalid name');
   await page.getByLabel('Final Album name').fill('Golden Forest Morning');await page.getByRole('button',{name:'Approve selection'}).click();await page.getByText('Approved',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Review Promotion'}).click();await page.getByRole('heading',{name:'Confirm Album Name Promotion'}).waitFor();await page.getByLabel('I confirm this Album name and Status change.').check();await page.getByRole('button',{name:'Confirm & Rename'}).click();await page.getByText('Album name Promotion completed.').waitFor();
+  await page.getByText('Image preview ended after Promotion.').waitFor();assert.equal(await page.locator('.evidence-preview:not(:disabled)').count(),0);
   await page.getByRole('button',{name:'Next review'}).click();await page.waitForFunction(()=>document.querySelector('h1.page-title')?.textContent!=='Golden Forest Morning');assert.notEqual(await page.locator('h1.page-title').textContent(),'Golden Forest Morning');
   const promotedAlbum=await admin({path:'/albums/1'});assert.equal(promotedAlbum.payload.data.album.title,'Golden Forest Morning');assert.equal(promotedAlbum.payload.data.album.status_name,'NAME_GENERATED');
   const promotionHistory=await admin({path:`/ai-work-items/${items[0]}/promotion`});assert.equal(promotionHistory.payload.data.promotion_history.items.length,1);
@@ -45,7 +49,7 @@ try{
   page.once('dialog',dialog=>dialog.accept());await page.reload();await page.getByText(/local draft predates the current Backend review state/).waitFor();assert.equal(await page.getByLabel('Administrator evaluation').inputValue(),'Retain this local stale draft');await page.getByRole('button',{name:'Discard local draft'}).click();
   const rejectedAlbum=await admin({path:'/albums/2'});assert.equal(rejectedAlbum.payload.data.album.title,'AI Fixture Album 2');assert.equal(rejectedAlbum.payload.data.album.status_name,'TEMPORARY');
 
-  await openReview(page,items[2]);await page.getByRole('button',{name:'Begin review'}).click();await page.getByLabel(/Reason/).fill('Use a different sample and retry');await page.getByRole('button',{name:'Request rework'}).click();await page.getByText('ReworkRequested',{exact:true}).waitFor();
+  await openReview(page,items[2]);await page.getByLabel(/Reason/).fill('Use a different sample and retry');await page.getByRole('button',{name:'Request rework'}).click();await page.getByText('ReworkRequested',{exact:true}).waitFor();
   const rework=await admin({path:`/ai-work-items/${items[2]}/review`});const successor=rework.payload.data.review.successor_work_item_uuid;assert.ok(successor);
   const cancelled=await admin({path:`/ai-work-items/${successor}/cancel`,method:'POST',body:{expected_version:1}});assert.equal(cancelled.status,200);
 

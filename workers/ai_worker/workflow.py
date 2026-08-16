@@ -11,8 +11,9 @@ fields, using this shape: {"scene":"...","people":{"minimum":0,"maximum":0},
 minimum and maximum must be integers from 0 to 100, confidence must be a number from 0 to 1, and the four list
 fields must contain strings. Do not identify people."""
 WRITER_PROMPT="""Using the following Vision JSON, return one JSON object only with album_summary (string),
-description (string), and suggested_names (exactly six unique names). Every suggested name must contain 2-5
-English words; every word must start with an uppercase letter and contain only letters, apostrophes, or hyphens.
+description (string), and suggested_names (exactly six unique names): exactly two names of two English words,
+exactly two names of three English words, and exactly two names of four English words. Every word must start
+with an uppercase letter and contain only letters, apostrophes, or hyphens.
 Never use Photo, Photos, Collection, Session, or Gallery as a word. Vision JSON:\n{vision}"""
 FORBIDDEN_NAME_WORDS={"photo","photos","collection","session","gallery"}
 
@@ -51,13 +52,15 @@ def validate_writer_payload(payload):
     names=payload["suggested_names"]
     if not isinstance(names,list) or len(names)!=6 or any(not isinstance(name,str) for name in names) or len(set(names))!=6:
         raise ProviderError("Writer suggested_names must contain exactly six unique strings.",error_code="MODEL_OUTPUT_INVALID")
-    normalized=[]
+    normalized=[];word_counts=[]
     for value in names:
         name=_bounded_text(value,"suggested name",120);words=name.split()
-        if not 2<=len(words)<=5 or any(not re.fullmatch(r"[A-Z][A-Za-z'’-]*",word) for word in words) \
+        if len(words) not in {2,3,4} or any(not re.fullmatch(r"[A-Z][A-Za-z'’-]*",word) for word in words) \
                 or any(word.casefold() in FORBIDDEN_NAME_WORDS for word in words):
-            raise ProviderError("Each suggested name must contain 2-5 capitalized English words and no forbidden term.",error_code="MODEL_OUTPUT_INVALID")
-        normalized.append(name)
+            raise ProviderError("Each suggested name must contain 2-4 capitalized English words and no forbidden term.",error_code="MODEL_OUTPUT_INVALID")
+        normalized.append(name);word_counts.append(len(words))
+    if sorted(word_counts)!=[2,2,3,3,4,4]:
+        raise ProviderError("Writer suggested_names must contain exactly two 2-word, two 3-word, and two 4-word names.",error_code="MODEL_OUTPUT_INVALID")
     return {"album_summary":_bounded_text(payload["album_summary"],"album_summary",500),
         "description":_bounded_text(payload["description"],"description",2000),"suggested_names":normalized}
 

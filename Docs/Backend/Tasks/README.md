@@ -78,6 +78,7 @@ are approved.
 | [BT-062](BT-062-claim-owner-evidence-manifest-access.md) | Active Writer claim-owner access to Backend-selected Evidence Manifests. |
 | [BT-063](BT-063-capability-aware-long-poll-work-claim.md) | Capability-matched atomic claims with bounded long-poll wake-up and attempt audit snapshots. |
 | [BT-064](BT-064-acknowledged-album-promotion-contract.md) | Acknowledgement-based single-Album Promotion without repeated name entry. |
+| [BT-065](BT-065-retire-promoted-evidence-content.md) | Retire image content after Promotion while retaining Manifest audit data. |
 
 BT identifiers record planning order, not mandatory execution order. Dispatch
 is an entry boundary for AI work, so BT-054 through BT-056 precede BT-047 in

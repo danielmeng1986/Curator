@@ -991,8 +991,8 @@ class TestVersionedApiAuthorization(_TestServerBase):
                             "actions":["walking"],"confidence":0.9,"warnings":[]},{"provider":"fixture"}
                     def writer(self,vision,settings): return {"album_summary":"A calm family outing",
                         "description":"A family explores a lakeside setting.","suggested_names":["Lakeside Family Walk",
-                        "Quiet Summer Shore","Morning By The Lake","Family Waterside Adventure",
-                        "Gentle Lakeside Memories","Together Near The Water"]},{"provider":"fixture"}
+                        "Quiet Shores","Lakeside Memories","Morning By Water",
+                        "Gentle Moments Beside Water","Together Near The Shore"]},{"provider":"fixture"}
                 workflow=DeterministicWorkflow(); client=CuratorClient(f"http://127.0.0.1:{self._port}",writer_issued["token"])
                 self.assertEqual(item_uuid,WorkerRuntime(client,workflow).run_once(claimed["data"]["item"]))
                 self.assertTrue(all(not path.exists() for path in workflow.paths))
@@ -1029,6 +1029,10 @@ class TestVersionedApiAuthorization(_TestServerBase):
                     "preview_token":promotion_preview["preview_token"],"acknowledged":True},admin)
                 self.assertEqual(200,status); self.assertEqual("Promoted",promoted["data"]["promotion"]["outcome"])
                 self.assertEqual("Lakeside Family Walk",self._db.execute("SELECT title FROM album WHERE id=?",(album_id,)).fetchone()[0])
+                status,metadata=self._get(f"/api/v1/ai-evidence/{evidence_uuid}",admin)
+                self.assertEqual(200,status);self.assertEqual(evidence_uuid,metadata["data"]["evidence"]["uuid"])
+                status,_,_,content=self._get_raw(f"/api/v1/ai-evidence/{evidence_uuid}/content",admin)
+                self.assertEqual(409,status);self.assertIn(b"EVIDENCE_CONTENT_RETIRED",content)
                 status, promotion_history = self._get(f"/api/v1/ai-work-items/{item_uuid}/promotion",admin)
                 self.assertEqual(200,status)
                 self.assertEqual("Promoted",promotion_history["data"]["promotion_history"]["items"][0]["outcome"])

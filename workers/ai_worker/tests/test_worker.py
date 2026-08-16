@@ -198,7 +198,7 @@ class WorkerTests(unittest.TestCase):
             def __init__(self,result):self.result,self.calls=result,[]
             def complete(self,prompt,**kwargs):self.calls.append((prompt,kwargs));return self.result,{"duration_ms":1}
         valid={"album_summary":"Garden scene","description":"A garden setting.","suggested_names":
-            ["Bamboo Garden","Quiet Retreat","Summer Reverie","Golden Afternoon","Gentle Elegance","Serene Moments"]}
+            ["Bamboo Garden","Quiet Retreat","Summer Garden Light","Gentle Summer Elegance","Serene Moments By Water","Together Near The Garden"]}
         vision_payload={"scene":"garden","people":{"minimum":1,"maximum":1},
             "location_environment":"Outdoor garden","subjects":["person"],"objects":["bamboo"],
             "actions":["posing"],"confidence":0.9,"warnings":[]}
@@ -236,7 +236,7 @@ class WorkerTests(unittest.TestCase):
 
     def test_writer_validation_retries_with_feedback_before_submission(self):
         valid={"album_summary":"Garden scene","description":"A garden setting.","suggested_names":
-            ["Bamboo Garden","Quiet Retreat","Summer Reverie","Golden Afternoon","Gentle Elegance","Serene Moments"]}
+            ["Bamboo Garden","Quiet Retreat","Summer Garden Light","Gentle Summer Elegance","Serene Moments By Water","Together Near The Garden"]}
         class Provider:
             def __init__(self):self.calls=[]
             def complete(self,prompt,**kwargs):
@@ -255,9 +255,10 @@ class WorkerTests(unittest.TestCase):
 
     def test_writer_validation_matches_backend_name_rules(self):
         base={"album_summary":"Summary","description":"Description","suggested_names":
-            ["Bamboo Garden","Quiet Retreat","Summer Reverie","Golden Afternoon","Gentle Elegance","Serene Moments"]}
+            ["Bamboo Garden","Quiet Retreat","Summer Garden Light","Gentle Summer Elegance","Serene Moments By Water","Together Near The Garden"]}
         self.assertEqual(base,validate_writer_payload(base))
-        for names in (["Only One"],base["suggested_names"][:-1]+["lowercase name"],base["suggested_names"][:-1]+["Private Photo"]):
+        for names in (["Only One"],base["suggested_names"][:-1]+["lowercase name"],base["suggested_names"][:-1]+["Private Photo"],
+                ["Bamboo Garden","Quiet Retreat","Summer Reverie","Golden Afternoon","Gentle Elegance","Serene Moments"]):
             with self.assertRaises(ProviderError):validate_writer_payload({**base,"suggested_names":names})
 
     def test_runtime_preserves_provider_failure_category(self):

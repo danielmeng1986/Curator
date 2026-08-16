@@ -7,6 +7,7 @@ tokens, backups, logs, or outputs.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import signal
 import sqlite3
@@ -155,13 +156,14 @@ def main() -> None:
         repair_candidate.mkdir(parents=True)
         (repair_candidate / "conflict.jpg").write_bytes(b"fixture-conflict")
     if args.scenario == "future-ai-workspace":
+        pixel_png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
         for title in ("Fixture Album", "AI Fixture Album 2", "AI Fixture Album 3"):
             album_root = resources["archive"] / "Fixture Studio" / title
             album_root.mkdir(parents=True)
             for index in range(8):
-                (album_root / f"evidence-{index + 1:02d}.jpg").write_bytes(
-                    b"\xff\xd8\xff" + bytes([index + 1]) * (1000 + index * 10)
-                )
+                (album_root / f"evidence-{index + 1:02d}.png").write_bytes(pixel_png)
 
     _initialize_database(resources["database"], args.scenario)
     config_path = root / "backend.json"

@@ -2874,6 +2874,12 @@ class AIPhotoEvidenceRepository:
                 "SELECT * FROM workspace_album_ai_worker_photo WHERE uuid=?", (evidence_uuid,)).fetchone()
         return dict(row) if row else None
 
+    def content_retired(self, item_uuid):
+        with self._db() as conn:
+            exists=conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_album_name_promotion'").fetchone()
+            if not exists:return False
+            return bool(conn.execute("SELECT 1 FROM workspace_album_name_promotion WHERE work_item_uuid=? AND outcome='Promoted' LIMIT 1",(item_uuid,)).fetchone())
+
 
 class AIResultRepository:
     """Atomic ordered result persistence and successful Work Item completion."""

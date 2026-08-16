@@ -232,15 +232,19 @@ transfer is specified separately.
 `GET /api/v1/ai-evidence/{evidence_uuid}` returns redacted Manifest-bound
 metadata; `/content` streams the signature-validated image with its fixed MIME,
 bounded length, private no-store caching, and nosniff headers. Admin may read
-for review/audit. Writer access requires that the same Token currently owns an
-unexpired claim on the evidence Work Item. No route accepts a path parameter.
+content during Review and pending Promotion, but a successful Promotion retires
+content transfer while metadata/history remain readable for audit. Writer access
+requires that the same Token currently owns an unexpired claim on the evidence
+Work Item. No route accepts a path parameter, creates a durable thumbnail, or
+copies image bytes into the database or Web workspace.
 
 `POST /api/v1/ai-work-items/{work_item_uuid}/results/vision` and `/writer`
 accept Writer-owned, versioned JSON results in that strict order. Both stages
 are bound to the active claim, immutable evidence Manifest, and snapshotted AI
 configuration. Vision uses `curator://album-analysis/vision/v1`; Writer uses
 `curator://album-analysis/writer/v1` and contains exactly six unique, bounded
-English Album-name suggestions. Exact retries are idempotent; a changed replay,
+English Album-name suggestions: two 2-word names, two 3-word names, and two
+4-word names. Exact retries are idempotent; a changed replay,
 wrong stage, stale evidence, or expired/wrong claim returns structured `409`
 without advancing review state. Accepted Writer output completes Worker
 execution and makes the Work Item `ReadyForReview`—it does not change Album.

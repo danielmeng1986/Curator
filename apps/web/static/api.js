@@ -202,6 +202,24 @@
     return legacyReadModel(path, payload.data, payload.meta);
   }
 
+  async function performBlobFetch(path, token) {
+    let response;
+    try {
+      response = await fetch(`${versionedBaseUrl()}${path}`, {
+        headers: { Accept: 'image/*', Authorization: `Bearer ${token}` }, cache:'no-store',
+      });
+    } catch {
+      throw new CuratorApiError('NETWORK_UNAVAILABLE', 'The Curator Backend is unavailable.');
+    }
+    if (!response.ok) {
+      let payload={};try{payload=await response.json();}catch{/* generic error below */}
+      const error=payload.error||{};
+      throw new CuratorApiError(error.code||`HTTP_${response.status}`,error.message||'The image is unavailable.',response.status,
+        {details:error.details||null,requestId:payload.meta?.request_id||null});
+    }
+    return response.blob();
+  }
+
   async function apiFetch(path, options = {}) {
     const token = deviceToken();
     if (!token) {
@@ -231,6 +249,11 @@
 
   const api = Object.freeze({
     get: (path) => apiFetch(path),
+    getBlob: (path) => {
+      const token=deviceToken();
+      if(!token)throw new CuratorApiError('AUTHENTICATION_MISSING_TOKEN','Device access is required.',401);
+      return performBlobFetch(path,token);
+    },
     post: (path, body) => apiFetch(path, { method: 'POST', body: JSON.stringify(body) }),
     put: (path, body) => apiFetch(path, { method: 'PUT', body: JSON.stringify(body) }),
     del: (path) => apiFetch(path, { method: 'DELETE' }),

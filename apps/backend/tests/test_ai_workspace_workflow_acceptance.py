@@ -14,11 +14,11 @@ VISION={"scene":"A family walking beside a lake","people":{"minimum":3,"maximum"
     "location_environment":"Outdoor lakeside","subjects":["family"],"objects":["trees"],
     "actions":["walking"],"confidence":0.91,"warnings":[]}
 WRITER_A={"album_summary":"A calm family outing","description":"A family explores a lakeside setting.",
-    "suggested_names":["Lakeside Family Walk","Quiet Summer Shore","Morning By The Lake",
-        "Family Waterside Adventure","Gentle Lakeside Memories","Together Near The Water"]}
+    "suggested_names":["Lakeside Family Walk","Quiet Shores","Lakeside Memories",
+        "Morning By Water","Gentle Moments Beside Water","Together Near The Shore"]}
 WRITER_B={"album_summary":"A bright walk near water","description":"A second model describes the same evidence.",
-    "suggested_names":["Golden Lakeside Journey","Summer Water Memories","Family Morning Adventure",
-        "Walking Beside Water","Bright Shore Together","Peaceful Family Escape"]}
+    "suggested_names":["Golden Lakeside Journey","Summer Memories","Bright Shores",
+        "Family Morning Adventure","Walking Beside Quiet Water","Peaceful Days Near Water"]}
 
 
 class Fixture:

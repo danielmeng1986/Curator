@@ -22,6 +22,11 @@ await assert.rejects(api.get('/statuses'), (error) => error.code === 'AUTHENTICA
 assert.equal(calls.length, 0, 'missing token must prevent a request');
 
 api.configure({ backendUrl: 'http://127.0.0.1:8788/', token: 'approved-token' });
+const imageBlob={type:'image/jpeg',size:3};
+nextResponse={ok:true,status:200,blob:async()=>imageBlob};
+assert.equal(await api.getBlob('/ai-evidence/evidence-1/content'),imageBlob);
+assert.equal(calls.at(-1)[1].headers.Authorization,'Bearer approved-token');
+assert.equal(calls.at(-1)[1].cache,'no-store');
 nextResponse = {
   ok: true,
   status: 200,
@@ -31,8 +36,8 @@ assert.equal(
   JSON.stringify(await api.get('/albums?limit=1')),
   JSON.stringify({ albums: [{ id: 1, name: 'Example' }], total: 53 }),
 );
-assert.equal(calls[0][0], 'http://127.0.0.1:8788/api/v1/albums?limit=1');
-assert.equal(calls[0][1].headers.Authorization, 'Bearer approved-token');
+assert.equal(calls.at(-1)[0], 'http://127.0.0.1:8788/api/v1/albums?limit=1');
+assert.equal(calls.at(-1)[1].headers.Authorization, 'Bearer approved-token');
 
 nextResponse = {
   ok: false,

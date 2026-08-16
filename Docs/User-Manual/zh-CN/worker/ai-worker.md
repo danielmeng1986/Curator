@@ -148,7 +148,8 @@ python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /
 Worker 在向 Backend 领取任务前会检查两个可执行文件。Vision 必须具备图片/projector 参数；
 Writer 必须具备 `--single-turn`、`--simple-io` 与有界输出参数，确保纯文本 prompt 不会进入
 交互式 chat 循环。Writer 会由 prompt 要求输出 JSON，并在提交前按照 Curator 的字段长度与
-六个名称规则进行本地校验；不合格的模型输出会收到有界纠错重试。受支持的 llama.cpp build
+六个名称分布规则（两个双词、两个三词、两个四词名称）进行本地校验；不合格的模型输出会收到
+有界纠错重试。受支持的 llama.cpp build
 无法稳定初始化 JSON grammar sampler，因此 Worker 不传 `--json-schema`；Worker 与 Backend
 的双重校验仍会拒绝超出 Curator 契约的数据。
 Vision 输出同样会在提交前按照 schema v1 的精确字段、人数范围、数组、置信度和文本上限进行
@@ -175,7 +176,7 @@ runtime 执行以下顺序：
 3. 处理期间通过 heartbeat 维持 lease。
 4. 只通过 API 下载不可变 Evidence Manifest 中的项目。
 5. 执行 Vision 处理并提交带版本的 Vision 结果。
-6. 执行 Writer 处理并提交恰好六个有效名称建议。
+6. 执行 Writer 处理并提交恰好六个有效名称建议：两个双词、两个三词、两个四词名称。
 7. 删除临时 evidence，然后等待下一项任务。
 8. 无法安全完成时提交真实的失败状态。
 

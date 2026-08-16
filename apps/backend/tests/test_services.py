@@ -1782,8 +1782,8 @@ class TestAIResultSubmissionContract(unittest.TestCase):
             "location_environment":"Outdoor lakeside","subjects":["family"],"objects":["trees"],
             "actions":["walking"],"confidence":0.9,"warnings":[]}
         self.writer = {"album_summary":"A calm family outing","description":"A family explores a lakeside setting.",
-            "suggested_names":["Lakeside Family Walk","Quiet Summer Shore","Morning By The Lake",
-                "Family Waterside Adventure","Gentle Lakeside Memories","Together Near The Water"]}
+            "suggested_names":["Lakeside Family Walk","Quiet Shores","Lakeside Memories",
+                "Morning By Water","Gentle Moments Beside Water","Together Near The Shore"]}
 
     def tearDown(self): TestAIPhotoEvidenceManifestContract.tearDown(self)
 
@@ -1890,6 +1890,8 @@ class TestAIAlbumNamePromotionContract(unittest.TestCase):
     def test_preview_discloses_change_and_execute_is_idempotent(self):
         before=self.conn.execute("SELECT title,status_id FROM album WHERE id=?",(self.item["album_id"],)).fetchone()
         preview=self.promotions.preview(self.item["uuid"],"admin-one")
+        evidence_uuid=self.evidence_repo.get_by_item(self.item["uuid"])["evidence"][0]["uuid"]
+        self.assertEqual("image/jpeg",self.service.content_descriptor(evidence_uuid,"admin")["mime_type"])
         self.assertEqual(before["title"],preview["current"]["title"]); self.assertEqual("Lakeside Family Walk",preview["resulting"]["title"])
         self.assertIs(preview["acknowledgement_required"],True); self.assertNotIn("confirmation",preview)
         result=self.promotions.execute(preview["preview_token"],True,"admin-one")
@@ -1897,6 +1899,9 @@ class TestAIAlbumNamePromotionContract(unittest.TestCase):
         self.assertFalse(result["idempotent"]); self.assertTrue(replay["idempotent"]); self.assertEqual(result["uuid"],replay["uuid"])
         album=self.conn.execute("SELECT title,status_id FROM album WHERE id=?",(self.item["album_id"],)).fetchone()
         self.assertEqual("Lakeside Family Walk",album["title"]); self.assertEqual(before["status_id"],album["status_id"])
+        self.assertEqual(evidence_uuid,self.service.metadata(evidence_uuid,"admin")["uuid"])
+        with self.assertRaises(svc.ServiceConflict) as retired:self.service.content_descriptor(evidence_uuid,"admin")
+        self.assertEqual("EVIDENCE_CONTENT_RETIRED",retired.exception.code)
 
     def test_temporary_maps_to_name_generated_and_stale_preview_is_zero_write(self):
         self.conn.execute("INSERT INTO status(name) VALUES ('TEMPORARY')"); temporary=self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
