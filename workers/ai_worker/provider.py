@@ -50,7 +50,8 @@ def _failure_code(diagnostic: str) -> str:
     lowered=diagnostic.casefold()
     if any(value in lowered for value in ("unknown argument","unknown option","unrecognized option","invalid argument")):
         return "MODEL_PROVIDER_ARGUMENT_INVALID"
-    if any(value in lowered for value in ("failed to initialize samplers","error initializing grammar sampler")):
+    if any(value in lowered for value in ("failed to initialize samplers","error initializing grammar sampler",
+            "failed to parse grammar","error parsing grammar")):
         return "MODEL_PROVIDER_ARGUMENT_INVALID"
     if any(value in lowered for value in ("mmproj","projector","vision model")):
         return "MODEL_PROVIDER_PROJECTOR_FAILED"

@@ -51,3 +51,6 @@ be generated, while retaining deterministic Worker and Backend validation.
   focused Backend tests pass.
 - The live Backend database was explicitly upgraded through migration `0017`;
   its Model Configuration now references the seeded Profile version.
+- A WSL smoke run exposed a build-specific invalid escaped hyphen in the first
+  grammar revision. The character class now places the hyphen last without an
+  escape, and regression coverage classifies grammar parse failures explicitly.

@@ -200,6 +200,11 @@ class WorkerTests(unittest.TestCase):
             LlamaTextCliProvider("llama-cli","model.gguf").complete("write",settings={"writer_temperature":0.5})
         self.assertEqual("MODEL_PROVIDER_ARGUMENT_INVALID",raised.exception.error_code);run.assert_not_called()
 
+    def test_writer_grammar_uses_gbnf_character_class_without_invalid_hyphen_escape(self):
+        from workers.ai_worker.constraints import WRITER_GBNF
+        self.assertIn("name-char ::= [A-Za-z'-]",WRITER_GBNF)
+        self.assertNotIn(r"\-]",WRITER_GBNF)
+
     def test_analysis_routes_images_only_to_vision_provider(self):
         class Provider:
             def __init__(self,result):self.result,self.calls=result,[]
@@ -259,6 +264,12 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(ProviderError) as raised:LlamaTextCliProvider("llama-cli","model.gguf").complete("write")
         self.assertEqual("MODEL_PROVIDER_ARGUMENT_INVALID",raised.exception.error_code)
         self.assertIn("sampler",str(raised.exception))
+
+    @patch("workers.ai_worker.provider.subprocess.run")
+    def test_text_provider_classifies_grammar_parse_failure(self,run):
+        run.side_effect=subprocess.CalledProcessError(-6,["llama-cli"],stderr="error parsing grammar: unknown escape; failed to parse grammar")
+        with self.assertRaises(ProviderError) as raised:LlamaTextCliProvider("llama-cli","model.gguf").complete("write")
+        self.assertEqual("MODEL_PROVIDER_ARGUMENT_INVALID",raised.exception.error_code)
 
     def test_writer_validation_matches_backend_name_rules(self):
         base={"album_summary":"Summary","description":"Description","suggested_names":
