@@ -40,6 +40,16 @@ assert.match(source,/\+ New Workspace/);
 assert.match(source,/api\.post\('\/ai-workspaces',\{title\}\)/);
 assert.match(source,/album_analysis/);
 
+assert.equal(
+  page._configurationSnapshot({configuration_snapshot_json:'{"instruction_profile":{"profile_name":"Curator Default"}}'}).instruction_profile.profile_name,
+  'Curator Default',
+);
+assert.equal(
+  page._configurationSnapshot({configuration_snapshot:{instruction_profile:{version:1}}}).instruction_profile.version,
+  1,
+);
+assert.equal(Object.keys(page._configurationSnapshot({configuration_snapshot_json:'not-json'})).length,0);
+
 page._detail={review:{work_item_uuid:'item-1'}};
 page.saveDraft();
 assert.equal(page._draft['item-1'].selected_name,'Golden Forest Morning');
