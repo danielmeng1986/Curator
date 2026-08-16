@@ -12,7 +12,7 @@ class ProviderError(RuntimeError):
         super().__init__(message);self.error_code=error_code
 
 REQUIRED_MTMD_OPTIONS=("--mmproj","--image","--image-max-tokens","--gpu-layers")
-REQUIRED_TEXT_OPTIONS=("--single-turn","--simple-io","--no-display-prompt","--no-show-timings","--json-schema","--gpu-layers")
+REQUIRED_TEXT_OPTIONS=("--single-turn","--simple-io","--no-display-prompt","--no-show-timings","--gpu-layers")
 DIAGNOSTIC_LIMIT=700
 
 def _validate_cli(cli: str,required_options,display_name: str) -> None:
@@ -48,6 +48,8 @@ def _safe_diagnostic(value: str|None,redactions) -> str:
 def _failure_code(diagnostic: str) -> str:
     lowered=diagnostic.casefold()
     if any(value in lowered for value in ("unknown argument","unknown option","unrecognized option","invalid argument")):
+        return "MODEL_PROVIDER_ARGUMENT_INVALID"
+    if any(value in lowered for value in ("failed to initialize samplers","error initializing grammar sampler")):
         return "MODEL_PROVIDER_ARGUMENT_INVALID"
     if any(value in lowered for value in ("mmproj","projector","vision model")):
         return "MODEL_PROVIDER_PROJECTOR_FAILED"
@@ -103,8 +105,8 @@ class LlamaCliProvider:
             "--temp",str(settings.get("temperature",0))]
         if self.mmproj: args += ["--mmproj",self.mmproj]
         if images:
-            for path in images:args += ["--image",str(path)]
-            args += ["--image-max-tokens",str(settings.get("image_max_tokens",384))]
+            args += ["--image",",".join(str(path) for path in images),
+                "--image-max-tokens",str(settings.get("image_max_tokens",384))]
         started=time.monotonic()
         try:
             result=subprocess.run(args,check=True,capture_output=True,text=True,timeout=self.timeout_seconds)
@@ -127,14 +129,13 @@ class LlamaTextCliProvider(LlamaCliProvider):
     """Non-interactive, single-turn Writer provider using standard llama-cli."""
     def __init__(self,cli: str,model: str,*,timeout_seconds: int=900,debug_dir: Path|None=None,stage: str="writer"):
         super().__init__(cli,model,timeout_seconds=timeout_seconds,debug_dir=debug_dir,stage=stage)
-    def complete(self,prompt: str,*,images=(),settings=None,json_schema=None) -> tuple[dict,dict]:
+    def complete(self,prompt: str,*,images=(),settings=None) -> tuple[dict,dict]:
         if images:raise ProviderError("Text model provider does not accept images.",error_code="MODEL_PROVIDER_ARGUMENT_INVALID")
         settings=settings or {};args=[self.cli,"-m",self.model,"-p",prompt,
             "-c",str(settings.get("context_size",4096)),"-t",str(settings.get("threads",1)),
             "-ngl",str(settings.get("gpu_layers",0)),"-n",str(settings.get("max_tokens",512)),
             "--temp",str(settings.get("temperature",0)),"--single-turn","--simple-io",
             "--no-display-prompt","--no-show-timings"]
-        if json_schema:args += ["--json-schema",json.dumps(json_schema,separators=(",",":"),ensure_ascii=True)]
         started=time.monotonic()
         try:
             result=subprocess.run(args,check=True,capture_output=True,text=True,timeout=self.timeout_seconds)
@@ -151,4 +152,11 @@ class LlamaTextCliProvider(LlamaCliProvider):
             raise ProviderError("Text model provider could not start; no Curator result was submitted.",
                 error_code="MODEL_PROVIDER_EXECUTABLE_INVALID") from exc
         self._record_debug(result.stdout,result.stderr,result.returncode,"completed")
-        return parse_json_streams(result.stdout,result.stderr),{"duration_ms":round((time.monotonic()-started)*1000),"provider":"llama_cpp"}
+        try:payload=parse_json_streams(result.stdout,result.stderr)
+        except ProviderError as exc:
+            diagnostic=_safe_diagnostic(f"{result.stderr}\n{result.stdout}",[prompt,self.model])
+            if _failure_code(diagnostic)=="MODEL_PROVIDER_ARGUMENT_INVALID":
+                raise ProviderError("Text model provider failed to initialize its sampler; no Curator result was submitted.",
+                    error_code="MODEL_PROVIDER_ARGUMENT_INVALID") from exc
+            raise
+        return payload,{"duration_ms":round((time.monotonic()-started)*1000),"provider":"llama_cpp"}

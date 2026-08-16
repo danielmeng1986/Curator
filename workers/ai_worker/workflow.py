@@ -14,17 +14,6 @@ WRITER_PROMPT="""Using the following Vision JSON, return one JSON object only wi
 description (string), and suggested_names (exactly six unique names). Every suggested name must contain 2-5
 English words; every word must start with an uppercase letter and contain only letters, apostrophes, or hyphens.
 Never use Photo, Photos, Collection, Session, or Gallery as a word. Vision JSON:\n{vision}"""
-WRITER_JSON_SCHEMA={"type":"object","additionalProperties":False,
-    "required":["album_summary","description","suggested_names"],"properties":{
-        # Keep the generation grammar deliberately structural. llama.cpp expands
-        # large JSON-Schema string bounds into repeated grammar rules and rejects
-        # otherwise valid schemas once that expansion exceeds its sane defaults.
-        # Curator's exact string bounds remain enforced by validate_writer_payload
-        # below and by the Backend before persistence.
-        "album_summary":{"type":"string"},
-        "description":{"type":"string"},
-        "suggested_names":{"type":"array","minItems":6,"maxItems":6,"uniqueItems":True,
-            "items":{"type":"string"}}}}
 FORBIDDEN_NAME_WORDS={"photo","photos","collection","session","gallery"}
 
 def _bounded_array(payload,key,maximum,text_limit):
@@ -103,7 +92,7 @@ class AnalysisWorkflow:
         base=WRITER_PROMPT.format(vision=json.dumps(vision,sort_keys=True))
         prompt=base
         for attempt in range(self.retries+1):
-            try:payload,metrics=self.writer_provider.complete(prompt,settings=settings,json_schema=WRITER_JSON_SCHEMA)
+            try:payload,metrics=self.writer_provider.complete(prompt,settings=settings)
             except ProviderError:
                 if attempt==self.retries:raise
                 self.sleep(2**attempt);continue

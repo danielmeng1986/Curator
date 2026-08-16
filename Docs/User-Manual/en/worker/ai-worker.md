@@ -164,17 +164,17 @@ production work (replace all three paths):
 The Worker checks both executables before asking the Backend for work. Vision
 requires the multimodal image/projector options. Writer requires
 `--single-turn`, `--simple-io`, and bounded-output options so a text-only prompt
-cannot enter an interactive chat loop. Writer output is constrained by a
-structural JSON Schema and locally checked against Curator's field-length and
-six-name rules before submission; invalid model output receives bounded
-corrective retries. Length limits are not expanded into llama.cpp grammar, so
-they cannot exceed its complexity limit, but both Worker and Backend still
+cannot enter an interactive chat loop. The prompt requests Writer JSON, which
+is locally checked against Curator's field-length and six-name rules before
+submission; invalid output receives bounded corrective retries. The supported
+llama.cpp build cannot reliably initialize its JSON grammar sampler, so the
+Worker does not pass `--json-schema`; Worker and Backend validation still
 reject data outside the Curator contract.
 Vision output is also checked locally against the exact v1 fields, people
 range, arrays, confidence, and text limits. Format drift receives bounded
 corrective retries instead of being submitted as an HTTP 400.
-Multiple Evidence images are passed to llama-mtmd in Manifest order as separate
-`--image FILE` arguments, never as one nonexistent comma-separated path.
+Multiple Evidence images are passed in Manifest order as the single
+comma-separated `--image` value required by the supported llama-mtmd build.
 
 For raw model-output diagnosis, explicitly add
 `--model-debug-dir /opt/curator-worker-debug`. The Worker stores per-Work-Item

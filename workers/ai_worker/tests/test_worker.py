@@ -146,8 +146,8 @@ class WorkerTests(unittest.TestCase):
             "inspect",images=[Path("one.jpg"),Path("two.jpg")],settings={"image_max_tokens":256})
         args=run.call_args.args[0]
         self.assertEqual({"scene":"lake"},payload);self.assertEqual("llama_cpp",metrics["provider"])
-        self.assertEqual(2,args.count("--image"))
-        self.assertEqual(["one.jpg","two.jpg"],[args[index+1] for index,value in enumerate(args) if value=="--image"])
+        self.assertEqual(1,args.count("--image"))
+        self.assertEqual("one.jpg,two.jpg",args[args.index("--image")+1])
         self.assertEqual("256",args[args.index("--image-max-tokens")+1])
         self.assertEqual("mmproj.gguf",args[args.index("--mmproj")+1])
         self.assertNotIn("--no-display-prompt",args)
@@ -179,16 +179,16 @@ class WorkerTests(unittest.TestCase):
     @patch("workers.ai_worker.provider.subprocess.run")
     def test_text_provider_is_single_turn_and_non_interactive(self,run):
         run.return_value.stdout='```json\n{"status":"ok"}\n```';run.return_value.stderr=""
-        payload,_=LlamaTextCliProvider("llama-cli","model.gguf").complete("write",settings={"max_tokens":128},json_schema={"type":"object"})
+        payload,_=LlamaTextCliProvider("llama-cli","model.gguf").complete("write",settings={"max_tokens":128})
         args=run.call_args.args[0]
         self.assertEqual({"status":"ok"},payload)
         for option in ("--single-turn","--simple-io","--no-display-prompt","--no-show-timings"):self.assertIn(option,args)
-        self.assertIn("--json-schema",args)
+        self.assertNotIn("--json-schema",args)
         self.assertNotIn("--mmproj",args);self.assertNotIn("--image",args)
 
     @patch("workers.ai_worker.provider.subprocess.run")
     def test_text_preflight_requires_single_turn_options(self,run):
-        run.return_value.stdout="--single-turn --simple-io --no-display-prompt --no-show-timings --json-schema --gpu-layers";run.return_value.stderr=""
+        run.return_value.stdout="--single-turn --simple-io --no-display-prompt --no-show-timings --gpu-layers";run.return_value.stderr=""
         validate_text_cli("llama-cli")
         run.return_value.stdout="--gpu-layers"
         with self.assertRaisesRegex(ProviderError,"missing required options"):validate_text_cli("llama-cli")
@@ -244,16 +244,14 @@ class WorkerTests(unittest.TestCase):
                 return ({"album_summary":"bad","description":"bad","suggested_names":["gallery"]} if len(self.calls)==1 else valid),{"duration_ms":1}
         provider=Provider();payload,_=AnalysisWorkflow(object(),provider,sleep=lambda _:None).writer({"scene":"garden"},{})
         self.assertEqual(valid,payload);self.assertEqual(2,len(provider.calls));self.assertIn("failed validation",provider.calls[1][0])
-        self.assertIn("json_schema",provider.calls[0][1])
+        self.assertNotIn("json_schema",provider.calls[0][1])
 
-    def test_writer_generation_schema_avoids_expensive_string_repetitions(self):
-        from workers.ai_worker.workflow import WRITER_JSON_SCHEMA
-        properties=WRITER_JSON_SCHEMA["properties"]
-        self.assertEqual({"type":"string"},properties["album_summary"])
-        self.assertEqual({"type":"string"},properties["description"])
-        self.assertEqual({"type":"string"},properties["suggested_names"]["items"])
-        self.assertEqual(6,properties["suggested_names"]["minItems"])
-        self.assertEqual(6,properties["suggested_names"]["maxItems"])
+    @patch("workers.ai_worker.provider.subprocess.run")
+    def test_text_provider_detects_zero_exit_sampler_failure(self,run):
+        run.return_value.stdout="Error: Failed to initialize samplers: std::exception";run.return_value.stderr="error initializing grammar sampler";run.return_value.returncode=0
+        with self.assertRaises(ProviderError) as raised:LlamaTextCliProvider("llama-cli","model.gguf").complete("write")
+        self.assertEqual("MODEL_PROVIDER_ARGUMENT_INVALID",raised.exception.error_code)
+        self.assertIn("sampler",str(raised.exception))
 
     def test_writer_validation_matches_backend_name_rules(self):
         base={"album_summary":"Summary","description":"Description","suggested_names":

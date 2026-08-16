@@ -147,14 +147,14 @@ python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /
 
 Worker 在向 Backend 领取任务前会检查两个可执行文件。Vision 必须具备图片/projector 参数；
 Writer 必须具备 `--single-turn`、`--simple-io` 与有界输出参数，确保纯文本 prompt 不会进入
-交互式 chat 循环。Writer 输出会受结构型 JSON Schema 约束，并在提交前按照 Curator 的字段
-长度与六个名称规则进行本地校验；不合格的模型输出会收到有界纠错重试。长度上限不直接写入
-llama.cpp grammar，以避免大范围重复规则超过其复杂度限制，但 Worker 与 Backend 均不会因此
-接受超出 Curator 契约的数据。
+交互式 chat 循环。Writer 会由 prompt 要求输出 JSON，并在提交前按照 Curator 的字段长度与
+六个名称规则进行本地校验；不合格的模型输出会收到有界纠错重试。受支持的 llama.cpp build
+无法稳定初始化 JSON grammar sampler，因此 Worker 不传 `--json-schema`；Worker 与 Backend
+的双重校验仍会拒绝超出 Curator 契约的数据。
 Vision 输出同样会在提交前按照 schema v1 的精确字段、人数范围、数组、置信度和文本上限进行
 本地校验；模型格式发生偏移时，Worker 会先进行有界纠错重试，而不是把无效结果提交成 HTTP 400。
-多张 Evidence 图片会按照 Manifest 顺序分别作为独立的 `--image FILE` 参数传给 llama-mtmd，
-不会被拼接成一个不存在的逗号分隔路径。
+多张 Evidence 图片会按照 Manifest 顺序组成该 llama-mtmd build 要求的单个逗号分隔
+`--image` 值。
 
 需要排查模型原始输出时，可显式添加 `--model-debug-dir /opt/curator-worker-debug`。Worker 会按
 Work Item 保存 Vision/Writer 的 stdout、stderr 与不含命令参数的 metadata；目录权限为 `0700`，

@@ -34,8 +34,8 @@ private Evidence paths.
 - Keep bounded multimodal arguments for the model, projector, context,
   threads, GPU layers, output tokens, temperature, images, and image-token
   budget.
-- Pass each Evidence image as its own `--image FILE` pair; never encode
-  multiple filesystem paths as one comma-separated filename.
+- Pass multi-image Evidence as the comma-separated value required by the
+  supported llama-mtmd build, preserving deterministic Manifest order.
 - Preserve bounded JSON-object extraction when llama.cpp emits ordinary
   informational output around the model response.
 - Capture process exit status and a bounded, sanitized stderr diagnostic for
@@ -46,14 +46,12 @@ private Evidence paths.
   stdout, stderr, and non-secret process metadata under private permissions.
 - Categorize executable/argument, timeout, model-load, projector, GPU/backend,
   context/token-budget, and invalid-output failures where reliably possible.
-- Constrain Writer output with a JSON Schema, validate the complete Backend
-  Writer contract locally, and retry with bounded corrective feedback before
-  any invalid payload can be submitted.
+- Prompt Writer for JSON, validate the complete Backend Writer contract
+  locally, and retry with bounded corrective feedback before any invalid
+  payload can be submitted. Do not enable the supported build's unstable JSON
+  grammar sampler.
 - Validate the complete Vision v1 contract locally and retry malformed model
   output with bounded corrective feedback before Backend submission.
-- Keep the llama.cpp generation Schema structural rather than encoding large
-  string-length repetitions that exceed upstream grammar complexity limits;
-  enforce the complete bounds in the local validator and Backend instead.
 - Decode safe Backend error envelopes so the operator sees the application
   error code and message instead of an unexplained HTTP 400 or 409.
 - Add a startup or smoke-test compatibility check that fails before claiming
@@ -98,13 +96,12 @@ private Evidence paths.
    retaining HTTP status, application code, and transient classification.
 8. Extend the bilingual manual with Qwen2.5-VL sizing guidance, while clearly
    identifying it as model-family guidance rather than a global Curator rule.
-9. Keep Writer grammar generation compatible with llama.cpp sane-default
-   limits by testing that large Curator string bounds are not expanded into the
-   provider-facing JSON Schema.
+9. Keep Writer compatible with the supported llama.cpp build by avoiding its
+   failing JSON grammar sampler and relying on local plus Backend validation.
 10. Mirror the Vision v1 exact fields, people range, bounded arrays, confidence,
     and text limits locally so model format drift cannot become an HTTP 400.
-11. Verify that multi-image Albums produce one llama-mtmd `--image` option per
-    Evidence file in deterministic Manifest order.
+11. Verify that multi-image Albums produce the supported comma-separated
+    llama-mtmd `--image` value in deterministic Manifest order.
 12. Add opt-in per-Work-Item Vision/Writer diagnostic artifacts without
     uploading raw model output, prompts, command arguments, or Evidence bytes.
 
@@ -116,8 +113,8 @@ private Evidence paths.
   response instead of waiting in an interactive chat loop.
 - A one-image Qwen2.5-VL smoke run can load the configured main model and
   projector and return a JSON object through the Worker provider.
-- Multi-image Album Evidence is supplied as repeated `--image FILE` arguments,
-  preserving Manifest order without constructing an invalid combined path.
+- Multi-image Album Evidence is supplied as the supported comma-separated
+  `--image` value while preserving Manifest order.
 - A non-zero llama.cpp exit tells the local operator whether the failure was
   caused by argument parsing, model/projector loading, GPU initialization,
   timeout, context pressure, or an unknown provider error when that distinction
@@ -134,9 +131,8 @@ private Evidence paths.
 - Invalid Writer JSON is rejected locally and retried; Backend validation
   failures identify their application code and message rather than only the
   numeric HTTP status.
-- Writer grammar compilation succeeds without expanding the 500/2000-character
-  Curator bounds; those bounds remain mandatory at both local and Backend
-  validation boundaries.
+- Writer output remains bounded by local and Backend validation without using
+  the supported llama.cpp build's failing JSON grammar sampler.
 - Editing an AI Model Configuration affects only future Dispatch snapshots;
   existing Work Items remain immutable and require deliberate Group closure and
   redispatch when sizing changes.
