@@ -47,7 +47,7 @@ class AlbumRemarkMigrationTests(unittest.TestCase):
             self.assertEqual((7, "album-7", "Existing Album", "A/Existing", 42, None), row)
             self.assertIn(MIGRATION_ID, versions)
             self.assertEqual("0000_base_catalog", versions[0])
-            self.assertEqual("0018_normalize_ai_profile_dataset", versions[-1])
+            self.assertEqual("0019_sensual_editorial_writer_profile", versions[-1])
 
     def test_rerun_is_a_no_op_without_a_second_backup(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -245,7 +245,7 @@ class CanonicalOrderedMigrationTests(unittest.TestCase):
                 self.assertEqual([], conn.execute("PRAGMA foreign_key_check").fetchall())
                 self.assertEqual("ok", conn.execute("PRAGMA integrity_check").fetchone()[0])
             self.assertTrue(expected <= tables)
-            self.assertEqual(19, len(versions))
+            self.assertEqual(20, len(versions))
             self.assertEqual(tuple(versions), result.applied_migrations)
             self.assertTrue(result.backup and result.backup.is_file())
 

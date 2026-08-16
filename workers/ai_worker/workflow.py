@@ -14,8 +14,12 @@ fields must contain strings. Do not identify people."""
 WRITER_PROMPT="""Using the following Vision JSON, return one JSON object only with album_summary (string),
 description (string), and suggested_names (exactly six unique names): exactly two names of two English words,
 exactly two names of three English words, and exactly two names of four English words. Every word must start
-with an uppercase letter and contain only letters, apostrophes, or hyphens.
-Never use Photo, Photos, Collection, Session, or Gallery as a word. Vision JSON:\n{vision}"""
+with an uppercase letter and contain only letters, apostrophes, or hyphens. Write sensual, provocative,
+imaginative editorial titles that create intrigue and fantasy through atmosphere, tension, invitation, mood,
+metaphor, or elegant wordplay. Avoid neutral descriptions, production labels, explicit anatomy, and literal
+combinations of clothing, pose, room, media-category, or shooting terms. Avoid title words such as Adult,
+Content, Shoot, Shoots, Posing, Displaying, Genital, Area, Interior, Photo, Photos, Collection, Session, or
+Gallery. Do not describe explicit sexual acts or identify a person. Vision JSON:\n{vision}"""
 FORBIDDEN_NAME_WORDS={"photo","photos","collection","session","gallery"}
 
 def _bounded_array(payload,key,maximum,text_limit):

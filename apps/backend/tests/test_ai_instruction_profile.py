@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from apps.ai_instruction_profile import compose, content_hash, default_content, snapshot
+from apps.ai_instruction_profile import DEFAULT_VERSION_UUID, compose, content_hash, default_content, snapshot
 from apps.backend import repositories as repo
 from apps.backend import services as svc
 
@@ -22,6 +22,9 @@ class AIInstructionProfileTests(unittest.TestCase):
         version=self.repo.get_version();frozen=snapshot(version)
         first=compose(frozen,"writer",vision={"scene":"indoor"});second=compose(frozen,"writer",vision={"scene":"indoor"})
         self.assertEqual(first,second);self.assertIn("<VISION_DATA>",first);self.assertEqual(content_hash(frozen),frozen["content_hash"])
+        self.assertEqual(DEFAULT_VERSION_UUID,version["version_uuid"]);self.assertEqual(2,version["version"])
+        self.assertIn("sensual, provocative, imaginative editorial style",first)
+        self.assertIn("Do not simply combine clothing, anatomy, pose, room",first)
         frozen["global_instruction"]="tampered"
         with self.assertRaisesRegex(ValueError,"hash"):compose(frozen,"vision")
 

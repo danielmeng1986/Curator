@@ -152,8 +152,8 @@ def _apply_0017(conn: sqlite3.Connection, source: Path) -> None:
     _apply_sql(conn, source)
     if "instruction_profile_version_uuid" not in _columns(conn,"ai_model_configuration"):
         conn.execute("ALTER TABLE ai_model_configuration ADD COLUMN instruction_profile_version_uuid TEXT")
-    from apps.ai_instruction_profile import DEFAULT_PROFILE_UUID, DEFAULT_VERSION_UUID, content_hash, default_content
-    now=datetime.now(timezone.utc).isoformat();content=default_content()
+    from apps.ai_instruction_profile import DEFAULT_PROFILE_UUID, LEGACY_DEFAULT_VERSION_UUID, content_hash, legacy_default_content
+    now=datetime.now(timezone.utc).isoformat();content=legacy_default_content()
     conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile
         (uuid,name,worker_kind,dataset_type,lifecycle_state,is_default,version,created_at,updated_at)
         VALUES (?,?,?,?,'Published',1,1,?,?)""",
@@ -162,13 +162,34 @@ def _apply_0017(conn: sqlite3.Connection, source: Path) -> None:
         (uuid,profile_uuid,version,global_instruction,dataset_instruction,vision_prompt_template,
          writer_prompt_template,output_language,naming_policy_json,vision_schema_version,writer_schema_version,
          validator_policy_version,instruction_transport,composition_version,content_hash,created_at)
-        VALUES (?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(DEFAULT_VERSION_UUID,DEFAULT_PROFILE_UUID,
+        VALUES (?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(LEGACY_DEFAULT_VERSION_UUID,DEFAULT_PROFILE_UUID,
         content["global_instruction"],content["dataset_instruction"],content["vision_prompt_template"],
         content["writer_prompt_template"],content["output_language"],json.dumps(content["naming_policy"],sort_keys=True),
         content["vision_schema_version"],content["writer_schema_version"],content["validator_policy_version"],
         content["instruction_transport"],content["composition_version"],content_hash(content),now))
     conn.execute("""UPDATE ai_model_configuration SET instruction_profile_version_uuid=?
-        WHERE instruction_profile_version_uuid IS NULL""",(DEFAULT_VERSION_UUID,))
+        WHERE instruction_profile_version_uuid IS NULL""",(LEGACY_DEFAULT_VERSION_UUID,))
+
+
+def _apply_0019(conn: sqlite3.Connection, source: Path) -> None:
+    """Publish the sensual editorial Writer prompt as immutable Profile v2."""
+    _apply_sql(conn, source)
+    from apps.ai_instruction_profile import DEFAULT_PROFILE_UUID, DEFAULT_VERSION_UUID, content_hash, default_content
+    now=datetime.now(timezone.utc).isoformat();content=default_content()
+    conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile_version
+        (uuid,profile_uuid,version,global_instruction,dataset_instruction,vision_prompt_template,
+         writer_prompt_template,output_language,naming_policy_json,vision_schema_version,writer_schema_version,
+         validator_policy_version,instruction_transport,composition_version,content_hash,created_at)
+        VALUES (?,?,2,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(DEFAULT_VERSION_UUID,DEFAULT_PROFILE_UUID,
+        content["global_instruction"],content["dataset_instruction"],content["vision_prompt_template"],
+        content["writer_prompt_template"],content["output_language"],json.dumps(content["naming_policy"],sort_keys=True),
+        content["vision_schema_version"],content["writer_schema_version"],content["validator_policy_version"],
+        content["instruction_transport"],content["composition_version"],content_hash(content),now))
+    conn.execute("""UPDATE ai_model_configuration SET instruction_profile_version_uuid=?,version=version+1,updated_at=?
+        WHERE instruction_profile_version_uuid IN (?,?)""",
+        (DEFAULT_VERSION_UUID,now,DEFAULT_VERSION_UUID,"00000000-0000-4000-8000-000000000101"))
+    conn.execute("""UPDATE ai_instruction_profile SET lifecycle_state='Published',is_default=1,updated_at=?
+        WHERE uuid=?""",(now,DEFAULT_PROFILE_UUID))
 
 
 def _recorded(conn: sqlite3.Connection) -> set[str]:
@@ -218,6 +239,8 @@ def migrate(
                     _apply_0016(conn)
                 elif migration_id == "0017_ai_instruction_profile":
                     _apply_0017(conn, source)
+                elif migration_id == "0019_sensual_editorial_writer_profile":
+                    _apply_0019(conn, source)
                 else:
                     _apply_sql(conn, source)
                 _verify_connection(conn)
