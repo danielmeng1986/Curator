@@ -2614,7 +2614,7 @@ class WorkDispatchRepository:
             self._ensure_schema(conn); AIReviewRepository._ensure_schema(conn); AIAlbumNamePromotionRepository._ensure_schema(conn)
             group=conn.execute("SELECT * FROM work_dispatch_group WHERE uuid=?",(group_uuid,)).fetchone()
             if not group: return None
-            rows=conn.execute("""SELECT gi.item_uuid,i.run_state,i.attempt_count,i.configuration_snapshot_json,
+            rows=conn.execute("""SELECT gi.item_uuid,i.run_state,i.attempt_count,i.version,i.configuration_snapshot_json,
                 i.created_at,i.updated_at,i.lease_expires_at,i.last_error,r.state review_state,
                 rs.state result_state,rw.successor_work_item_uuid,
                 p.outcome promotion_outcome FROM work_dispatch_group_item gi

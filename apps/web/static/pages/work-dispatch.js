@@ -36,11 +36,23 @@ const WorkDispatchPage = {
   _itemRows(items, albumTitle = '') {
     return (items || []).map(item => {
       const config=item.configuration_snapshot || {};
+      const retry=item.run_state === 'Failed'
+        ? `<button class="btn btn-primary" onclick="WorkDispatchPage.retryItem('${esc(item.item_uuid)}',${item.version},this)">Retry</button>`
+        : '';
       return `<tr><td>${esc(albumTitle || '—')}</td><td><strong>${esc(config.name || 'Unknown configuration')}</strong><div class="table-secondary"><code>${esc(config.model_file || '—')}</code></div></td>
         <td><span class="chip ${item.run_state === 'Failed' ? 'chip-error' : item.run_state === 'Completed' ? 'chip-ok' : 'chip-warn'}">${esc(this._stage(item))}</span><div class="table-secondary">Run ${esc(item.run_state)}${item.result_state ? ` · Result ${esc(item.result_state)}` : ''}</div></td>
         <td>${item.attempt_count}</td><td>${item.updated_at ? esc(new Date(item.updated_at).toLocaleString()) : '—'}${item.lease_expires_at ? `<div class="table-secondary">Lease until ${esc(new Date(item.lease_expires_at).toLocaleString())}</div>` : ''}</td>
-        <td>${item.last_error ? `<span class="text-error">${esc(item.last_error)}</span>` : '—'}</td><td><a class="btn btn-secondary" href="#/ai-work-items/${esc(item.item_uuid)}/review">Open</a></td></tr>`;
+        <td>${item.last_error ? `<span class="text-error">${esc(item.last_error)}</span>` : '—'}</td><td><div class="detail-actions"><a class="btn btn-secondary" href="#/ai-work-items/${esc(item.item_uuid)}/review">Open</a>${retry}</div></td></tr>`;
     }).join('');
+  },
+
+  async retryItem(uuid,version,trigger) {
+    const result=await ui.runAction(`work-item-retry-${uuid}`,()=>api.post(`/ai-work-items/${encodeURIComponent(uuid)}/retry`,{expected_version:version}),{trigger,context:'retry the failed Work Item'});
+    if(!result.ok)return;
+    toast('Work Item returned to the Worker queue.');
+    const groupMatch=window.location.hash.match(/^#\/work-dispatch\/groups\/([^/?]+)/);
+    if(groupMatch)await this.renderGroup({uuid:decodeURIComponent(groupMatch[1])});
+    else await this.loadView();
   },
 
   async render({ view = 'available' } = {}) {

@@ -38,6 +38,8 @@ assert.match(pageSource, /Preparing evidence \/ Vision analysis/);
 assert.match(pageSource, /Writer analysis/);
 assert.match(pageSource, /Waiting for Worker/);
 assert.match(pageSource, /Refresh progress/);
+assert.match(pageSource, />Retry<\/button>/);
+assert.match(pageSource, /\/ai-work-items\/\$\{encodeURIComponent\(uuid\)\}\/retry/);
 assert.match(pageSource, /No Open AI Workspace exists/);
 assert.match(pageSource, /Create and select an Open AI Workspace/);
 
@@ -48,6 +50,10 @@ assert.match(configHtml,/qwen\.gguf/);assert.match(configHtml,/context 4096/);as
 assert.equal(page._stage({run_state:'Pending'}),'Waiting for Worker');
 assert.equal(page._stage({run_state:'Claimed',result_state:'AwaitingWriter'}),'Writer analysis');
 assert.equal(page._stage({run_state:'Completed',review_state:'ReadyForReview'}),'ReadyForReview');
+const failedRows=page._itemRows([{item_uuid:'item-1',version:3,run_state:'Failed',attempt_count:1,configuration_snapshot:{name:'Balanced',model_file:'qwen.gguf'}}],'Fixture Album');
+assert.match(failedRows,/>Retry<\/button>/);assert.match(failedRows,/retryItem\('item-1',3,this\)/);
+const pendingRows=page._itemRows([{item_uuid:'item-2',version:1,run_state:'Pending',attempt_count:0,configuration_snapshot:{name:'Balanced',model_file:'qwen.gguf'}}],'Fixture Album');
+assert.doesNotMatch(pendingRows,/>Retry<\/button>/);
 
 elements.set('dispatchSelectionCount', { textContent:'' });
 elements.set('dispatchPreviewBtn', { disabled:true });

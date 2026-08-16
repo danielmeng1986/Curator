@@ -957,6 +957,7 @@ class TestVersionedApiAuthorization(_TestServerBase):
             self.assertEqual(1,active_groups["meta"]["pagination"]["total"])
             self.assertEqual(group_uuid,active_groups["data"][0]["uuid"])
             self.assertIn("allowed_actions",active_groups["data"][0])
+            self.assertIsInstance(active_groups["data"][0]["items"][0]["version"],int)
             status, overview = self._get(f"/api/v1/ai-workspaces/{workspace_uuid}/overview",admin)
             self.assertEqual(200,status)
             self.assertEqual(1,overview["data"]["overview"]["summary"]["total_groups"])
