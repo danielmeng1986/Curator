@@ -156,6 +156,11 @@ Vision 输出同样会在提交前按照 schema v1 的精确字段、人数范�
 多张 Evidence 图片会按照 Manifest 顺序分别作为独立的 `--image FILE` 参数传给 llama-mtmd，
 不会被拼接成一个不存在的逗号分隔路径。
 
+需要排查模型原始输出时，可显式添加 `--model-debug-dir /opt/curator-worker-debug`。Worker 会按
+Work Item 保存 Vision/Writer 的 stdout、stderr 与不含命令参数的 metadata；目录权限为 `0700`，
+文件为 `0600`。该选项默认关闭，内容不会上传 Backend，也不会复制 Evidence，但原始输出可能
+包含对私人图片的描述，测试完成后应由操作者删除。JSON 解析会先检查 stdout，再检查 stderr。
+
 仅当所选 llama.cpp/模型组合不要求独立 projector 时才省略 `--mmproj`。正常模式会用最长
 30 秒的 outbound HTTP 请求等待 `album_name_analysis` 任务；Backend Dispatch 提交后会立即
 唤醒兼容 Worker，不需要重新运行命令，也不会在 WSL 开放监听端口。正常超时会安静地开始

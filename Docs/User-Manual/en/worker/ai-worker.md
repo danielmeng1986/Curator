@@ -176,6 +176,13 @@ corrective retries instead of being submitted as an HTTP 400.
 Multiple Evidence images are passed to llama-mtmd in Manifest order as separate
 `--image FILE` arguments, never as one nonexistent comma-separated path.
 
+For raw model-output diagnosis, explicitly add
+`--model-debug-dir /opt/curator-worker-debug`. The Worker stores per-Work-Item
+Vision/Writer stdout, stderr, and argument-free metadata using `0700`
+directories and `0600` files. This is off by default, never uploaded, and does
+not copy Evidence, but raw output can describe private images and should be
+deleted by the operator after testing. JSON parsing checks stdout, then stderr.
+
 Omit `--mmproj` only when the chosen llama.cpp/model combination does not
 require a separate projector. Normal mode waits on outbound HTTP requests of at
 most 30 seconds for `album_name_analysis` work. A committed Dispatch wakes a

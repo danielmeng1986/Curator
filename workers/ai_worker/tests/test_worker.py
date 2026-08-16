@@ -9,7 +9,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from workers.ai_worker.client import CuratorClient,EnrollmentClient,CuratorApiError
 from workers.ai_worker.workflow import AnalysisWorkflow,validate_writer_payload
-from workers.ai_worker.provider import LlamaCliProvider,LlamaTextCliProvider,ProviderError,parse_json_object,validate_mtmd_cli,validate_text_cli
+from workers.ai_worker.provider import LlamaCliProvider,LlamaTextCliProvider,ProviderError,parse_json_object,parse_json_streams,validate_mtmd_cli,validate_text_cli
 from workers.ai_worker.runtime import WorkerRuntime
 from workers.ai_worker.cli import parser
 from workers.ai_worker import config
@@ -23,6 +23,7 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(SystemExit):parser().parse_args(["run","--llama-cli","llama","--model-root","models"])
         args=parser().parse_args(["run","--worker-kind","album_name_analysis","--llama-cli","llama-mtmd-cli","--text-cli","llama-cli","--model-root","models","--once"])
         self.assertEqual("album_name_analysis",args.worker_kind);self.assertTrue(args.once)
+        self.assertIsNone(args.model_debug_dir)
 
     def test_result_is_suggestion_only_after_retry(self):
         result=AnalysisWorkflow(FakeProvider(1), sleep=lambda _: None).analyze("x")
@@ -121,6 +122,22 @@ class WorkerTests(unittest.TestCase):
 
     def test_json_extraction_ignores_provider_noise(self):
         self.assertEqual({"scene":"lake"},parse_json_object("timing log\n{\"scene\":\"lake\"}\nmore"))
+
+    def test_json_extraction_checks_stderr_after_stdout(self):
+        self.assertEqual({"scene":"lake"},parse_json_streams("ordinary stdout","log\n{\"scene\":\"lake\"}"))
+
+    @patch("workers.ai_worker.provider.subprocess.run")
+    def test_opt_in_debug_log_records_both_streams_with_private_permissions(self,run):
+        run.return_value.stdout="not json";run.return_value.stderr='log\n{"scene":"lake"}' ;run.return_value.returncode=0
+        with tempfile.TemporaryDirectory() as root:
+            debug=Path(root)/"item-1"
+            payload,_=LlamaCliProvider("llama-mtmd-cli","model.gguf",debug_dir=debug).complete("inspect")
+            self.assertEqual({"scene":"lake"},payload)
+            files=list(debug.iterdir());self.assertEqual(3,len(files))
+            self.assertEqual(0,debug.stat().st_mode & 0o077)
+            self.assertTrue(all(path.stat().st_mode & 0o077==0 for path in files))
+            self.assertEqual("not json",next(debug.glob("*.stdout.txt")).read_text())
+            self.assertIn('{"scene":"lake"}',next(debug.glob("*.stderr.txt")).read_text())
 
     @patch("workers.ai_worker.provider.subprocess.run")
     def test_llama_provider_passes_bounded_multimodal_configuration(self,run):

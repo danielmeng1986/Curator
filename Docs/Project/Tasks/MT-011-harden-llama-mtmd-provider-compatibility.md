@@ -40,6 +40,10 @@ private Evidence paths.
   informational output around the model response.
 - Capture process exit status and a bounded, sanitized stderr diagnostic for
   the local operator and the existing Work Item failure record.
+- Parse generated JSON from stdout first and stderr second for compatibility
+  with llama.cpp builds that select different output streams.
+- Provide an explicit, default-off local debug directory that records raw
+  stdout, stderr, and non-secret process metadata under private permissions.
 - Categorize executable/argument, timeout, model-load, projector, GPU/backend,
   context/token-budget, and invalid-output failures where reliably possible.
 - Constrain Writer output with a JSON Schema, validate the complete Backend
@@ -101,6 +105,8 @@ private Evidence paths.
     and text limits locally so model format drift cannot become an HTTP 400.
 11. Verify that multi-image Albums produce one llama-mtmd `--image` option per
     Evidence file in deterministic Manifest order.
+12. Add opt-in per-Work-Item Vision/Writer diagnostic artifacts without
+    uploading raw model output, prompts, command arguments, or Evidence bytes.
 
 ## Acceptance Criteria
 
@@ -118,6 +124,9 @@ private Evidence paths.
   is present in safe stderr.
 - Diagnostics are bounded to the Backend error-message limit and contain no
   Device Token, prompt body, private Evidence path, or retained Evidence bytes.
+- Raw output is written only when `--model-debug-dir` is explicit, remains on
+  the Worker host with `0700` directories and `0600` files, and is never sent
+  to Backend failure records.
 - Provider failure never submits a partial Vision or Writer result and still
   truthfully ends the owned attempt as Failed.
 - Invalid Vision JSON is rejected and retried locally before any result reaches

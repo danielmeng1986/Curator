@@ -28,6 +28,8 @@ def parser():
     run.add_argument("--text-cli",required=True,help="Path to llama-cli for single-turn Writer output")
     run.add_argument("--model-root",required=True,type=Path)
     run.add_argument("--mmproj",type=Path);run.add_argument("--once",action="store_true")
+    run.add_argument("--model-debug-dir",type=Path,
+        help="Opt-in private directory for raw llama.cpp stdout/stderr diagnostics")
     run.add_argument("--wait-seconds",type=int,default=30);run.add_argument("--lease-seconds",type=int,default=300)
     return root
 
@@ -65,6 +67,9 @@ def run(args):
     root=args.model_root.expanduser().resolve()
     if not root.is_dir():raise ValueError("Model root was not found.")
     if args.mmproj and not args.mmproj.expanduser().is_file():raise ValueError("Multimodal projector was not found.")
+    debug_root=args.model_debug_dir.expanduser().resolve() if args.model_debug_dir else None
+    if debug_root:
+        debug_root.mkdir(parents=True,exist_ok=True);debug_root.chmod(0o700)
     validate_mtmd_cli(cli)
     validate_text_cli(text_cli)
     client=CuratorClient(state["backend_url"],state["token"])
@@ -90,8 +95,13 @@ def run(args):
                 if not model.is_file():
                     client.fail_work(claim["uuid"],"WORKER_CONFIGURATION_INVALID",f"Configured model file was not found: {snapshot['model_file']}")
                     raise ValueError(f"Configured model file was not found: {snapshot['model_file']}")
-                provider=LlamaCliProvider(cli,str(model),mmproj=str(args.mmproj) if args.mmproj else None)
-                writer_provider=LlamaTextCliProvider(text_cli,str(model))
+                debug_dir=(debug_root/claim["uuid"]).resolve() if debug_root else None
+                if debug_dir:
+                    try:debug_dir.relative_to(debug_root)
+                    except ValueError:raise ValueError("Work Item debug directory escapes model debug root.")
+                provider=LlamaCliProvider(cli,str(model),mmproj=str(args.mmproj) if args.mmproj else None,
+                    debug_dir=debug_dir,stage="vision")
+                writer_provider=LlamaTextCliProvider(text_cli,str(model),debug_dir=debug_dir,stage="writer")
                 WorkerRuntime(client,WORKER_KINDS[args.worker_kind](provider,writer_provider),worker_kind=args.worker_kind,
                     lease_seconds=args.lease_seconds).run_once(claim)
             if args.once:return 0
