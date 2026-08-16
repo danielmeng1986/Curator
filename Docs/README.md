@@ -28,6 +28,7 @@ recorded only as a product Memo.
 | Vision/concepts | [01-Vision.md](01-Vision.md), [04-Data-Model.md](04-Data-Model.md), [05-AI.md](05-AI.md) | Product intent; check lifecycle labels before treating concepts as current |
 | Backend | [Backend Architecture](Backend/Backend-Architecture.md), [Specifications](Backend/Specifications/README.md), [Supported Surface](Backend/Supported-Backend-Surface.md) | Current boundaries and approved behavior |
 | Backend delivery | [Backend Tasks](Backend/Tasks/README.md), [Testing Strategy](Backend/Testing-Strategy.md), [Readiness Matrix](Backend/Workflow-Readiness-Matrix.md) | Implementation scope and evidence |
+| AI model control | [AI Control](AI-Control/README.md), [AIC Tasks](AI-Control/README.md#task-index) | Versioned instructions, prompt composition, provider transport, validation, evaluation, and run reproducibility |
 | Database | [Database Model](Database/Curator_Database_Model.md), [Schema Source](Database/Schema-Source-of-Truth.md), [Schema Catalog](Database/Schema-Catalog.md) | Physical persistence navigation and authority |
 | Web UI | [UI documentation](UI/README.md), [UI Specification](UI/Specification.md), [UI Matrix](UI/Workflow-Readiness-Matrix.md), [UI Tasks](UI/Tasks/README.md) | apps.web design characteristics, workflow behavior, recovery, and browser acceptance |
 | Runtime/project | [Runtime Layout](Project/Runtime-Layout.md), [Project Tasks](Project/Tasks/README.md) | Source/runtime boundaries and MT work |

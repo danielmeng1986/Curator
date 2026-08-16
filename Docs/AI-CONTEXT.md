@@ -82,6 +82,7 @@ owning task. Do not silently choose one and rewrite the other.
 | Web UI | Governance → [UI documentation](UI/README.md) → relevant feature/matrix → UI task → browser evidence |
 | Database/schema | Governance → [Schema Source](Database/Schema-Source-of-Truth.md) → [Schema Catalog](Database/Schema-Catalog.md) → relevant [diagram](Database/Curator_Database_Model.md) and persistence map → DBDOC/BT task |
 | AI Worker/Workspace | Backend Architecture → Work Dispatch Specification → AI Workspace acceptance fixture → AI diagram/persistence map → BT/UI task |
+| AI model behavior/control | Governance → [AI Control](AI-Control/README.md) → owning AIC task → affected Backend/Worker/UI contracts and evaluation evidence |
 | Runtime/repository migration | [Runtime Layout](Project/Runtime-Layout.md) → Project task index → owning MT task |
 | Documentation maintenance | Governance → [Docs task index](Tasks/README.md) → owning DOC/DBDOC task |
 | Future native product discussion | [macOS Memo](Project/macOS-Native-Curator-Memo.md); treat as non-binding Memo |
@@ -90,6 +91,8 @@ owning task. Do not silently choose one and rewrite the other.
 
 - `BT-*`: Backend behavior, API, persistence implementation, safety, and workflows.
 - `UI-*`: apps.web behavior and browser acceptance.
+- `AIC-*`: cross-cutting AI instructions, prompts, provider transport, validation,
+  evaluation, and immutable run reproducibility.
 - `MT-*`: cross-project runtime/repository migrations.
 - `DOC-*`: documentation governance, navigation, architecture, and concepts.
 - `DBDOC-*`: database catalog, diagrams, persistence documentation, and drift checks.
