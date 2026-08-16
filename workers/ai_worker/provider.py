@@ -10,7 +10,7 @@ class ProviderError(RuntimeError):
         super().__init__(message);self.error_code=error_code
 
 REQUIRED_MTMD_OPTIONS=("--mmproj","--image","--image-max-tokens","--gpu-layers")
-REQUIRED_TEXT_OPTIONS=("--single-turn","--simple-io","--no-display-prompt","--no-show-timings","--gpu-layers")
+REQUIRED_TEXT_OPTIONS=("--single-turn","--simple-io","--no-display-prompt","--no-show-timings","--json-schema","--gpu-layers")
 DIAGNOSTIC_LIMIT=700
 
 def _validate_cli(cli: str,required_options,display_name: str) -> None:
@@ -98,13 +98,14 @@ class LlamaTextCliProvider(LlamaCliProvider):
     """Non-interactive, single-turn Writer provider using standard llama-cli."""
     def __init__(self,cli: str,model: str,*,timeout_seconds: int=900):
         super().__init__(cli,model,timeout_seconds=timeout_seconds)
-    def complete(self,prompt: str,*,images=(),settings=None) -> tuple[dict,dict]:
+    def complete(self,prompt: str,*,images=(),settings=None,json_schema=None) -> tuple[dict,dict]:
         if images:raise ProviderError("Text model provider does not accept images.",error_code="MODEL_PROVIDER_ARGUMENT_INVALID")
         settings=settings or {};args=[self.cli,"-m",self.model,"-p",prompt,
             "-c",str(settings.get("context_size",4096)),"-t",str(settings.get("threads",1)),
             "-ngl",str(settings.get("gpu_layers",0)),"-n",str(settings.get("max_tokens",512)),
             "--temp",str(settings.get("temperature",0)),"--single-turn","--simple-io",
             "--no-display-prompt","--no-show-timings"]
+        if json_schema:args += ["--json-schema",json.dumps(json_schema,separators=(",",":"),ensure_ascii=True)]
         started=time.monotonic()
         try:
             result=subprocess.run(args,check=True,capture_output=True,text=True,timeout=self.timeout_seconds)

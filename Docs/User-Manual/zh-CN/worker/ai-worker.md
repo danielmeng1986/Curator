@@ -147,7 +147,8 @@ python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /
 
 Worker 在向 Backend 领取任务前会检查两个可执行文件。Vision 必须具备图片/projector 参数；
 Writer 必须具备 `--single-turn`、`--simple-io` 与有界输出参数，确保纯文本 prompt 不会进入
-交互式 chat 循环。
+交互式 chat 循环。Writer 输出会受 JSON Schema 约束，并在提交前按照 Curator 的六个名称
+规则进行本地校验；不合格的模型输出会收到有界纠错重试。
 
 仅当所选 llama.cpp/模型组合不要求独立 projector 时才省略 `--mmproj`。正常模式会用最长
 30 秒的 outbound HTTP 请求等待 `album_name_analysis` 任务；Backend Dispatch 提交后会立即
@@ -194,6 +195,7 @@ Admin policy 让 item 可重试。
 | `403` | 确认专用 Worker 设备已按所需 scopes 批准为 Writer；不要提升为 Admin。 |
 | 没有领取 Work Item | 确认进程使用 `--worker-kind album_name_analysis`，Admin 已派发相同 Worker kind 的 Album 与配置；队列为空时 `--once` 会正常退出。 |
 | 模型/provider 失败 | 查看 Worker 输出与 Work Item 中限长、脱敏后的 llama.cpp 诊断；核对参数、模型/mmproj、GPU、context 与 image token。保持 Review/Promotion 不变。 |
+| Backend 拒绝请求 | Worker 会显示 HTTP 状态以及 Backend `error.code` 和安全 message；按应用错误处理，不要仅凭 400/409 猜测。 |
 
 <!-- manual-section: security -->
 ## 10. 安全与数据边界

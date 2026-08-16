@@ -1,12 +1,14 @@
 import unittest
 import json
 import hashlib
+import io
 import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
-from workers.ai_worker.client import CuratorClient,EnrollmentClient
-from workers.ai_worker.workflow import AnalysisWorkflow
+from urllib.error import HTTPError
+from workers.ai_worker.client import CuratorClient,EnrollmentClient,CuratorApiError
+from workers.ai_worker.workflow import AnalysisWorkflow,validate_writer_payload
 from workers.ai_worker.provider import LlamaCliProvider,LlamaTextCliProvider,ProviderError,parse_json_object,validate_mtmd_cli,validate_text_cli
 from workers.ai_worker.runtime import WorkerRuntime
 from workers.ai_worker.cli import parser
@@ -40,6 +42,13 @@ class WorkerTests(unittest.TestCase):
         self.assertTrue(all(request.headers["Authorization"] == "Bearer writer-token" for request in requests))
         self.assertEqual({"worker_kinds":["album_name_analysis"],"lease_seconds":120,"wait_seconds":30},json.loads(requests[0].data))
         self.assertEqual("MODEL_TIMEOUT", json.loads(requests[2].data)["error_code"])
+
+    def test_api_client_reports_backend_error_code_and_message(self):
+        body=b'{"error":{"code":"REQUEST_INVALID","message":"suggested_names must contain exactly six unique names."}}'
+        def opener(request,timeout):raise HTTPError(request.full_url,400,"Bad Request",{},io.BytesIO(body))
+        with self.assertRaises(CuratorApiError) as raised:CuratorClient("http://curator","writer-token",opener=opener).submit_writer("item-1",{})
+        self.assertEqual(400,raised.exception.status);self.assertEqual("REQUEST_INVALID",raised.exception.code)
+        self.assertIn("suggested_names must contain",str(raised.exception));self.assertIn("HTTP 400",str(raised.exception))
 
     def test_worker_downloads_evidence_by_opaque_identity_only(self):
         requests = []
@@ -152,15 +161,16 @@ class WorkerTests(unittest.TestCase):
     @patch("workers.ai_worker.provider.subprocess.run")
     def test_text_provider_is_single_turn_and_non_interactive(self,run):
         run.return_value.stdout='```json\n{"status":"ok"}\n```';run.return_value.stderr=""
-        payload,_=LlamaTextCliProvider("llama-cli","model.gguf").complete("write",settings={"max_tokens":128})
+        payload,_=LlamaTextCliProvider("llama-cli","model.gguf").complete("write",settings={"max_tokens":128},json_schema={"type":"object"})
         args=run.call_args.args[0]
         self.assertEqual({"status":"ok"},payload)
         for option in ("--single-turn","--simple-io","--no-display-prompt","--no-show-timings"):self.assertIn(option,args)
+        self.assertIn("--json-schema",args)
         self.assertNotIn("--mmproj",args);self.assertNotIn("--image",args)
 
     @patch("workers.ai_worker.provider.subprocess.run")
     def test_text_preflight_requires_single_turn_options(self,run):
-        run.return_value.stdout="--single-turn --simple-io --no-display-prompt --no-show-timings --gpu-layers";run.return_value.stderr=""
+        run.return_value.stdout="--single-turn --simple-io --no-display-prompt --no-show-timings --json-schema --gpu-layers";run.return_value.stderr=""
         validate_text_cli("llama-cli")
         run.return_value.stdout="--gpu-layers"
         with self.assertRaisesRegex(ProviderError,"missing required options"):validate_text_cli("llama-cli")
@@ -169,12 +179,33 @@ class WorkerTests(unittest.TestCase):
         class Provider:
             def __init__(self,result):self.result,self.calls=result,[]
             def complete(self,prompt,**kwargs):self.calls.append((prompt,kwargs));return self.result,{"duration_ms":1}
-        vision=Provider({"scene":"garden"});writer=Provider({"suggested_names":["Garden"]})
+        valid={"album_summary":"Garden scene","description":"A garden setting.","suggested_names":
+            ["Bamboo Garden","Quiet Retreat","Summer Reverie","Golden Afternoon","Gentle Elegance","Serene Moments"]}
+        vision=Provider({"scene":"garden"});writer=Provider(valid)
         workflow=AnalysisWorkflow(vision,writer)
         vision_result,_=workflow.vision([Path("one.jpg")],{"max_tokens":128})
         workflow.writer(vision_result,{"max_tokens":128})
         self.assertEqual([Path("one.jpg")],vision.calls[0][1]["images"])
         self.assertNotIn("images",writer.calls[0][1])
+
+    def test_writer_validation_retries_with_feedback_before_submission(self):
+        valid={"album_summary":"Garden scene","description":"A garden setting.","suggested_names":
+            ["Bamboo Garden","Quiet Retreat","Summer Reverie","Golden Afternoon","Gentle Elegance","Serene Moments"]}
+        class Provider:
+            def __init__(self):self.calls=[]
+            def complete(self,prompt,**kwargs):
+                self.calls.append((prompt,kwargs))
+                return ({"album_summary":"bad","description":"bad","suggested_names":["gallery"]} if len(self.calls)==1 else valid),{"duration_ms":1}
+        provider=Provider();payload,_=AnalysisWorkflow(object(),provider,sleep=lambda _:None).writer({"scene":"garden"},{})
+        self.assertEqual(valid,payload);self.assertEqual(2,len(provider.calls));self.assertIn("failed validation",provider.calls[1][0])
+        self.assertIn("json_schema",provider.calls[0][1])
+
+    def test_writer_validation_matches_backend_name_rules(self):
+        base={"album_summary":"Summary","description":"Description","suggested_names":
+            ["Bamboo Garden","Quiet Retreat","Summer Reverie","Golden Afternoon","Gentle Elegance","Serene Moments"]}
+        self.assertEqual(base,validate_writer_payload(base))
+        for names in (["Only One"],base["suggested_names"][:-1]+["lowercase name"],base["suggested_names"][:-1]+["Private Photo"]):
+            with self.assertRaises(ProviderError):validate_writer_payload({**base,"suggested_names":names})
 
     def test_runtime_preserves_provider_failure_category(self):
         class Client:

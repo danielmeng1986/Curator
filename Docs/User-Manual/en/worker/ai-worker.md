@@ -164,7 +164,9 @@ production work (replace all three paths):
 The Worker checks both executables before asking the Backend for work. Vision
 requires the multimodal image/projector options. Writer requires
 `--single-turn`, `--simple-io`, and bounded-output options so a text-only prompt
-cannot enter an interactive chat loop.
+cannot enter an interactive chat loop. Writer output is JSON-Schema constrained
+and locally checked against Curator's six-name rules before submission; invalid
+model output receives bounded corrective retries.
 
 Omit `--mmproj` only when the chosen llama.cpp/model combination does not
 require a separate projector. Normal mode waits on outbound HTTP requests of at
@@ -216,6 +218,7 @@ rerun Worker tests, inspect `--help`, and review release notes before restarting
 | `403` | Confirm the dedicated Worker device was approved as Writer with required scopes; do not elevate to Admin. |
 | No Work Item is claimed | Confirm the process uses `--worker-kind album_name_analysis` and Admin dispatched the same Worker kind; `--once` exits normally when the queue is empty. |
 | Model/provider failure | Preserve redacted diagnostics and leave Review/Promotion untouched; the Worker reports failure or retries inference according to its lease policy. |
+| Backend rejects a request | The Worker reports the HTTP status plus the Backend `error.code` and safe message. Act on that application error instead of guessing from 400/409 alone. |
 
 <!-- manual-section: security -->
 ## 10. Security and data boundaries

@@ -40,6 +40,11 @@ private Evidence paths.
   the local operator and the existing Work Item failure record.
 - Categorize executable/argument, timeout, model-load, projector, GPU/backend,
   context/token-budget, and invalid-output failures where reliably possible.
+- Constrain Writer output with a JSON Schema, validate the complete Backend
+  Writer contract locally, and retry with bounded corrective feedback before
+  any invalid payload can be submitted.
+- Decode safe Backend error envelopes so the operator sees the application
+  error code and message instead of an unexplained HTTP 400 or 409.
 - Add a startup or smoke-test compatibility check that fails before claiming
   work when the selected executable lacks required multimodal options.
 - Add regression tests and update the English and Chinese Worker manuals with
@@ -75,7 +80,12 @@ private Evidence paths.
 5. Add tests for successful noisy JSON output, unsupported arguments, non-zero
    exit, timeout, sanitization, truncation, and absence of secrets/private
    Evidence paths.
-6. Extend the bilingual manual with Qwen2.5-VL sizing guidance, while clearly
+6. Mirror the Writer v1 field, length, count, uniqueness, capitalization,
+   word-count, and forbidden-term rules in a local pre-submission validator;
+   retry invalid model output with rule-specific feedback.
+7. Parse Backend JSON error envelopes into bounded client diagnostics while
+   retaining HTTP status, application code, and transient classification.
+8. Extend the bilingual manual with Qwen2.5-VL sizing guidance, while clearly
    identifying it as model-family guidance rather than a global Curator rule.
 
 ## Acceptance Criteria
@@ -94,6 +104,9 @@ private Evidence paths.
   Device Token, prompt body, private Evidence path, or retained Evidence bytes.
 - Provider failure never submits a partial Vision or Writer result and still
   truthfully ends the owned attempt as Failed.
+- Invalid Writer JSON is rejected locally and retried; Backend validation
+  failures identify their application code and message rather than only the
+  numeric HTTP status.
 - Editing an AI Model Configuration affects only future Dispatch snapshots;
   existing Work Items remain immutable and require deliberate Group closure and
   redispatch when sizing changes.

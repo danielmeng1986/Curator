@@ -6,8 +6,21 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
 class CuratorApiError(RuntimeError):
-    def __init__(self,message,*,status=None,transient=False):
-        super().__init__(message);self.status,self.transient=status,transient
+    def __init__(self,message,*,status=None,code=None,details=None,transient=False):
+        super().__init__(message);self.status,self.code,self.details,self.transient=status,code,details,transient
+
+def _api_error(exc: HTTPError,context: str) -> CuratorApiError:
+    code=None;message=None;details=None
+    try:
+        body=json.loads(exc.read().decode("utf-8"));error=body.get("error",{})
+        if isinstance(error,dict):code=error.get("code");message=error.get("message");details=error.get("details")
+    except (OSError,UnicodeDecodeError,json.JSONDecodeError,AttributeError):pass
+    finally:exc.close()
+    description=context
+    if code and message:description=f"{context}: {code} — {message} (HTTP {exc.code})"
+    elif message:description=f"{context}: {message} (HTTP {exc.code})"
+    else:description=f"{context}: HTTP {exc.code}"
+    return CuratorApiError(description[:1000],status=exc.code,code=code,details=details,transient=exc.code>=500)
 
 class CuratorClient:
     def __init__(self, base_url: str, token: str, opener=urlopen):
@@ -16,14 +29,14 @@ class CuratorClient:
         request = Request(f"{self.base_url}/api/v1{path}", headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"})
         try:
             with self._opener(request, timeout=10) as response: return json.loads(response.read())
-        except HTTPError as exc: raise CuratorApiError(f"Backend rejected request: HTTP {exc.code}") from exc
+        except HTTPError as exc: raise _api_error(exc,"Backend rejected request") from exc
         except URLError as exc: raise CuratorApiError("Backend unavailable; retry the worker request.") from exc
     def post(self, path: str, body: dict, *, timeout: float = 10) -> dict:
         request = Request(f"{self.base_url}/api/v1{path}", data=json.dumps(body).encode(), method="POST",
             headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json", "Content-Type": "application/json"})
         try:
             with self._opener(request, timeout=timeout) as response: return json.loads(response.read())
-        except HTTPError as exc: raise CuratorApiError(f"Backend rejected request: HTTP {exc.code}",status=exc.code,transient=exc.code>=500) from exc
+        except HTTPError as exc: raise _api_error(exc,"Backend rejected request") from exc
         except (URLError,TimeoutError) as exc: raise CuratorApiError("Backend unavailable; retry the worker request.",transient=True) from exc
     def claim_work(self, worker_kind: str, lease_seconds: int = 300, wait_seconds: int = 0) -> dict:
         return self.post("/ai-work-items/claim",{"worker_kinds":[worker_kind],"lease_seconds":lease_seconds,
@@ -46,7 +59,7 @@ class CuratorClient:
             headers={"Authorization":f"Bearer {self.token}","Accept":"image/jpeg,image/png,image/webp"})
         try:
             with self._opener(request,timeout=30) as response: return response.read()
-        except HTTPError as exc: raise CuratorApiError(f"Backend rejected evidence: HTTP {exc.code}") from exc
+        except HTTPError as exc: raise _api_error(exc,"Backend rejected evidence") from exc
         except URLError as exc: raise CuratorApiError("Backend unavailable during evidence transfer.") from exc
     def health(self) -> dict: return self.get("/health")
     def principal(self) -> dict: return self.get("/auth/me")
@@ -62,7 +75,7 @@ class EnrollmentClient:
             headers={"Accept":"application/json","Content-Type":"application/json"})
         try:
             with self._opener(request, timeout=10) as response: return json.loads(response.read())
-        except HTTPError as exc: raise CuratorApiError(f"Backend rejected enrollment: HTTP {exc.code}") from exc
+        except HTTPError as exc: raise _api_error(exc,"Backend rejected enrollment") from exc
         except URLError as exc: raise CuratorApiError("Backend unavailable during enrollment.") from exc
     def request(self, *, device_name: str, device_identity: str, registration_proof: str,
                 token: str, enrollment_proof: str) -> dict:
