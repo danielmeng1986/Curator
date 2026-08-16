@@ -20,6 +20,7 @@ const WorkDispatchPage = {
   _pollGeneration: 0,
   _pollDelay: 5000,
   _pollInFlight: false,
+  _selectionAnchorId: null,
 
   _configurationSummary(item) {
     return `<strong>${esc(item.name)}</strong><span class="config-model">${esc(item.model_identifier)} · <code>${esc(item.model_file)}</code></span>
@@ -198,8 +199,8 @@ const WorkDispatchPage = {
       <button class="btn btn-secondary" onclick="WorkDispatchPage.selectFirst()">Select first N…</button>
       <button id="dispatchPreviewBtn" class="btn btn-primary" onclick="WorkDispatchPage.preview()" disabled>Preview dispatch</button>
       <span id="dispatchSelectionCount">0 Albums selected</span></div></div>
-      <div class="card table-wrap"><table><thead><tr><th>Select</th><th>Album</th><th>Studio</th><th>Status</th><th>Eligibility</th><th>Warnings</th></tr></thead><tbody>
-      ${rows.map(item => `<tr><td><input type="checkbox" aria-label="Select ${esc(item.title)}" data-dispatch-album="${item.id}" ${item.can_dispatch ? '' : 'disabled'} onchange="WorkDispatchPage.toggle(${item.id},this.checked)"></td>
+      <div class="card table-wrap"><table><thead><tr><th><label><input id="dispatchSelectPage" type="checkbox" aria-label="Select all Albums on current page" onclick="WorkDispatchPage.togglePage(this.checked)"> Select</label></th><th>Album</th><th>Studio</th><th>Status</th><th>Eligibility</th><th>Warnings</th></tr></thead><tbody>
+      ${rows.map(item => `<tr><td><input type="checkbox" aria-label="Select ${esc(item.title)}" data-dispatch-album="${item.id}" ${item.can_dispatch ? '' : 'disabled'} onclick="WorkDispatchPage.toggle(${item.id},this.checked,event)"></td>
         <td><a href="#/albums/${item.id}">${esc(item.title)}</a></td><td>${esc(item.studio_name || '—')}</td><td>${esc(item.status_name || '—')}</td>
         <td><span class="chip ${item.can_dispatch ? 'chip-ok' : 'chip-error'}">${esc(item.eligibility)}</span>${item.eligibility_reason ? `<div>${esc(item.eligibility_reason)}</div>` : ''}</td>
         <td>${(item.warnings || []).map(value => `<span class="chip chip-warn">${esc(value)}</span>`).join(' ') || '—'}</td></tr>`).join('') || '<tr><td colspan="6">No Albums are currently available for this Worker.</td></tr>'}
@@ -214,25 +215,38 @@ const WorkDispatchPage = {
   },
 
   changeView(view) { this._view = view; this._resetSelection(); void this.loadView(); },
-  _resetSelection(){this._selected=new Set();this._selectionMode='ids';this._firstN=null;},
+  _resetSelection(){this._selected=new Set();this._selectionMode='ids';this._firstN=null;this._selectionAnchorId=null;},
   workerChanged(){this._state[this._view].offset=0;this._resetSelection();void this.loadView();},
   filterChanged(){const state=this._state.available;state.status_id=document.getElementById('dispatchStatusFilter').value;state.studio_id=document.getElementById('dispatchStudioFilter').value;state.model_id=document.getElementById('dispatchModelFilter').value;state.offset=0;this._resetSelection();void this.loadView();},
   clearFilters(){Object.assign(this._state.available,{status_id:'',studio_id:'',model_id:'',offset:0});this._resetSelection();void this.loadView();},
   pageSizeChanged(value){const size=Number(value);if(![25,50,100].includes(size))return;this._state[this._view].limit=size;this._state[this._view].offset=0;this._resetSelection();void this.loadView();},
   changePage(direction){const state=this._state[this._view];const next=state.offset+direction*state.limit;if(next<0||next>=this._meta.total)return;state.offset=next;this._resetSelection();void this.loadView();},
-  toggle(id, checked) { this._selectionMode='ids';this._firstN=null;if (checked) this._selected.add(id); else this._selected.delete(id); this._selectionChanged(); },
+  toggle(id, checked, event={}) {
+    this._selectionMode='ids';this._firstN=null;
+    const rows=Array.isArray(this._candidates)?this._candidates:[];
+    const current=rows.findIndex(item=>item.id===id);
+    const anchor=rows.findIndex(item=>item.id===this._selectionAnchorId);
+    if(event.shiftKey&&current>=0&&anchor>=0){
+      const [start,end]=current<anchor?[current,anchor]:[anchor,current];
+      rows.slice(start,end+1).filter(item=>item.can_dispatch).forEach(item=>checked?this._selected.add(item.id):this._selected.delete(item.id));
+    }else if(checked)this._selected.add(id);else this._selected.delete(id);
+    this._selectionAnchorId=id;this._syncAlbumCheckboxes();this._selectionChanged();
+  },
+  _syncAlbumCheckboxes(){document.querySelectorAll('[data-dispatch-album]').forEach(input=>{input.checked=this._selected.has(Number(input.dataset.dispatchAlbum));});},
   _selectionChanged() {
     const count = this._selectionMode==='first_n'?this._firstN:this._selected.size;
     const label = document.getElementById('dispatchSelectionCount'); if (label) label.textContent = this._selectionMode==='first_n'?`First ${count} filtered Albums selected`:`${count} Albums selected`;
     const workspace=document.getElementById('dispatchWorkspace')?.value;
     const button = document.getElementById('dispatchPreviewBtn'); if (button) button.disabled = !count||!workspace;
+    const pageToggle=document.getElementById('dispatchSelectPage');
+    if(pageToggle){const eligible=(Array.isArray(this._candidates)?this._candidates:[]).filter(item=>item.can_dispatch);const selected=eligible.filter(item=>this._selected.has(item.id)).length;pageToggle.checked=eligible.length>0&&selected===eligible.length;pageToggle.indeterminate=selected>0&&selected<eligible.length;pageToggle.disabled=!eligible.length;}
   },
   selectPage() {
-    this._selectionMode='ids';this._firstN=null;
+    this._selectionMode='ids';this._firstN=null;this._selectionAnchorId=null;
     this._selected = new Set((Array.isArray(this._candidates) ? this._candidates : []).filter(item => item.can_dispatch).map(item => item.id));
-    document.querySelectorAll('[data-dispatch-album]').forEach(input => { input.checked = this._selected.has(Number(input.dataset.dispatchAlbum)); });
-    this._selectionChanged();
+    this._syncAlbumCheckboxes();this._selectionChanged();
   },
+  togglePage(checked){if(checked)return this.selectPage();this._selectionMode='ids';this._firstN=null;this._selectionAnchorId=null;this._selected.clear();this._syncAlbumCheckboxes();this._selectionChanged();},
   selectFirst() {
     const raw = window.prompt('How many Albums from the complete filtered result should be selected? (1–100)', '10');
     const count = Number(raw); if (!Number.isInteger(count) || count < 1 || count > 100) { toast('Enter a number from 1 to 100.', 'error'); return; }

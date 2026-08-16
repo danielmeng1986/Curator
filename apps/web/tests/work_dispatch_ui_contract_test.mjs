@@ -48,6 +48,9 @@ assert.match(pageSource, />Retry<\/button>/);
 assert.match(pageSource, /\/ai-work-items\/\$\{encodeURIComponent\(uuid\)\}\/retry/);
 assert.match(pageSource, /No Open AI Workspace exists/);
 assert.match(pageSource, /Create and select an Open AI Workspace/);
+assert.match(pageSource, /Select all Albums on current page/);
+assert.match(pageSource, /event\.shiftKey/);
+assert.match(pageSource, /pageToggle\.indeterminate/);
 
 const configHtml=page._configurationSummary({name:'Balanced',model_identifier:'qwen',model_file:'qwen.gguf',sample_count:8,
   context_size:4096,max_tokens:800,image_max_tokens:384,temperature:0.2,threads:8,gpu_layers:20,
@@ -64,6 +67,7 @@ assert.doesNotMatch(pendingRows,/>Retry<\/button>/);
 elements.set('dispatchSelectionCount', { textContent:'' });
 elements.set('dispatchPreviewBtn', { disabled:true });
 elements.set('dispatchWorkspace', { value:'workspace-1' });
+elements.set('dispatchSelectPage', { checked:false, indeterminate:false, disabled:false });
 page.toggle(12, true);
 assert.equal(page._selected.has(12), true);
 assert.equal(elements.get('dispatchSelectionCount').textContent, '1 Albums selected');
@@ -79,6 +83,18 @@ page._candidates = [
 ];
 page.selectPage();
 assert.deepEqual([...page._selected], [1,3]);
+assert.equal(elements.get('dispatchSelectPage').checked,true);
+page.togglePage(false);
+assert.equal(page._selected.size,0);
+assert.equal(elements.get('dispatchSelectPage').checked,false);
+
+page._candidates.push({id:4,can_dispatch:true});
+page.toggle(1,true);
+assert.equal(elements.get('dispatchSelectPage').indeterminate,true);
+page.toggle(4,true,{shiftKey:true});
+assert.deepEqual([...page._selected],[1,3,4]);
+page.toggle(1,false,{shiftKey:true});
+assert.equal(page._selected.size,0);
 
 page._meta={total:121,limit:50,offset:50};
 assert.match(page._paginationHtml(),/Showing 51–100 of 121/);
