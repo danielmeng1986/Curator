@@ -9,7 +9,7 @@ import random
 from pathlib import Path
 from . import config
 from .client import CuratorClient,EnrollmentClient,CuratorApiError
-from .provider import LlamaCliProvider,validate_mtmd_cli
+from .provider import LlamaCliProvider,LlamaTextCliProvider,validate_mtmd_cli,validate_text_cli
 from .runtime import WorkerRuntime,payload_data
 from .workflow import AnalysisWorkflow
 
@@ -24,7 +24,9 @@ def parser():
     commands.add_parser("status",help="Check delayed Admin approval")
     run=commands.add_parser("run",help="Claim and process Work Items")
     run.add_argument("--worker-kind",required=True,choices=sorted(WORKER_KINDS))
-    run.add_argument("--llama-cli",required=True);run.add_argument("--model-root",required=True,type=Path)
+    run.add_argument("--llama-cli",required=True,help="Path to llama-mtmd-cli for Vision")
+    run.add_argument("--text-cli",required=True,help="Path to llama-cli for single-turn Writer output")
+    run.add_argument("--model-root",required=True,type=Path)
     run.add_argument("--mmproj",type=Path);run.add_argument("--once",action="store_true")
     run.add_argument("--wait-seconds",type=int,default=30);run.add_argument("--lease-seconds",type=int,default=300)
     return root
@@ -58,10 +60,13 @@ def run(args):
     if not 0<=args.wait_seconds<=30:raise ValueError("wait-seconds must be from 0 to 30.")
     cli=shutil.which(args.llama_cli) or str(Path(args.llama_cli).expanduser())
     if not Path(cli).is_file():raise ValueError("llama.cpp CLI executable was not found.")
+    text_cli=shutil.which(args.text_cli) or str(Path(args.text_cli).expanduser())
+    if not Path(text_cli).is_file():raise ValueError("llama.cpp text CLI executable was not found.")
     root=args.model_root.expanduser().resolve()
     if not root.is_dir():raise ValueError("Model root was not found.")
     if args.mmproj and not args.mmproj.expanduser().is_file():raise ValueError("Multimodal projector was not found.")
     validate_mtmd_cli(cli)
+    validate_text_cli(text_cli)
     client=CuratorClient(state["backend_url"],state["token"])
     principal=payload_data(client.principal())["principal"]
     if principal.get("role")!="writer":raise ValueError("AI Worker requires an approved Writer identity.")
@@ -86,7 +91,8 @@ def run(args):
                     client.fail_work(claim["uuid"],"WORKER_CONFIGURATION_INVALID",f"Configured model file was not found: {snapshot['model_file']}")
                     raise ValueError(f"Configured model file was not found: {snapshot['model_file']}")
                 provider=LlamaCliProvider(cli,str(model),mmproj=str(args.mmproj) if args.mmproj else None)
-                WorkerRuntime(client,WORKER_KINDS[args.worker_kind](provider),worker_kind=args.worker_kind,
+                writer_provider=LlamaTextCliProvider(text_cli,str(model))
+                WorkerRuntime(client,WORKER_KINDS[args.worker_kind](provider,writer_provider),worker_kind=args.worker_kind,
                     lease_seconds=args.lease_seconds).run_once(claim)
             if args.once:return 0
     except KeyboardInterrupt:

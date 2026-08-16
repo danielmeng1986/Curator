@@ -28,6 +28,9 @@ private Evidence paths.
 
 - Remove the `llama-cli`-specific `--no-display-prompt` option from the
   `llama-mtmd-cli` invocation profile.
+- Use separate executables for the two stages: `llama-mtmd-cli` for Vision and
+  standard `llama-cli --single-turn --simple-io` for Writer, because a prompt
+  without images makes `llama-mtmd-cli` enter an interactive chat loop.
 - Keep bounded multimodal arguments for the model, projector, context,
   threads, GPU layers, output tokens, temperature, images, and image-token
   budget.
@@ -61,8 +64,8 @@ private Evidence paths.
 
 ## Implementation Steps
 
-1. Separate the `llama-mtmd-cli` argument profile from options that are valid
-   only for another llama.cpp CLI.
+1. Separate the `llama-mtmd-cli` Vision argument profile from the standard
+   `llama-cli` single-turn Writer profile.
 2. Add deterministic subprocess-result handling that retains a safe,
    size-bounded diagnostic while preserving the original exception cause.
 3. Map timeouts and confidently recognizable provider failures to truthful
@@ -79,6 +82,8 @@ private Evidence paths.
 
 - The current supported `llama-mtmd-cli` build receives no
   `--no-display-prompt` argument.
+- The Writer stage uses a separately validated `--text-cli` and exits after one
+  response instead of waiting in an interactive chat loop.
 - A one-image Qwen2.5-VL smoke run can load the configured main model and
   projector and return a JSON object through the Worker provider.
 - A non-zero llama.cpp exit tells the local operator whether the failure was

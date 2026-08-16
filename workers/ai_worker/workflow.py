@@ -10,10 +10,11 @@ WRITER_PROMPT="""Using the following Vision JSON, return JSON only with album_su
 and suggested_names (exactly six unique concise English names). Vision JSON:\n{vision}"""
 
 class AnalysisWorkflow:
-    def __init__(self, provider, retries:int=2, sleep=time.sleep): self.provider,self.retries,self.sleep=provider,retries,sleep
-    def _complete(self,*args,**kwargs):
+    def __init__(self, provider, writer_provider=None, retries:int=2, sleep=time.sleep):
+        self.provider,self.writer_provider=provider,writer_provider or provider;self.retries,self.sleep=retries,sleep
+    def _complete(self,provider,*args,**kwargs):
         for attempt in range(self.retries+1):
-            try: return self.provider.complete(*args,**kwargs)
+            try: return provider.complete(*args,**kwargs)
             except ProviderError:
                 if attempt==self.retries: raise
                 self.sleep(2**attempt)
@@ -23,7 +24,7 @@ class AnalysisWorkflow:
             except ProviderError:
                 if attempt==self.retries: raise
                 self.sleep(2**attempt)
-    def vision(self,images,settings): return self._complete(VISION_PROMPT,images=images,settings=settings)
+    def vision(self,images,settings): return self._complete(self.provider,VISION_PROMPT,images=images,settings=settings)
     def writer(self,vision,settings):
         import json
-        return self._complete(WRITER_PROMPT.format(vision=json.dumps(vision,sort_keys=True)),settings=settings)
+        return self._complete(self.writer_provider,WRITER_PROMPT.format(vision=json.dumps(vision,sort_keys=True)),settings=settings)

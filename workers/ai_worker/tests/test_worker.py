@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 from workers.ai_worker.client import CuratorClient,EnrollmentClient
 from workers.ai_worker.workflow import AnalysisWorkflow
-from workers.ai_worker.provider import LlamaCliProvider,ProviderError,parse_json_object,validate_mtmd_cli
+from workers.ai_worker.provider import LlamaCliProvider,LlamaTextCliProvider,ProviderError,parse_json_object,validate_mtmd_cli,validate_text_cli
 from workers.ai_worker.runtime import WorkerRuntime
 from workers.ai_worker.cli import parser
 from workers.ai_worker import config
@@ -19,7 +19,7 @@ class FakeProvider:
 class WorkerTests(unittest.TestCase):
     def test_run_requires_a_registered_worker_kind(self):
         with self.assertRaises(SystemExit):parser().parse_args(["run","--llama-cli","llama","--model-root","models"])
-        args=parser().parse_args(["run","--worker-kind","album_name_analysis","--llama-cli","llama","--model-root","models","--once"])
+        args=parser().parse_args(["run","--worker-kind","album_name_analysis","--llama-cli","llama-mtmd-cli","--text-cli","llama-cli","--model-root","models","--once"])
         self.assertEqual("album_name_analysis",args.worker_kind);self.assertTrue(args.once)
 
     def test_result_is_suggestion_only_after_retry(self):
@@ -148,6 +148,33 @@ class WorkerTests(unittest.TestCase):
         validate_mtmd_cli("llama-mtmd-cli")
         run.return_value.stdout="--image"
         with self.assertRaisesRegex(ProviderError,"missing required options"):validate_mtmd_cli("llama-mtmd-cli")
+
+    @patch("workers.ai_worker.provider.subprocess.run")
+    def test_text_provider_is_single_turn_and_non_interactive(self,run):
+        run.return_value.stdout='```json\n{"status":"ok"}\n```';run.return_value.stderr=""
+        payload,_=LlamaTextCliProvider("llama-cli","model.gguf").complete("write",settings={"max_tokens":128})
+        args=run.call_args.args[0]
+        self.assertEqual({"status":"ok"},payload)
+        for option in ("--single-turn","--simple-io","--no-display-prompt","--no-show-timings"):self.assertIn(option,args)
+        self.assertNotIn("--mmproj",args);self.assertNotIn("--image",args)
+
+    @patch("workers.ai_worker.provider.subprocess.run")
+    def test_text_preflight_requires_single_turn_options(self,run):
+        run.return_value.stdout="--single-turn --simple-io --no-display-prompt --no-show-timings --gpu-layers";run.return_value.stderr=""
+        validate_text_cli("llama-cli")
+        run.return_value.stdout="--gpu-layers"
+        with self.assertRaisesRegex(ProviderError,"missing required options"):validate_text_cli("llama-cli")
+
+    def test_analysis_routes_images_only_to_vision_provider(self):
+        class Provider:
+            def __init__(self,result):self.result,self.calls=result,[]
+            def complete(self,prompt,**kwargs):self.calls.append((prompt,kwargs));return self.result,{"duration_ms":1}
+        vision=Provider({"scene":"garden"});writer=Provider({"suggested_names":["Garden"]})
+        workflow=AnalysisWorkflow(vision,writer)
+        vision_result,_=workflow.vision([Path("one.jpg")],{"max_tokens":128})
+        workflow.writer(vision_result,{"max_tokens":128})
+        self.assertEqual([Path("one.jpg")],vision.calls[0][1]["images"])
+        self.assertNotIn("images",writer.calls[0][1])
 
     def test_runtime_preserves_provider_failure_category(self):
         class Client:

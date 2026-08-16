@@ -98,7 +98,8 @@ python3 -m workers.ai_worker status
 
 runtime 配置由私有状态文件、CLI 主机路径和 Admin 创建的 AI Model Configuration snapshot
 共同组成。Admin UI 中的 `model_file` 是相对于 `--model-root` 的可移植路径；
-`--llama-cli` 指定可执行文件，需要独立 projector 的多模态 build 使用 `--mmproj`。
+`--llama-cli` 指定 Vision 使用的 `llama-mtmd-cli`，`--text-cli` 指定单轮 Writer 使用的标准
+`llama-cli`，需要独立 projector 的多模态 build 使用 `--mmproj`。
 
 首次派遣前，Administrator 在 **Administrator Center → AI Model
 Configurations** 中选择 **New Configuration**。填写可辨识的名称、模型标识、相对
@@ -129,7 +130,7 @@ Worker 以 `--model-root /opt/curator-models` 启动时，配置中的
 确认 Admin 配置中的 `model_file` 位于所选 model root 下，然后启动 Worker：
 
 ```bash
-python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /opt/llama.cpp/build/bin/llama-mtmd-cli --model-root /opt/curator-models --mmproj /opt/curator-models/mmproj.gguf
+python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /opt/llama.cpp/build/bin/llama-mtmd-cli --text-cli /opt/llama.cpp/build/bin/llama-cli --model-root /opt/curator-models --mmproj /opt/curator-models/mmproj.gguf
 ```
 
 更新 llama.cpp 后，先用一张不敏感的本地图片验证，再领取生产任务（替换以下三个路径）：
@@ -144,7 +145,9 @@ python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /
   -p 'Return one JSON object describing this image.'
 ```
 
-Worker 在向 Backend 领取任务之前，也会确认所选可执行文件声明了必需的多模态参数。
+Worker 在向 Backend 领取任务前会检查两个可执行文件。Vision 必须具备图片/projector 参数；
+Writer 必须具备 `--single-turn`、`--simple-io` 与有界输出参数，确保纯文本 prompt 不会进入
+交互式 chat 循环。
 
 仅当所选 llama.cpp/模型组合不要求独立 projector 时才省略 `--mmproj`。正常模式会用最长
 30 秒的 outbound HTTP 请求等待 `album_name_analysis` 任务；Backend Dispatch 提交后会立即

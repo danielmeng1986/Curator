@@ -108,8 +108,9 @@ another host or register through developer tools/raw REST calls.
 
 Runtime configuration combines the private state file, CLI host paths, and the
 Admin-created AI Model Configuration snapshot. `model_file` in the Admin UI is
-a portable path relative to `--model-root`; `--llama-cli` names the executable,
-and multimodal builds that require it use `--mmproj`.
+a portable path relative to `--model-root`; `--llama-cli` names
+`llama-mtmd-cli` for Vision, `--text-cli` names standard `llama-cli` for the
+single-turn Writer stage, and multimodal builds that require it use `--mmproj`.
 
 Before the first dispatch, an Administrator opens **Administrator Center → AI
 Model Configurations** and selects **New Configuration**. Enter a recognizable
@@ -144,7 +145,7 @@ Confirm the Admin configuration's `model_file` exists below the chosen model
 root, then start the Worker:
 
 ```bash
-python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /opt/llama.cpp/build/bin/llama-mtmd-cli --model-root /opt/curator-models --mmproj /opt/curator-models/mmproj.gguf
+python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /opt/llama.cpp/build/bin/llama-mtmd-cli --text-cli /opt/llama.cpp/build/bin/llama-cli --model-root /opt/curator-models --mmproj /opt/curator-models/mmproj.gguf
 ```
 
 After updating llama.cpp, verify one non-sensitive local image before claiming
@@ -160,8 +161,10 @@ production work (replace all three paths):
   -p 'Return one JSON object describing this image.'
 ```
 
-The Worker also checks that the selected executable advertises the required
-multimodal options before it asks the Backend for work.
+The Worker checks both executables before asking the Backend for work. Vision
+requires the multimodal image/projector options. Writer requires
+`--single-turn`, `--simple-io`, and bounded-output options so a text-only prompt
+cannot enter an interactive chat loop.
 
 Omit `--mmproj` only when the chosen llama.cpp/model combination does not
 require a separate projector. Normal mode waits on outbound HTTP requests of at
