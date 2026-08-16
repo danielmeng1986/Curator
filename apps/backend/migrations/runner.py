@@ -157,7 +157,7 @@ def _apply_0017(conn: sqlite3.Connection, source: Path) -> None:
     conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile
         (uuid,name,worker_kind,dataset_type,lifecycle_state,is_default,version,created_at,updated_at)
         VALUES (?,?,?,?,'Published',1,1,?,?)""",
-        (DEFAULT_PROFILE_UUID,"Curator Album Analysis Default","album_name_analysis","album",now,now))
+        (DEFAULT_PROFILE_UUID,"Curator Album Analysis Default","album_name_analysis","album_analysis",now,now))
     conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile_version
         (uuid,profile_uuid,version,global_instruction,dataset_instruction,vision_prompt_template,
          writer_prompt_template,output_language,naming_policy_json,vision_schema_version,writer_schema_version,

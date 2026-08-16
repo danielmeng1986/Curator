@@ -16,7 +16,8 @@ import json
 import sqlite3
 import hashlib
 from datetime import datetime, timezone
-from apps.ai_instruction_profile import DEFAULT_PROFILE_UUID, DEFAULT_VERSION_UUID, content_hash, default_content
+from apps.ai_instruction_profile import (DEFAULT_PROFILE_UUID, DEFAULT_VERSION_UUID, content_hash, default_content,
+    snapshot as instruction_snapshot)
 
 
 # ---------------------------------------------------------------------------
@@ -2241,7 +2242,9 @@ class AIInstructionProfileRepository:
         now=datetime.now(timezone.utc).isoformat();content=default_content()
         conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile
             (uuid,name,worker_kind,dataset_type,lifecycle_state,is_default,version,created_at,updated_at)
-            VALUES (?,?,?,?,'Published',1,1,?,?)""",(DEFAULT_PROFILE_UUID,"Curator Album Analysis Default","album_name_analysis","album",now,now))
+            VALUES (?,?,?,?,'Published',1,1,?,?)""",(DEFAULT_PROFILE_UUID,"Curator Album Analysis Default","album_name_analysis","album_analysis",now,now))
+        conn.execute("""UPDATE ai_instruction_profile SET dataset_type='album_analysis'
+            WHERE uuid=? AND dataset_type='album'""",(DEFAULT_PROFILE_UUID,))
         conn.execute("""INSERT OR IGNORE INTO ai_instruction_profile_version
             (uuid,profile_uuid,version,global_instruction,dataset_instruction,vision_prompt_template,writer_prompt_template,
             output_language,naming_policy_json,vision_schema_version,writer_schema_version,validator_policy_version,
@@ -2359,7 +2362,9 @@ class AIModelConfigurationRepository:
             try: conn.execute("ALTER TABLE ai_model_configuration ADD COLUMN instruction_profile_version_uuid TEXT")
             except sqlite3.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower(): raise
-        AIInstructionProfileRepository._ensure_schema(conn);conn.commit()
+        AIInstructionProfileRepository._ensure_schema(conn)
+        conn.execute("""UPDATE ai_model_configuration SET instruction_profile_version_uuid=?
+            WHERE instruction_profile_version_uuid IS NULL""",(DEFAULT_VERSION_UUID,));conn.commit()
 
     @staticmethod
     def _norm(row):
@@ -2877,6 +2882,21 @@ class AlbumAIWorkDispatchRepository(WorkDispatchRepository):
                     for config_row in configurations:
                         config = AIModelConfigurationRepository._norm(config_row)
                         snapshot = {key:value for key,value in config.items() if key not in {"id","created_at","updated_at"}}
+                        profile_row=conn.execute("""SELECT v.*,p.name AS profile_name,p.lifecycle_state,
+                            p.worker_kind,p.dataset_type FROM ai_instruction_profile_version v
+                            JOIN ai_instruction_profile p ON p.uuid=v.profile_uuid WHERE v.uuid=?""",
+                            (config.get("instruction_profile_version_uuid"),)).fetchone()
+                        if not profile_row or profile_row["lifecycle_state"]!="Published" \
+                                or profile_row["worker_kind"]!=payload["worker_kind"] \
+                                or profile_row["dataset_type"]!=payload["dataset_type"]:
+                            raise PersistenceConflict({"code":"DISPATCH_PREVIEW_STALE","resource":"instruction_profile",
+                                "configuration_uuid":config["uuid"]})
+                        profile=AIInstructionProfileRepository._version(profile_row)
+                        resolved=instruction_snapshot(profile)
+                        if resolved["content_hash"]!=profile["content_hash"]:
+                            raise PersistenceConflict({"code":"DISPATCH_PREVIEW_STALE","resource":"instruction_profile_hash",
+                                "configuration_uuid":config["uuid"]})
+                        snapshot["instruction_profile"]=resolved
                         item_uuid = str(uuid.uuid4())
                         conn.execute("""INSERT INTO workspace_album_ai_worker
                             (uuid,workspace_uuid,album_id,worker_kind,ai_model_configuration_uuid,configuration_snapshot_json,created_at,updated_at)

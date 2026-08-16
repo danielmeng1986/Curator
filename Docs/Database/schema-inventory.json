@@ -18,7 +18,8 @@
     "0014_authentication_and_operations",
     "0015_ui_device_enrollment",
     "0016_capability_aware_work_claim",
-    "0017_ai_instruction_profile"
+    "0017_ai_instruction_profile",
+    "0018_normalize_ai_profile_dataset"
   ],
   "excluded_tables": [
     "sqlite_sequence"

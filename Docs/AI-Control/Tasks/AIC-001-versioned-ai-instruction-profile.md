@@ -232,3 +232,9 @@ The migration/bootstrap Profile must reproduce current supported behavior:
   executed content hash.
 - Migration, lifecycle, deterministic composition, tamper rejection, Backend
   service, concurrent Dispatch, and Worker regression tests pass.
+- The atomic multi-Album Dispatch path resolves and embeds the published Profile
+  inside the same transaction; a missing, incompatible, disabled, or
+  hash-mismatched Profile makes the Preview stale instead of creating a legacy
+  snapshot.
+- Migration `0018` aligns the seeded Profile Dataset identity with the
+  `album_analysis` Dispatch adapter before strict compatibility enforcement.

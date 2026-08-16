@@ -54,3 +54,6 @@ be generated, while retaining deterministic Worker and Backend validation.
 - A WSL smoke run exposed a build-specific invalid escaped hyphen in the first
   grammar revision. The character class now places the hyphen last without an
   escape, and regression coverage classifies grammar parse failures explicitly.
+- A second WSL smoke run exposed unbounded deterministic continuation inside a
+  name word. Each word is now structurally bounded to 24 characters, preventing
+  token-budget exhaustion before the JSON object closes.

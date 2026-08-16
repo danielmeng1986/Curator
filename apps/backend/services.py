@@ -1897,8 +1897,8 @@ class AIInstructionProfileService:
     def create(self,fields,actor=None):
         name=str(fields.get("name") or "").strip()
         if not name or len(name)>120:raise ValueError("name is required and must be at most 120 characters.")
-        worker_kind=fields.get("worker_kind","album_name_analysis");dataset_type=fields.get("dataset_type","album")
-        if worker_kind!="album_name_analysis" or dataset_type!="album":raise ValueError("Only album_name_analysis/album is currently supported.")
+        worker_kind=fields.get("worker_kind","album_name_analysis");dataset_type=fields.get("dataset_type","album_analysis")
+        if worker_kind!="album_name_analysis" or dataset_type!="album_analysis":raise ValueError("Only album_name_analysis/album_analysis is currently supported.")
         content=validate_content(fields.get("content") or {})
         item=self._repo.create(name,worker_kind,dataset_type,content,actor,_utc_now_iso());self._record("ai_instruction_profile_create",item,"AI Instruction Profile draft created");return item
     def create_version(self,profile_uuid,expected_version,fields,actor=None):

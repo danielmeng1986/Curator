@@ -203,6 +203,7 @@ class WorkerTests(unittest.TestCase):
     def test_writer_grammar_uses_gbnf_character_class_without_invalid_hyphen_escape(self):
         from workers.ai_worker.constraints import WRITER_GBNF
         self.assertIn("name-char ::= [A-Za-z'-]",WRITER_GBNF)
+        self.assertIn("word ::= upper name-char{0,23}",WRITER_GBNF)
         self.assertNotIn(r"\-]",WRITER_GBNF)
 
     def test_analysis_routes_images_only_to_vision_provider(self):

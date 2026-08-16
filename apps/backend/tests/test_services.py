@@ -10,6 +10,7 @@ verified here; HTTP transport concerns are verified in test_api_contract.py.
 from __future__ import annotations
 
 import sqlite3
+import json
 import os
 import sys
 import tempfile
@@ -1631,6 +1632,10 @@ class TestAtomicAlbumAIWorkDispatchContract(unittest.TestCase):
         self.assertEqual({"work_dispatch_batch":1,"work_dispatch_group":2,"album_work_reservation":2,
             "work_dispatch_group_item":4,"workspace_album_ai_worker":4,"work_dispatch_preview_claim":1}, counts)
         self.assertEqual(before, [row[0] for row in self.conn.execute("SELECT status_id FROM album ORDER BY id")])
+        snapshots=[json.loads(row[0]) for row in self.conn.execute(
+            "SELECT configuration_snapshot_json FROM workspace_album_ai_worker ORDER BY id")]
+        self.assertTrue(all(value["instruction_profile"]["profile_name"]=="Curator Album Analysis Default" for value in snapshots))
+        self.assertTrue(all(len(value["instruction_profile"]["content_hash"])==64 for value in snapshots))
         operation = self.conn.execute("SELECT status,batch_uuid FROM operation WHERE uuid=?", (result["operation_uuid"],)).fetchone()
         self.assertEqual(("Succeeded",result["batch_uuid"]), tuple(operation))
         detail = self.service.batch_detail(result["batch_uuid"])
