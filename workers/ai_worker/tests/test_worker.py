@@ -11,7 +11,7 @@ from workers.ai_worker.client import CuratorClient,EnrollmentClient,CuratorApiEr
 from workers.ai_worker.workflow import AnalysisWorkflow,validate_writer_payload
 from workers.ai_worker.provider import LlamaCliProvider,LlamaTextCliProvider,ProviderError,parse_json_object,parse_json_streams,validate_mtmd_cli,validate_text_cli
 from workers.ai_worker.runtime import WorkerRuntime
-from workers.ai_worker.cli import parser
+from workers.ai_worker.cli import parser,run
 from workers.ai_worker import config
 class FakeProvider:
     def __init__(self, failures=0): self.failures=failures
@@ -24,6 +24,36 @@ class WorkerTests(unittest.TestCase):
         args=parser().parse_args(["run","--worker-kind","album_name_analysis","--llama-cli","llama-mtmd-cli","--text-cli","llama-cli","--model-root","models","--once"])
         self.assertEqual("album_name_analysis",args.worker_kind);self.assertTrue(args.once)
         self.assertIsNone(args.model_debug_dir)
+        self.assertEqual(3,args.max_consecutive_item_failures)
+
+    def test_run_rejects_invalid_consecutive_failure_limit(self):
+        args=parser().parse_args(["run","--worker-kind","album_name_analysis","--llama-cli","vision","--text-cli","writer",
+            "--model-root","models","--max-consecutive-item-failures","0"])
+        with patch("workers.ai_worker.cli.config.load",return_value={"status":"Approved"}):
+            with self.assertRaisesRegex(ValueError,"max-consecutive-item-failures"):run(args)
+
+    def test_run_skips_item_failures_resets_after_success_and_stops_at_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);vision=root/"vision";writer=root/"writer";model=root/"model.gguf"
+            for path in (vision,writer,model):path.touch()
+            args=parser().parse_args(["run","--worker-kind","album_name_analysis","--llama-cli",str(vision),
+                "--text-cli",str(writer),"--model-root",str(root),"--max-consecutive-item-failures","3"])
+            claims=[{"uuid":f"item-{index}","worker_kind":"album_name_analysis",
+                "configuration_snapshot":{"model_file":"model.gguf"}} for index in range(1,6)]
+            class Client:
+                def principal(self):return {"data":{"principal":{"role":"writer"}}}
+                def claim_work(self,*_):return {"data":{"item":claims.pop(0)}}
+            runtime=unittest.mock.Mock()
+            runtime.run_once.side_effect=[ProviderError("bad output",error_code="MODEL_OUTPUT_INVALID"),None,
+                ProviderError("bad output",error_code="MODEL_OUTPUT_INVALID"),
+                ProviderError("bad output",error_code="MODEL_OUTPUT_INVALID"),
+                ProviderError("bad output",error_code="MODEL_OUTPUT_INVALID")]
+            with patch("workers.ai_worker.cli.config.load",return_value={"status":"Approved","backend_url":"http://curator","token":"token"}), \
+                    patch("workers.ai_worker.cli.validate_mtmd_cli"),patch("workers.ai_worker.cli.validate_text_cli"), \
+                    patch("workers.ai_worker.cli.CuratorClient",return_value=Client()), \
+                    patch("workers.ai_worker.cli.WorkerRuntime",return_value=runtime):
+                with self.assertRaisesRegex(RuntimeError,"3 consecutive"):run(args)
+            self.assertEqual(5,runtime.run_once.call_count)
 
     def test_result_is_suggestion_only_after_retry(self):
         result=AnalysisWorkflow(FakeProvider(1), sleep=lambda _: None).analyze("x")
@@ -279,6 +309,24 @@ class WorkerTests(unittest.TestCase):
         for names in (["Only One"],base["suggested_names"][:-1]+["lowercase name"],base["suggested_names"][:-1]+["Private Photo"],
                 ["Bamboo Garden","Quiet Retreat","Summer Reverie","Golden Afternoon","Gentle Elegance","Serene Moments"]):
             with self.assertRaises(ProviderError):validate_writer_payload({**base,"suggested_names":names})
+
+    def test_writer_validation_identifies_forbidden_title_and_word(self):
+        payload={"album_summary":"Summary","description":"Description","suggested_names":
+            ["Bamboo Garden","Quiet Retreat","Summer Garden Light","Gentle Summer Elegance","Serene Moments By Water","Romantic Pillow Talk Session"]}
+        with self.assertRaises(ProviderError) as raised:validate_writer_payload(payload)
+        self.assertIn('"Romantic Pillow Talk Session"',str(raised.exception))
+        self.assertIn('forbidden word "Session"',str(raised.exception))
+
+    def test_writer_retry_feedback_rejects_repeating_invalid_title(self):
+        invalid={"album_summary":"Summary","description":"Description","suggested_names":
+            ["Bamboo Garden","Quiet Retreat","Summer Garden Light","Gentle Summer Elegance","Serene Moments By Water","Romantic Pillow Talk Session"]}
+        valid={**invalid,"suggested_names":invalid["suggested_names"][:-1]+["Romantic Pillow Talk Dreams"]}
+        class Provider:
+            def __init__(self):self.calls=[]
+            def complete(self,prompt,**kwargs):
+                self.calls.append(prompt);return (invalid if len(self.calls)==1 else valid),{}
+        provider=Provider();result,_=AnalysisWorkflow(object(),provider,sleep=lambda _:None).writer({}, {})
+        self.assertEqual(valid,result);self.assertIn("do not repeat the invalid title or forbidden word",provider.calls[1])
 
     def test_writer_replaces_roman_and_repeated_letter_four_word_fillers(self):
         from workers.ai_worker.workflow import normalize_writer_titles

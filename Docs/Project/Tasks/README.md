@@ -25,3 +25,4 @@ database access; Web UI, AI Worker, and tools are API clients.
 | [MT-009](MT-009-add-runnable-ai-worker.md) | Runnable, enrollable WSL2 AI Worker | Completed |
 | [MT-010](MT-010-add-capability-aware-waiting-ai-worker.md) | Capability-declared long-poll AI Worker | Completed |
 | [MT-011](MT-011-harden-llama-mtmd-provider-compatibility.md) | Compatible, diagnosable llama-mtmd provider execution | In Progress |
+| [MT-012](MT-012-isolate-ai-worker-item-failures.md) | Isolated Work Item failures and bounded Worker circuit breaking | Complete |

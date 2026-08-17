@@ -61,9 +61,17 @@ def validate_writer_payload(payload):
     normalized=[];word_counts=[]
     for value in names:
         name=_bounded_text(value,"suggested name",120);words=name.split()
-        if len(words) not in {2,3,4} or any(not re.fullmatch(r"[A-Z][A-Za-z'’-]*",word) for word in words) \
-                or any(word.casefold() in FORBIDDEN_NAME_WORDS for word in words):
-            raise ProviderError("Each suggested name must contain 2-4 capitalized English words and no forbidden term.",error_code="MODEL_OUTPUT_INVALID")
+        if len(words) not in {2,3,4}:
+            raise ProviderError(f'Suggested name "{name}" contains {len(words)} words; each name must contain 2-4 words.',
+                error_code="MODEL_OUTPUT_INVALID")
+        invalid_words=[word for word in words if not re.fullmatch(r"[A-Z][A-Za-z'’-]*",word)]
+        if invalid_words:
+            raise ProviderError(f'Suggested name "{name}" contains invalid word "{invalid_words[0]}"; every word must be capitalized English letters.',
+                error_code="MODEL_OUTPUT_INVALID")
+        forbidden_words=[word for word in words if word.casefold() in FORBIDDEN_NAME_WORDS]
+        if forbidden_words:
+            raise ProviderError(f'Suggested name "{name}" contains forbidden word "{forbidden_words[0]}".',
+                error_code="MODEL_OUTPUT_INVALID")
         normalized.append(name);word_counts.append(len(words))
     if sorted(word_counts) not in ([2,2,3,3,3,3],[2,2,3,3,3,4],[2,2,3,3,4,4]):
         raise ProviderError("Writer names must contain two 2-word names, at least two 3-word names, and natural 3-or-4-word remaining names.",error_code="MODEL_OUTPUT_INVALID")
@@ -131,5 +139,6 @@ class AnalysisWorkflow:
                 return validated,metrics
             except ProviderError as exc:
                 if attempt==self.retries:raise
-                prompt=f"{base}\nYour previous response failed validation: {exc} Regenerate the complete JSON object and obey every rule."
+                prompt=(f"{base}\nYour previous response failed validation: {exc} "
+                    "Replace every invalid suggested name, regenerate the complete JSON object, and do not repeat the invalid title or forbidden word.")
                 self.sleep(2**attempt)

@@ -14,6 +14,9 @@ from .runtime import WorkerRuntime,payload_data
 from .workflow import AnalysisWorkflow
 
 WORKER_KINDS={"album_name_analysis":AnalysisWorkflow}
+TERMINAL_ITEM_ERROR_CODES={"WORKER_KIND_MISMATCH","WORKER_CONFIGURATION_INVALID",
+    "MODEL_PROVIDER_EXECUTABLE_INVALID","MODEL_PROVIDER_ARGUMENT_INVALID",
+    "MODEL_PROVIDER_MODEL_LOAD_FAILED","MODEL_PROVIDER_PROJECTOR_FAILED","MODEL_PROVIDER_ACCELERATOR_FAILED"}
 
 def parser():
     root=argparse.ArgumentParser(prog="python3 -m workers.ai_worker")
@@ -31,6 +34,8 @@ def parser():
     run.add_argument("--model-debug-dir",type=Path,
         help="Opt-in private directory for raw llama.cpp stdout/stderr diagnostics")
     run.add_argument("--wait-seconds",type=int,default=30);run.add_argument("--lease-seconds",type=int,default=300)
+    run.add_argument("--max-consecutive-item-failures",type=int,default=3,
+        help="Stop after this many consecutive recoverable Work Item failures (default: 3)")
     return root
 
 def enroll(args):
@@ -60,6 +65,8 @@ def run(args):
     if state.get("status")!="Approved":raise ValueError("Worker registration is not approved; run status first.")
     if not 60<=args.lease_seconds<=3600:raise ValueError("lease-seconds must be from 60 to 3600.")
     if not 0<=args.wait_seconds<=30:raise ValueError("wait-seconds must be from 0 to 30.")
+    if not 1<=args.max_consecutive_item_failures<=100:
+        raise ValueError("max-consecutive-item-failures must be from 1 to 100.")
     cli=shutil.which(args.llama_cli) or str(Path(args.llama_cli).expanduser())
     if not Path(cli).is_file():raise ValueError("llama.cpp CLI executable was not found.")
     text_cli=shutil.which(args.text_cli) or str(Path(args.text_cli).expanduser())
@@ -76,34 +83,46 @@ def run(args):
     principal=payload_data(client.principal())["principal"]
     if principal.get("role")!="writer":raise ValueError("AI Worker requires an approved Writer identity.")
     print(f"Curator AI Worker started for {args.worker_kind}. Waiting for compatible work; press Ctrl-C to stop.")
-    failures=0
+    connection_failures=0;item_failures=0
     try:
         while True:
             try:
                 claim=payload_data(client.claim_work(args.worker_kind,args.lease_seconds,0 if args.once else args.wait_seconds)).get("item")
-                failures=0
+                connection_failures=0
             except CuratorApiError as exc:
                 if not exc.transient:raise
-                failures+=1;delay=min(30,2**min(failures-1,5))+random.uniform(0,0.5)
+                connection_failures+=1;delay=min(30,2**min(connection_failures-1,5))+random.uniform(0,0.5)
                 print(f"Backend connection interrupted; retrying in {delay:.1f}s.",file=sys.stderr);time.sleep(delay);continue
             if claim:
-                snapshot=claim["configuration_snapshot"];model=(root/snapshot["model_file"]).resolve()
-                try:model.relative_to(root)
-                except ValueError:
-                    client.fail_work(claim["uuid"],"WORKER_CONFIGURATION_INVALID","Configured model escapes model root.")
-                    raise ValueError("Configured model escapes model root.")
-                if not model.is_file():
-                    client.fail_work(claim["uuid"],"WORKER_CONFIGURATION_INVALID",f"Configured model file was not found: {snapshot['model_file']}")
-                    raise ValueError(f"Configured model file was not found: {snapshot['model_file']}")
-                debug_dir=(debug_root/claim["uuid"]).resolve() if debug_root else None
-                if debug_dir:
-                    try:debug_dir.relative_to(debug_root)
-                    except ValueError:raise ValueError("Work Item debug directory escapes model debug root.")
-                provider=LlamaCliProvider(cli,str(model),mmproj=str(args.mmproj) if args.mmproj else None,
-                    debug_dir=debug_dir,stage="vision")
-                writer_provider=LlamaTextCliProvider(text_cli,str(model),debug_dir=debug_dir,stage="writer")
-                WorkerRuntime(client,WORKER_KINDS[args.worker_kind](provider,writer_provider),worker_kind=args.worker_kind,
-                    lease_seconds=args.lease_seconds).run_once(claim)
+                try:
+                    snapshot=claim["configuration_snapshot"];model=(root/snapshot["model_file"]).resolve()
+                    try:model.relative_to(root)
+                    except ValueError:
+                        client.fail_work(claim["uuid"],"WORKER_CONFIGURATION_INVALID","Configured model escapes model root.")
+                        raise ValueError("Configured model escapes model root.")
+                    if not model.is_file():
+                        client.fail_work(claim["uuid"],"WORKER_CONFIGURATION_INVALID",f"Configured model file was not found: {snapshot['model_file']}")
+                        raise ValueError(f"Configured model file was not found: {snapshot['model_file']}")
+                    debug_dir=(debug_root/claim["uuid"]).resolve() if debug_root else None
+                    if debug_dir:
+                        try:debug_dir.relative_to(debug_root)
+                        except ValueError:raise ValueError("Work Item debug directory escapes model debug root.")
+                    provider=LlamaCliProvider(cli,str(model),mmproj=str(args.mmproj) if args.mmproj else None,
+                        debug_dir=debug_dir,stage="vision")
+                    writer_provider=LlamaTextCliProvider(text_cli,str(model),debug_dir=debug_dir,stage="writer")
+                    WorkerRuntime(client,WORKER_KINDS[args.worker_kind](provider,writer_provider),worker_kind=args.worker_kind,
+                        lease_seconds=args.lease_seconds).run_once(claim)
+                except Exception as exc:
+                    error_code=getattr(exc,"error_code",None)
+                    if isinstance(exc,CuratorApiError) and not exc.transient:raise
+                    if isinstance(exc,ValueError) or error_code in TERMINAL_ITEM_ERROR_CODES:raise
+                    item_failures+=1
+                    if args.once:raise
+                    if item_failures>=args.max_consecutive_item_failures:
+                        raise RuntimeError(f"AI Worker stopped after {item_failures} consecutive Work Item failures.") from exc
+                    print(f"Work Item {claim['uuid']} failed ({item_failures}/{args.max_consecutive_item_failures}); continuing with the next item: {exc}",file=sys.stderr)
+                    continue
+                item_failures=0
             if args.once:return 0
     except KeyboardInterrupt:
         print("\nCurator AI Worker stopped.");return 0

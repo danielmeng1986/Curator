@@ -133,6 +133,11 @@ Worker 以 `--model-root /opt/curator-models` 启动时，配置中的
 python3 -m workers.ai_worker run --worker-kind album_name_analysis --llama-cli /opt/llama.cpp/build/bin/llama-mtmd-cli --text-cli /opt/llama.cpp/build/bin/llama-cli --model-root /opt/curator-models --mmproj /opt/curator-models/mmproj.gguf
 ```
 
+连续运行默认允许两个可恢复的 Work Item 依次失败，并在第三个连续失败时停止，防止系统性问题
+批量制造 Failed 项。可用 `--max-consecutive-item-failures 3` 显式设置阈值；任一 Work Item
+成功后计数清零。无效模型输出、单项 evidence 或 context 问题会让当前项保持 Failed，然后继续
+领取下一项；模型文件、projector、加速器、CLI 参数、Worker kind、身份或权限等全局错误仍立即停止。
+
 更新 llama.cpp 后，先用一张不敏感的本地图片验证，再领取生产任务（替换以下三个路径）：
 
 ```bash
@@ -209,6 +214,8 @@ Admin policy 让 item 可重试。
 | 没有领取 Work Item | 确认进程使用 `--worker-kind album_name_analysis`，Admin 已派发相同 Worker kind 的 Album 与配置；队列为空时 `--once` 会正常退出。 |
 | 模型/provider 失败 | 查看 Worker 输出与 Work Item 中限长、脱敏后的 llama.cpp 诊断；核对参数、模型/mmproj、GPU、context 与 image token。保持 Review/Promotion 不变。 |
 | Backend 拒绝请求 | Worker 会显示 HTTP 状态以及 Backend `error.code` 和安全 message；按应用错误处理，不要仅凭 400/409 猜测。 |
+| 单个 Work Item 显示 Failed | 连续 Worker 会继续处理其他 Pending 项。修复并重启 Backend/Worker 后，在 UI 对该项选择 Retry；它会回到 Pending 并被自动领取。不要为其他 Waiting 项重新 Dispatch。 |
+| Worker 因连续三项失败停止 | 先检查三项是否共享模型、配置或输入问题；修复后重启 Worker。Failed 项需逐项 Retry，仍为 Pending 的项不需操作。 |
 
 <!-- manual-section: security -->
 ## 10. 安全与数据边界
