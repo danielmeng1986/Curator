@@ -26,3 +26,4 @@ database access; Web UI, AI Worker, and tools are API clients.
 | [MT-010](MT-010-add-capability-aware-waiting-ai-worker.md) | Capability-declared long-poll AI Worker | Completed |
 | [MT-011](MT-011-harden-llama-mtmd-provider-compatibility.md) | Compatible, diagnosable llama-mtmd provider execution | In Progress |
 | [MT-012](MT-012-isolate-ai-worker-item-failures.md) | Isolated Work Item failures and bounded Worker circuit breaking | Complete |
+| [MT-013](MT-013-resume-retried-ai-worker-results.md) | Stage-aware Retry without conflicting result replay | Complete |

@@ -36,19 +36,24 @@ class WorkerRuntime:
                 raise RuntimeError("Claimed Work Item kind does not match this Worker process.")
             with LeaseHeartbeat(self.client,item_uuid,self.lease_seconds) as heartbeat:
                 manifest=payload_data(self.client.prepare_manifest(item_uuid))["manifest"]
-                with tempfile.TemporaryDirectory(prefix="curator-ai-worker-",dir=self.temp_root) as directory:
-                    paths=[]
-                    for evidence in manifest["evidence"]:
-                        content=self.client.download_evidence(evidence["uuid"])
-                        if len(content)!=evidence["size_bytes"] or hashlib.sha256(content).hexdigest()!=evidence["sha256"]:
-                            raise RuntimeError("Downloaded evidence failed integrity validation.")
-                        suffix={"image/jpeg":".jpg","image/png":".png","image/webp":".webp"}[evidence["mime_type"]]
-                        path=Path(directory)/f"evidence-{evidence['ordinal']}{suffix}";path.write_bytes(content);path.chmod(0o600);paths.append(path)
-                    settings=claimed["configuration_snapshot"]
-                    vision,vision_metrics=self.workflow.vision(paths,settings);heartbeat.ensure()
-                    self.client.submit_vision(item_uuid,vision,vision_metrics)
-                    writer,writer_metrics=self.workflow.writer(vision,settings);heartbeat.ensure()
-                    self.client.submit_writer(item_uuid,writer,writer_metrics)
+                settings=claimed["configuration_snapshot"];result_state=claimed.get("result_state","AwaitingVision")
+                if result_state=="AwaitingWriter":
+                    vision=claimed.get("accepted_vision")
+                    if not isinstance(vision,dict):raise RuntimeError("AwaitingWriter claim is missing its accepted Vision result.")
+                elif result_state=="AwaitingVision":
+                    with tempfile.TemporaryDirectory(prefix="curator-ai-worker-",dir=self.temp_root) as directory:
+                        paths=[]
+                        for evidence in manifest["evidence"]:
+                            content=self.client.download_evidence(evidence["uuid"])
+                            if len(content)!=evidence["size_bytes"] or hashlib.sha256(content).hexdigest()!=evidence["sha256"]:
+                                raise RuntimeError("Downloaded evidence failed integrity validation.")
+                            suffix={"image/jpeg":".jpg","image/png":".png","image/webp":".webp"}[evidence["mime_type"]]
+                            path=Path(directory)/f"evidence-{evidence['ordinal']}{suffix}";path.write_bytes(content);path.chmod(0o600);paths.append(path)
+                        vision,vision_metrics=self.workflow.vision(paths,settings);heartbeat.ensure()
+                        self.client.submit_vision(item_uuid,vision,vision_metrics)
+                else:raise RuntimeError(f"Claimed Work Item has unsupported result state: {result_state}.")
+                writer,writer_metrics=self.workflow.writer(vision,settings);heartbeat.ensure()
+                self.client.submit_writer(item_uuid,writer,writer_metrics)
             return item_uuid
         except KeyboardInterrupt: raise
         except Exception as exc:

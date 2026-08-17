@@ -186,6 +186,11 @@ runtime 执行以下顺序：
 7. 删除临时 evidence，然后等待下一项任务。
 8. 无法安全完成时提交真实的失败状态。
 
+若 Vision 已成功而 Writer 后续失败，Admin 在 UI 选择 Retry 后，Backend 会在下一次 claim
+返回 `AwaitingWriter` 和已接受的不可变 Vision。Worker 会重新验证 Manifest，但不会再次下载
+Evidence、执行 Vision 或提交 Vision；它直接使用原 Vision 重跑 Writer，从而保留审计记录并
+避免 `AI_RESULT_CONFLICTING_REPLAY`。`AwaitingVision` 的新任务仍执行完整两阶段流程。
+
 Admin Review 与 Promotion 仍在 Curator Web UI 中完成。
 
 <!-- manual-section: lifecycle -->
@@ -214,7 +219,8 @@ Admin policy 让 item 可重试。
 | 没有领取 Work Item | 确认进程使用 `--worker-kind album_name_analysis`，Admin 已派发相同 Worker kind 的 Album 与配置；队列为空时 `--once` 会正常退出。 |
 | 模型/provider 失败 | 查看 Worker 输出与 Work Item 中限长、脱敏后的 llama.cpp 诊断；核对参数、模型/mmproj、GPU、context 与 image token。保持 Review/Promotion 不变。 |
 | Backend 拒绝请求 | Worker 会显示 HTTP 状态以及 Backend `error.code` 和安全 message；按应用错误处理，不要仅凭 400/409 猜测。 |
-| 单个 Work Item 显示 Failed | 连续 Worker 会继续处理其他 Pending 项。修复并重启 Backend/Worker 后，在 UI 对该项选择 Retry；它会回到 Pending 并被自动领取。不要为其他 Waiting 项重新 Dispatch。 |
+| 单个 Work Item 显示 Failed | 连续 Worker 会继续处理其他 Pending 项。修复并重启 Backend/Worker 后，在 UI 对该项选择 Retry；它会回到 Pending 并从最后一个已接受阶段继续。不要为其他 Waiting 项重新 Dispatch。 |
+| Retry 后出现 `AI_RESULT_CONFLICTING_REPLAY` | Backend 与 Worker 版本不匹配，旧 Worker 正在重复 Vision。停止旧 Worker，同时部署 MT-013 的 Backend 和 Worker 后再 Retry；不要删除已接受结果。 |
 | Worker 因连续三项失败停止 | 先检查三项是否共享模型、配置或输入问题；修复后重启 Worker。Failed 项需逐项 Retry，仍为 Pending 的项不需操作。 |
 
 <!-- manual-section: security -->

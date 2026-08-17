@@ -2467,6 +2467,19 @@ class AIWorkItemRepository:
     def _norm(row):
         item = dict(row); item["configuration_snapshot"] = json.loads(item.pop("configuration_snapshot_json")); return item
 
+    @staticmethod
+    def _resume_context(conn,item_uuid):
+        """Return only immutable stage data required by the active Worker attempt."""
+        exists=conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ai_work_item_result_state'").fetchone()
+        if not exists:return {"result_state":"AwaitingVision"}
+        state=conn.execute("SELECT state FROM ai_work_item_result_state WHERE work_item_uuid=?",(item_uuid,)).fetchone()
+        result_state=state[0] if state else "AwaitingVision"
+        context={"result_state":result_state}
+        if result_state=="AwaitingWriter":
+            vision=conn.execute("SELECT payload_json FROM ai_work_item_result_stage WHERE work_item_uuid=? AND stage='Vision'",(item_uuid,)).fetchone()
+            if vision:context["accepted_vision"]=json.loads(vision[0])
+        return context
+
     def create(self, fields):
         item_uuid = str(uuid.uuid4())
         with self._db() as conn:
@@ -2515,7 +2528,8 @@ class AIWorkItemRepository:
                 VALUES (?,?,?,?,?,?)""",(item_uuid,attempt,worker_token_uuid,now,lease_expires_at,
                 json.dumps(list(worker_kinds),separators=(",",":"))));conn.commit()
             claimed = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?", (item_uuid,)).fetchone()
-        return self._norm(claimed)
+            result=self._norm(claimed);result.update(self._resume_context(conn,item_uuid))
+        return result
 
     def heartbeat(self, item_uuid, worker_token_uuid, now, lease_expires_at):
         with self._db() as conn:

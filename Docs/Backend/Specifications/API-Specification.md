@@ -297,7 +297,12 @@ Selection is atomic and considers only Work Items whose immutable
 `worker_kind` is declared by the process, whose Workspace is Open, and whose
 run state is Pending or has an expired claim lease. An incompatible older item
 must not block a later compatible item. Success returns `200` with an already
-owned `data.item`, including its required `worker_kind`. A normal deadline
+owned `data.item`, including its required `worker_kind` and `result_state`.
+An item without an accepted Vision result returns `AwaitingVision`. An item
+retried after Vision succeeded returns `AwaitingWriter` and the exact normalized
+immutable `accepted_vision` payload required to resume Writer without replaying
+Vision. The recovery payload is claim-bound and contains no Token, path, or
+Evidence bytes. A normal deadline
 returns `200` with `data.item: null` and creates no attempt, Operation, or Work
 Item mutation.
 

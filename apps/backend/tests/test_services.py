@@ -1368,6 +1368,7 @@ class TestAIWorkItemClaimContract(unittest.TestCase):
     def test_claim_failure_retry_and_second_attempt_preserve_history(self):
         item = self.service.create(self.workspace["uuid"], self.album_id, self.config["uuid"])
         claimed = self.service.claim_next("worker-one", 60); self.assertEqual(item["uuid"], claimed["uuid"])
+        self.assertEqual("AwaitingVision",claimed["result_state"]);self.assertNotIn("accepted_vision",claimed)
         with self.assertRaises(svc.ServiceConflict): self.service.heartbeat(item["uuid"], "worker-two", 60)
         failed = self.service.fail(item["uuid"], "worker-one", "MODEL_TIMEOUT", "Model timed out")
         retried = self.service.retry(item["uuid"], failed["version"]); self.assertEqual("Pending", retried["run_state"])
@@ -1811,6 +1812,21 @@ class TestAIResultSubmissionContract(unittest.TestCase):
         with self.assertRaises(svc.ServiceConflict) as ctx:
             self.results.submit(self.item["uuid"],"worker-one","Vision",self.results.VISION_SCHEMA,changed)
         self.assertEqual("AI_RESULT_CONFLICTING_REPLAY",ctx.exception.code)
+
+    def test_failed_writer_retry_claim_contains_immutable_vision_resume_context(self):
+        self.results.submit(self.item["uuid"],"worker-one","Vision",self.results.VISION_SCHEMA,self.vision)
+        current=self.item_repo.get(self.item["uuid"])
+        self.conn.execute("""UPDATE workspace_album_ai_worker SET run_state='Failed',claimed_by_token_uuid=NULL,
+            lease_expires_at=NULL,version=version+1 WHERE uuid=?""",(self.item["uuid"],));self.conn.commit()
+        failed=self.item_repo.get(self.item["uuid"])
+        retried=self.item_repo.admin_transition(self.item["uuid"],failed["version"],("Failed",),"Pending",
+            "2026-08-10T02:00:00+00:00")
+        self.assertEqual("Pending",retried["run_state"])
+        claimed=self.item_repo.claim_next("worker-two",("album_name_analysis",),
+            "2026-08-10T02:00:01+00:00","2026-08-10T02:05:01+00:00")
+        self.assertEqual("AwaitingWriter",claimed["result_state"])
+        self.assertEqual(self.vision,claimed["accepted_vision"])
+        self.assertNotEqual(current["version"],claimed["version"])
 
     def test_invalid_schema_name_and_claim_make_no_result(self):
         bad = dict(self.writer); bad["suggested_names"] = ["Bad Photos"] * 6

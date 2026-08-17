@@ -141,6 +141,25 @@ class WorkerTests(unittest.TestCase):
         client=Client();workflow=Workflow();self.assertEqual("item-1",WorkerRuntime(client,workflow).run_once())
         self.assertEqual(["vision","writer"],[item[0] for item in client.calls]);self.assertFalse(workflow.paths[0].exists())
 
+    def test_runtime_resumes_awaiting_writer_without_replaying_vision_or_evidence(self):
+        accepted={"scene":"accepted vision"}
+        class Client:
+            def __init__(self):self.calls=[]
+            def prepare_manifest(self,*_):self.calls.append("manifest");return {"data":{"manifest":{"evidence":[]}}}
+            def download_evidence(self,*_):raise AssertionError("resume must not download evidence")
+            def submit_vision(self,*_):raise AssertionError("resume must not replay Vision")
+            def submit_writer(self,*args):self.calls.append(("writer",args))
+            def heartbeat(self,*_):pass
+            def fail_work(self,*_):self.calls.append("fail")
+        class Workflow:
+            def vision(self,*_):raise AssertionError("resume must not run Vision")
+            def writer(self,vision,settings):self.vision=vision;return {"suggested_names":["a"]},{"duration_ms":1}
+        claimed={"uuid":"item-1","worker_kind":"album_name_analysis","configuration_snapshot":{},
+            "result_state":"AwaitingWriter","accepted_vision":accepted}
+        client=Client();workflow=Workflow()
+        self.assertEqual("item-1",WorkerRuntime(client,workflow).run_once(claimed))
+        self.assertEqual(accepted,workflow.vision);self.assertEqual("writer",client.calls[-1][0]);self.assertNotIn("fail",client.calls)
+
     def test_runtime_rejects_and_truthfully_fails_a_mismatched_claim_before_evidence(self):
         class Client:
             def __init__(self):self.calls=[]
