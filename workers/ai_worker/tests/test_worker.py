@@ -153,12 +153,13 @@ class WorkerTests(unittest.TestCase):
             def fail_work(self,*_):self.calls.append("fail")
         class Workflow:
             def vision(self,*_):raise AssertionError("resume must not run Vision")
-            def writer(self,vision,settings):self.vision=vision;return {"suggested_names":["a"]},{"duration_ms":1}
+            def writer(self,vision,settings):self.vision,self.settings=vision,settings;return {"suggested_names":["a"]},{"duration_ms":1}
         claimed={"uuid":"item-1","worker_kind":"album_name_analysis","configuration_snapshot":{},
-            "result_state":"AwaitingWriter","accepted_vision":accepted}
+            "result_state":"AwaitingWriter","accepted_vision":accepted,"attempt_count":4}
         client=Client();workflow=Workflow()
         self.assertEqual("item-1",WorkerRuntime(client,workflow).run_once(claimed))
         self.assertEqual(accepted,workflow.vision);self.assertEqual("writer",client.calls[-1][0]);self.assertNotIn("fail",client.calls)
+        self.assertEqual("item-1",workflow.settings["_work_item_uuid"]);self.assertEqual(4,workflow.settings["_work_item_attempt"])
 
     def test_runtime_rejects_and_truthfully_fails_a_mismatched_claim_before_evidence(self):
         class Client:
@@ -228,17 +229,18 @@ class WorkerTests(unittest.TestCase):
     @patch("workers.ai_worker.provider.subprocess.run")
     def test_text_provider_is_single_turn_and_non_interactive(self,run):
         run.return_value.stdout='```json\n{"status":"ok"}\n```';run.return_value.stderr=""
-        payload,metrics=LlamaTextCliProvider("llama-cli","model.gguf").complete("write",settings={"max_tokens":128})
+        payload,metrics=LlamaTextCliProvider("llama-cli","model.gguf").complete("write",settings={"max_tokens":128,"writer_seed":123})
         args=run.call_args.args[0]
         self.assertEqual({"status":"ok"},payload)
         for option in ("--single-turn","--simple-io","--no-display-prompt","--no-show-timings"):self.assertIn(option,args)
         self.assertIn("--grammar",args);self.assertIn("name2",args[args.index("--grammar")+1])
+        self.assertEqual("123",args[args.index("--seed")+1]);self.assertEqual(123,metrics["effective_seed"])
         self.assertEqual("writer-v1-gbnf-2-natural-titles",metrics["constrained_decoding"]);self.assertEqual(0,metrics["effective_temperature"])
         self.assertNotIn("--mmproj",args);self.assertNotIn("--image",args)
 
     @patch("workers.ai_worker.provider.subprocess.run")
     def test_text_preflight_requires_single_turn_options(self,run):
-        run.return_value.stdout="--single-turn --simple-io --no-display-prompt --no-show-timings --gpu-layers --grammar";run.return_value.stderr=""
+        run.return_value.stdout="--single-turn --simple-io --no-display-prompt --no-show-timings --gpu-layers --grammar --seed";run.return_value.stderr=""
         validate_text_cli("llama-cli")
         run.return_value.stdout="--gpu-layers"
         with self.assertRaisesRegex(ProviderError,"missing required options"):validate_text_cli("llama-cli")
@@ -248,6 +250,16 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(ProviderError) as raised:
             LlamaTextCliProvider("llama-cli","model.gguf").complete("write",settings={"writer_temperature":0.5})
         self.assertEqual("MODEL_PROVIDER_ARGUMENT_INVALID",raised.exception.error_code);run.assert_not_called()
+
+    @patch("workers.ai_worker.provider.subprocess.run")
+    def test_writer_debug_metadata_records_effective_generation_controls(self,run):
+        run.return_value.stdout='{"status":"ok"}';run.return_value.stderr="";run.return_value.returncode=0
+        with tempfile.TemporaryDirectory() as root:
+            debug=Path(root)/"item-1"
+            LlamaTextCliProvider("llama-cli","model.gguf",debug_dir=debug).complete("write",
+                settings={"writer_seed":456,"writer_temperature":0.1,"writer_generation_attempt":2})
+            metadata=json.loads(next(debug.glob("*.metadata.json")).read_text())
+            self.assertEqual({"attempt":2,"seed":456,"temperature":0.1},metadata["generation"])
 
     def test_writer_grammar_uses_gbnf_character_class_without_invalid_hyphen_escape(self):
         from workers.ai_worker.constraints import WRITER_GBNF
@@ -307,6 +319,25 @@ class WorkerTests(unittest.TestCase):
         provider=Provider();payload,_=AnalysisWorkflow(object(),provider,sleep=lambda _:None).writer({"scene":"garden"},{})
         self.assertEqual(valid,payload);self.assertEqual(2,len(provider.calls));self.assertIn("failed validation",provider.calls[1][0])
         self.assertNotIn("json_schema",provider.calls[0][1])
+        first_settings,repair_settings=provider.calls[0][1]["settings"],provider.calls[1][1]["settings"]
+        self.assertNotEqual(first_settings["writer_seed"],repair_settings["writer_seed"])
+        self.assertEqual(0,first_settings["writer_temperature"]);self.assertEqual(0.1,repair_settings["writer_temperature"])
+        self.assertIn('previous suggested_names were: ["gallery"]',provider.calls[1][0])
+
+    def test_all_writer_repair_attempts_have_distinct_prompts_and_seeds(self):
+        valid={"album_summary":"Garden scene","description":"A garden setting.","suggested_names":
+            ["Bamboo Garden","Quiet Retreat","Summer Garden Light","Gentle Summer Elegance","Serene Moments By Water","Together Near The Garden"]}
+        invalid={**valid,"suggested_names":["Bamboo Garden"]*6}
+        class Provider:
+            def __init__(self):self.calls=[]
+            def complete(self,prompt,**kwargs):
+                self.calls.append((prompt,kwargs));return (invalid if len(self.calls)<3 else valid),{}
+        provider=Provider();result,_=AnalysisWorkflow(object(),provider,sleep=lambda _:None).writer({},
+            {"_work_item_uuid":"item-1","_work_item_attempt":2})
+        self.assertEqual(valid,result);self.assertEqual(3,len(provider.calls))
+        self.assertEqual(3,len({call[1]["settings"]["writer_seed"] for call in provider.calls}))
+        self.assertIn("Writer repair attempt 2 of 3",provider.calls[1][0]);self.assertIn("Writer repair attempt 3 of 3",provider.calls[2][0])
+        self.assertNotEqual(provider.calls[1][0],provider.calls[2][0])
 
     @patch("workers.ai_worker.provider.subprocess.run")
     def test_text_provider_detects_zero_exit_sampler_failure(self,run):
@@ -358,6 +389,14 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual("Silken Shadows Unveiled",normalized["suggested_names"][5])
         self.assertEqual("Whispers Between Sheets II",payload["suggested_names"][4])
         self.assertEqual(normalized,validate_writer_payload(normalized))
+
+    def test_writer_filler_normalization_never_creates_a_duplicate(self):
+        from workers.ai_worker.workflow import normalize_writer_titles
+        payload={"album_summary":"Summary","description":"Description","suggested_names":[
+            "Nude Serenity","Natural Grace","Water's Embrace Serenity","Grass Embrace Serenity",
+            "Tree Embrace Serenity","Water's Embrace Serenity II"]}
+        with self.assertRaisesRegex(ProviderError,"would duplicate"):
+            normalize_writer_titles(payload)
 
     def test_runtime_preserves_provider_failure_category(self):
         class Client:

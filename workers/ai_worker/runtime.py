@@ -36,7 +36,9 @@ class WorkerRuntime:
                 raise RuntimeError("Claimed Work Item kind does not match this Worker process.")
             with LeaseHeartbeat(self.client,item_uuid,self.lease_seconds) as heartbeat:
                 manifest=payload_data(self.client.prepare_manifest(item_uuid))["manifest"]
-                settings=claimed["configuration_snapshot"];result_state=claimed.get("result_state","AwaitingVision")
+                settings=dict(claimed["configuration_snapshot"])
+                settings["_work_item_uuid"]=item_uuid;settings["_work_item_attempt"]=claimed.get("attempt_count",1)
+                result_state=claimed.get("result_state","AwaitingVision")
                 if result_state=="AwaitingWriter":
                     vision=claimed.get("accepted_vision")
                     if not isinstance(vision,dict):raise RuntimeError("AwaitingWriter claim is missing its accepted Vision result.")

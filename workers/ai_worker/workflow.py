@@ -1,6 +1,7 @@
 """Two-stage Album-analysis orchestration and prompt ownership."""
 from __future__ import annotations
 import json
+import hashlib
 import re
 import time
 from .provider import ProviderError
@@ -22,6 +23,18 @@ Content, Shoot, Shoots, Posing, Displaying, Genital, Area, Interior, Photo, Phot
 Gallery. Do not describe explicit sexual acts or identify a person. Vision JSON:\n{vision}"""
 FORBIDDEN_NAME_WORDS={"photo","photos","collection","session","gallery"}
 NATURAL_TITLE_POLICY_VERSION="writer-natural-title-v1"
+WRITER_REPAIR_TEMPERATURE=0.1
+
+def _writer_attempt_settings(settings,attempt):
+    """Derive observable sampling parameters from Work Item and repair attempts."""
+    result=dict(settings or {})
+    material=f"{result.get('_work_item_uuid','unbound')}:{result.get('_work_item_attempt',1)}:{attempt+1}"
+    result["writer_seed"]=int.from_bytes(hashlib.sha256(material.encode()).digest()[:4],"big") & 0x7fffffff
+    result["writer_generation_attempt"]=attempt+1
+    result.setdefault("writer_temperature",0)
+    if attempt:
+        result["writer_temperature"]=max(float(result.get("writer_temperature",0)),WRITER_REPAIR_TEMPERATURE)
+    return result
 
 def _bounded_array(payload,key,maximum,text_limit):
     values=payload[key]
@@ -88,7 +101,10 @@ def normalize_writer_titles(payload):
         roman_filler=bool(re.fullmatch(r"[IVXLCDM]{2,}",tail))
         repeated_filler=bool(re.fullmatch(r"(.)\1{3,}",tail,re.IGNORECASE))
         if (roman_filler or repeated_filler) and len(words)==4:
-            names[index]=" ".join(words[:-1]);replacements+=1
+            candidate=" ".join(words[:-1])
+            if candidate in names[:index]+names[index+1:]:
+                raise ProviderError(f'Suggested name "{names[index]}" contains filler, but removing it would duplicate "{candidate}". Replace the complete title with a distinct name.',error_code="MODEL_OUTPUT_INVALID")
+            names[index]=candidate;replacements+=1
     result["suggested_names"]=names
     return result,replacements
 
@@ -126,7 +142,8 @@ class AnalysisWorkflow:
         base=compose(profile,"writer",vision=vision) if profile else WRITER_PROMPT.format(vision=json.dumps(vision,sort_keys=True))
         prompt=base
         for attempt in range(self.retries+1):
-            try:payload,metrics=self.writer_provider.complete(prompt,settings=settings)
+            attempt_settings=_writer_attempt_settings(settings,attempt)
+            try:payload,metrics=self.writer_provider.complete(prompt,settings=attempt_settings)
             except ProviderError:
                 if attempt==self.retries:raise
                 self.sleep(2**attempt);continue
@@ -139,6 +156,8 @@ class AnalysisWorkflow:
                 return validated,metrics
             except ProviderError as exc:
                 if attempt==self.retries:raise
-                prompt=(f"{base}\nYour previous response failed validation: {exc} "
-                    "Replace every invalid suggested name, regenerate the complete JSON object, and do not repeat the invalid title or forbidden word.")
+                previous_names=json.dumps(payload.get("suggested_names") if isinstance(payload,dict) else None,ensure_ascii=True)
+                prompt=(f"{base}\nWriter repair attempt {attempt+2} of {self.retries+1}. "
+                    f"Your previous suggested_names were: {previous_names}. Your previous response failed validation: {exc} "
+                    "Replace every invalid or duplicated suggested name, regenerate the complete JSON object, and do not repeat the invalid title or forbidden word.")
                 self.sleep(2**attempt)

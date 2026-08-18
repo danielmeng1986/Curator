@@ -155,8 +155,9 @@ Writer 必须具备 `--single-turn`、`--simple-io`、`--grammar` 与有界输�
 llama.cpp build 会在领取任务前被拒绝，纯文本 prompt 也不会进入交互式 chat 循环。Writer 会由
 prompt 要求输出 JSON，并在提交前按照 Curator 的字段长度与
 六个名称分布规则（两个双词、两个三词、两个四词名称）进行本地校验；不合格的模型输出会收到
-有界纠错重试。Curator 每次 Writer 调用都会传入审核过的 `writer-v1-gbnf-1` Grammar，并把
-Writer 的有效 temperature 固定为零；Grammar sampler 失败时不会静默退回自由生成。Worker 与
+有界纠错重试。Curator 每次 Writer 调用都会传入审核过的 Writer Grammar。首次生成保留配置的
+temperature；纠错生成在原值为零时使用低温 `0.1`，并根据 Work Item、Backend Retry 次数和内部
+纠错次数传入不同的 `--seed`。Grammar sampler 失败时不会静默退回自由生成。Worker 与
 Backend 的双重校验仍负责唯一性、禁用词等语义规则。
 Vision 输出同样会在提交前按照 schema v1 的精确字段、人数范围、数组、置信度和文本上限进行
 本地校验；模型格式发生偏移时，Worker 会先进行有界纠错重试，而不是把无效结果提交成 HTTP 400。
@@ -164,7 +165,8 @@ Vision 输出同样会在提交前按照 schema v1 的精确字段、人数范�
 `--image` 值。
 
 需要排查模型原始输出时，可显式添加 `--model-debug-dir /opt/curator-worker-debug`。Worker 会按
-Work Item 保存 Vision/Writer 的 stdout、stderr 与不含命令参数的 metadata；目录权限为 `0700`，
+Work Item 保存 Vision/Writer 的 stdout、stderr 与不含命令参数的 metadata；Writer metadata 会额外
+记录实际 generation attempt、seed 和 temperature。目录权限为 `0700`，
 文件为 `0600`。该选项默认关闭，内容不会上传 Backend，也不会复制 Evidence，但原始输出可能
 包含对私人图片的描述，测试完成后应由操作者删除。JSON 解析会先检查 stdout，再检查 stderr。
 

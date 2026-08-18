@@ -13,7 +13,7 @@ class ProviderError(RuntimeError):
         super().__init__(message);self.error_code=error_code
 
 REQUIRED_MTMD_OPTIONS=("--mmproj","--image","--image-max-tokens","--gpu-layers")
-REQUIRED_TEXT_OPTIONS=("--single-turn","--simple-io","--no-display-prompt","--no-show-timings","--gpu-layers","--grammar")
+REQUIRED_TEXT_OPTIONS=("--single-turn","--simple-io","--no-display-prompt","--no-show-timings","--gpu-layers","--grammar","--seed")
 DIAGNOSTIC_LIMIT=700
 
 def _validate_cli(cli: str,required_options,display_name: str) -> None:
@@ -89,13 +89,14 @@ class LlamaCliProvider:
     def _text(value):
         if value is None:return ""
         return value.decode(errors="replace") if isinstance(value,bytes) else str(value)
-    def _record_debug(self,stdout,stderr,returncode,outcome):
+    def _record_debug(self,stdout,stderr,returncode,outcome,parameters=None):
         if not self.debug_dir:return
         self.debug_dir.mkdir(parents=True,exist_ok=True);self.debug_dir.chmod(0o700)
         stem=f"{self.stage}-{time.time_ns()}"
         values={f"{stem}.stdout.txt":self._text(stdout),f"{stem}.stderr.txt":self._text(stderr),
             f"{stem}.metadata.json":json.dumps({"stage":self.stage,"returncode":returncode,"outcome":outcome,
-                "stdout_bytes":len(self._text(stdout).encode()),"stderr_bytes":len(self._text(stderr).encode())},indent=2)+"\n"}
+                "stdout_bytes":len(self._text(stdout).encode()),"stderr_bytes":len(self._text(stderr).encode()),
+                **({"generation":parameters} if parameters else {})},indent=2)+"\n"}
         for name,value in values.items():
             path=self.debug_dir/name
             descriptor=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
@@ -136,19 +137,23 @@ class LlamaTextCliProvider(LlamaCliProvider):
         settings=settings or {};writer_temperature=settings.get("writer_temperature",0)
         if isinstance(writer_temperature,bool) or not isinstance(writer_temperature,(int,float)) or not 0<=writer_temperature<=0.2:
             raise ProviderError("Writer temperature must be between 0 and 0.2.",error_code="MODEL_PROVIDER_ARGUMENT_INVALID")
+        writer_seed=settings.get("writer_seed",0)
+        if isinstance(writer_seed,bool) or not isinstance(writer_seed,int) or not 0<=writer_seed<=0x7fffffff:
+            raise ProviderError("Writer seed must be an integer from 0 to 2147483647.",error_code="MODEL_PROVIDER_ARGUMENT_INVALID")
+        generation={"attempt":settings.get("writer_generation_attempt",1),"seed":writer_seed,"temperature":writer_temperature}
         args=[self.cli,"-m",self.model,"-p",prompt,
             "-c",str(settings.get("context_size",4096)),"-t",str(settings.get("threads",1)),
             "-ngl",str(settings.get("gpu_layers",0)),"-n",str(settings.get("max_tokens",512)),
-            "--temp",str(writer_temperature),"--grammar",WRITER_GBNF,"--single-turn","--simple-io",
+            "--temp",str(writer_temperature),"--seed",str(writer_seed),"--grammar",WRITER_GBNF,"--single-turn","--simple-io",
             "--no-display-prompt","--no-show-timings"]
         started=time.monotonic()
         try:
             result=subprocess.run(args,check=True,capture_output=True,text=True,timeout=self.timeout_seconds)
         except subprocess.TimeoutExpired as exc:
-            self._record_debug(exc.stdout,exc.stderr,None,"timeout")
+            self._record_debug(exc.stdout,exc.stderr,None,"timeout",generation)
             raise ProviderError("Text model provider timed out; no Curator result was submitted.",error_code="MODEL_PROVIDER_TIMEOUT") from exc
         except subprocess.CalledProcessError as exc:
-            self._record_debug(exc.stdout,exc.stderr,exc.returncode,"process_failed")
+            self._record_debug(exc.stdout,exc.stderr,exc.returncode,"process_failed",generation)
             diagnostic=_safe_diagnostic(exc.stderr or exc.stdout,[prompt,self.model])
             message="Text model provider failed"
             if diagnostic:message+=f": {diagnostic}"
@@ -156,7 +161,7 @@ class LlamaTextCliProvider(LlamaCliProvider):
         except OSError as exc:
             raise ProviderError("Text model provider could not start; no Curator result was submitted.",
                 error_code="MODEL_PROVIDER_EXECUTABLE_INVALID") from exc
-        self._record_debug(result.stdout,result.stderr,result.returncode,"completed")
+        self._record_debug(result.stdout,result.stderr,result.returncode,"completed",generation)
         try:payload=parse_json_streams(result.stdout,result.stderr)
         except ProviderError as exc:
             diagnostic=_safe_diagnostic(f"{result.stderr}\n{result.stdout}",[prompt,self.model])
@@ -165,4 +170,5 @@ class LlamaTextCliProvider(LlamaCliProvider):
                     error_code="MODEL_PROVIDER_ARGUMENT_INVALID") from exc
             raise
         return payload,{"duration_ms":round((time.monotonic()-started)*1000),"provider":"llama_cpp",
-            "constrained_decoding":WRITER_GRAMMAR_VERSION,"effective_temperature":writer_temperature}
+            "constrained_decoding":WRITER_GRAMMAR_VERSION,"effective_temperature":writer_temperature,
+            "effective_seed":writer_seed,"writer_generation_attempt":generation["attempt"]}

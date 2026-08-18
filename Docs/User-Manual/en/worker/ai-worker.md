@@ -168,8 +168,10 @@ cannot enter an interactive chat loop. The prompt requests Writer JSON, which
 is locally checked against Curator's field-length and six-name distribution
 (two 2-word, two 3-word, and two 4-word names) before
 submission; invalid output receives bounded corrective retries. Curator passes
-its reviewed `writer-v1-gbnf-1` grammar on every Writer invocation and uses an
-effective Writer temperature of zero. A llama.cpp build without grammar support
+its reviewed Writer grammar on every Writer invocation. Initial generation
+preserves the configured temperature; corrective generation uses a reviewed
+low temperature of `0.1` when the original is zero and an explicit seed derived
+from the Work Item, Backend Retry, and internal repair attempt. A llama.cpp build without grammar support
 is rejected before claim, and sampler failure never falls back to unconstrained
 generation. Worker and Backend validation remain authoritative for semantic
 rules such as uniqueness and forbidden words.
@@ -181,7 +183,8 @@ comma-separated `--image` value required by the supported llama-mtmd build.
 
 For raw model-output diagnosis, explicitly add
 `--model-debug-dir /opt/curator-worker-debug`. The Worker stores per-Work-Item
-Vision/Writer stdout, stderr, and argument-free metadata using `0700`
+Vision/Writer stdout, stderr, and argument-free metadata using `0700`. Writer
+metadata also records the effective generation attempt, seed, and temperature. The
 directories and `0600` files. This is off by default, never uploaded, and does
 not copy Evidence, but raw output can describe private images and should be
 deleted by the operator after testing. JSON parsing checks stdout, then stderr.
