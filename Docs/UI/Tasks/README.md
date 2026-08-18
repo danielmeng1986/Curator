@@ -78,6 +78,7 @@ snapshot, archive, and output resources.
 | [UI-033](UI-033-streamline-ai-review-and-live-dispatch-progress.md) | Fast sequential Album review and automatically refreshed run progress | Complete |
 | [UI-034](UI-034-live-review-and-ephemeral-evidence-preview.md) | Live AI Review state and ephemeral lazy-loaded evidence preview | Complete |
 | [UI-035](UI-035-separate-work-queue-review-and-item-cancellation.md) | Work queue/review/closure workflow, per-item cancellation, and dual pagination | Complete |
+| [UI-036](UI-036-guide-cancelled-work-item-closure.md) | Explain Album reservation and Group closure after Work Item cancellation | Complete |
 
 ## Dependency outline
 

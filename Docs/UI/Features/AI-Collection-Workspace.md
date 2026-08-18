@@ -67,6 +67,12 @@ active lease deadline, redacted failure, and a stable detail route. The stage is
 a projection of authoritative Backend state, not a browser-owned progress bar.
 Long Dispatch pages provide synchronized navigation above and below the content,
 including First, Previous, direct page entry, Next, and Last.
+Cancelling a Failed Work Item preserves its Dispatch Group and therefore does
+not return the Album to Available. Group detail explains the remaining
+reservation and the next step: complete or cancel the other runs, enter
+Closure, and choose **Release Group**. **Abandon Group** remains the exceptional
+whole-Group recovery action; it also frees the reservation but records the
+Group as Abandoned.
 While Worker Queue or an Active Group detail route is visible, bounded native-JavaScript
 polling refreshes only the progress region every five seconds. It pauses in a
 hidden tab, avoids overlapping requests, backs off after failure, preserves an

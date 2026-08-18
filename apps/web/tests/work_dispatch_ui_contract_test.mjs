@@ -52,7 +52,8 @@ assert.match(pageSource, />Retry<\/button>/);
 assert.match(pageSource, /\/ai-work-items\/\$\{encodeURIComponent\(uuid\)\}\/retry/);
 assert.match(pageSource, />Cancel<\/button>/);
 assert.match(pageSource, /\/ai-work-items\/\$\{encodeURIComponent\(uuid\)\}\/cancel/);
-assert.match(pageSource, /Dispatch Group was preserved/);
+assert.match(pageSource, /Album remains reserved by this Group/);
+assert.match(pageSource, /Release Group/);
 assert.match(pageSource, /No Open AI Workspace exists/);
 assert.match(pageSource, /Create and select an Open AI Workspace/);
 assert.match(pageSource, /Select all Albums on current page/);
@@ -71,6 +72,11 @@ assert.match(failedRows,/>Retry<\/button>/);assert.match(failedRows,/retryItem\(
 assert.match(failedRows,/>Cancel<\/button>/);assert.match(failedRows,/cancelItem\('item-1',3,this\)/);
 const pendingRows=page._itemRows([{item_uuid:'item-2',version:1,run_state:'Pending',attempt_count:0,configuration_snapshot:{name:'Balanced',model_file:'qwen.gguf'}}],'Fixture Album');
 assert.doesNotMatch(pendingRows,/>Retry<\/button>/);
+const closureGuidance=page._groupNextStepHtml({items:[{run_state:'Cancelled'}],allowed_actions:['release']});
+assert.match(closureGuidance,/Ready to return this Album to Available/);assert.match(closureGuidance,/free the Album reservation/);
+const mixedGuidance=page._groupNextStepHtml({items:[{run_state:'Cancelled'},{run_state:'Pending'}],allowed_actions:[]});
+assert.match(mixedGuidance,/Album is still reserved/);assert.match(mixedGuidance,/remaining Worker runs/);
+assert.match(page._groupActionsHtml({group:{uuid:'group-1',version:2},allowed_actions:['release']}),/>Release Group<\/button>/);
 
 elements.set('dispatchSelectionCount', { textContent:'' });
 elements.set('dispatchPreviewBtn', { disabled:true });

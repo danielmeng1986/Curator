@@ -79,10 +79,11 @@ try{
   const failed=await fixture.request(`/ai-work-items/${failedItem.uuid}/fail`,{method:'POST',role:'writer',body:{error_code:'EVIDENCE_SAMPLE_INSUFFICIENT',message:'Album contains fewer usable images than the configured sample count.'}});
   assert.equal(failed.status,200);
   const failedGroup=active.payload.data.find(group=>group.items.some(item=>item.item_uuid===failedItem.uuid));assert.ok(failedGroup);
-  await page.goto(`${fixture.origin}/#/work-dispatch/groups/${failedGroup.uuid}`);await page.getByText('EVIDENCE_SAMPLE_INSUFFICIENT').waitFor();
+  await page.goto(`${fixture.origin}/#/work-dispatch/groups/${failedGroup.uuid}`);await page.getByText('Album contains fewer usable images than the configured sample count.').waitFor();
   await page.getByRole('button',{name:'Cancel',exact:true}).click();await page.getByRole('heading',{name:'Cancel failed Work Item?'}).waitFor();
-  await page.getByRole('button',{name:'Cancel Work Item'}).click();await page.getByText('Work Item cancelled. The Dispatch Group was preserved.').waitFor();
+  await page.getByRole('button',{name:'Cancel Work Item'}).click();await page.getByText(/Work Item cancelled. The Album remains reserved/).waitFor();
   assert.equal(await page.getByText('Cancelled',{exact:true}).count(),1);
+  await page.getByText(/The Album is still reserved/).waitFor();
 
   for(const group of active.payload.data){
     const detail=await fixture.request(`/work-dispatch/groups/${group.uuid}`,{role:'admin'});
@@ -100,7 +101,7 @@ try{
     await page.goto(`${fixture.origin}/#/work-dispatch/groups/${group.uuid}`); await page.getByRole('heading',{name:'Dispatch Group'}).waitFor();
     assert.equal(await page.getByRole('columnheader',{name:'Current stage'}).isVisible(),true);
     page.once('dialog',dialog=>dialog.accept('Browser acceptance terminal cancellation'));
-    const cancel=page.getByRole('button',{name:'cancel',exact:true});if(await cancel.count())await cancel.click();else await page.getByRole('button',{name:'release',exact:true}).click();await page.getByText('Released').waitFor();
+    const cancel=page.getByRole('button',{name:'Cancel Group',exact:true});if(await cancel.count())await cancel.click();else await page.getByRole('button',{name:'Release Group',exact:true}).click();await page.getByText('Released').waitFor();
   }
   await page.goto(`${fixture.origin}/#/work-dispatch`); await page.getByRole('heading',{name:'Album Work Dispatch'}).waitFor();
   assert.equal(await page.locator('[data-dispatch-album]').count(),3);

@@ -64,10 +64,10 @@ const WorkDispatchPage = {
   },
 
   async cancelItem(uuid,version,trigger) {
-    if(!await ui.confirmDialog({title:'Cancel failed Work Item?',message:'This removes only this failed run from Worker processing. Other runs and the Dispatch Group are preserved.',confirmLabel:'Cancel Work Item',danger:true}))return;
+    if(!await ui.confirmDialog({title:'Cancel failed Work Item?',message:'This removes only this failed run from Worker processing. The Dispatch Group and its other runs are preserved, so the Album remains reserved. To dispatch the Album again, finish the Group in Closure and choose Release Group.',confirmLabel:'Cancel Work Item',danger:true}))return;
     const result=await ui.runAction(`work-item-cancel-${uuid}`,()=>api.post(`/ai-work-items/${encodeURIComponent(uuid)}/cancel`,{expected_version:version}),{trigger,context:'cancel the failed Work Item'});
     if(!result.ok)return;
-    toast('Work Item cancelled. The Dispatch Group was preserved.');
+    toast('Work Item cancelled. The Album remains reserved by this Group; use Closure → Release Group to make it Available again.');
     const groupMatch=window.location.hash.match(/^#\/work-dispatch\/groups\/([^/?]+)/);
     if(groupMatch)await this.renderGroup({uuid:decodeURIComponent(groupMatch[1])});
     else await this.loadView();
@@ -101,20 +101,30 @@ const WorkDispatchPage = {
         <div class="card workspace-summary"><p>Group: <code>${esc(group.uuid)}</code></p><p>Album #${group.album_id} · Worker ${esc(group.worker_kind)} · Version ${group.version}</p>
         <div id="dispatchGroupBlockers">${this._groupBlockersHtml(detail)}</div>
         <div class="table-wrap"><table class="work-progress"><thead><tr><th>Album</th><th>Configuration</th><th>Current stage</th><th>Attempts</th><th>Last activity</th><th>Failure</th><th>Details</th></tr></thead><tbody id="dispatchGroupProgressRows">${this._itemRows(detail.items, `Album #${group.album_id}`)}</tbody></table></div>
+        <div id="dispatchGroupNextStep">${this._groupNextStepHtml(detail)}</div>
         <div id="dispatchGroupActions" class="detail-actions">${this._groupActionsHtml(detail)}</div></div>`;
       if(group.group_state==='Active')this._startPolling(`group:${group.uuid}`,()=>this.refreshGroup(group.uuid,false),()=>window.location.hash===`#/work-dispatch/groups/${group.uuid}`);
     } catch(error){ui.renderPageError(el,error,'Dispatch Group');}
   },
 
   _groupBlockersHtml(detail){return detail.blockers.length?`<div class="alert alert-warning">${detail.blockers.map(item=>esc(item.reason)).join(' · ')}</div>`:'';},
-  _groupActionsHtml(detail){const group=detail.group;return detail.allowed_actions.map(action=>`<button class="btn ${action==='release'?'btn-primary':'btn-danger'}" onclick="WorkDispatchPage.closeGroup('${esc(group.uuid)}','${action}',${group.version},this)">${action}</button>`).join('');},
+  _groupNextStepHtml(detail){
+    const items=detail.items||[];const actions=detail.allowed_actions||[];
+    const cancelled=items.filter(item=>item.run_state==='Cancelled').length;
+    const workerOpen=items.some(item=>['Pending','Claimed','Failed'].includes(item.run_state));
+    if(actions.includes('release'))return `<div class="alert alert-info"><strong>Ready to return this Album to Available.</strong> ${cancelled===items.length?'All Work Items are cancelled. ':'Worker and review work is complete. '}Choose <strong>Release Group</strong> to free the Album reservation so it can be dispatched again.</div>`;
+    if(cancelled&&workerOpen)return '<div class="alert alert-info"><strong>The Album is still reserved.</strong> Cancelling a Work Item preserves this Group. Finish, retry, or cancel the remaining Worker runs; when the Group reaches Closure, choose <strong>Release Group</strong> to make the Album Available again.</div>';
+    if(actions.includes('abandon'))return '<div class="alert alert-warning"><strong>Choose the scope of recovery.</strong> Retry or cancel individual failed Work Items to preserve this Group. <strong>Abandon Group</strong> closes the entire Group and frees the Album reservation for a new dispatch.</div>';
+    return '';
+  },
+  _groupActionsHtml(detail){const group=detail.group;const labels={release:'Release Group',abandon:'Abandon Group',cancel:'Cancel Group'};return detail.allowed_actions.map(action=>`<button class="btn ${action==='release'?'btn-primary':'btn-danger'}" onclick="WorkDispatchPage.closeGroup('${esc(group.uuid)}','${action}',${group.version},this)">${labels[action]||action}</button>`).join('');},
   async refreshGroup(uuid,manual=false){
     const result=await api.get(`/work-dispatch/groups/${encodeURIComponent(uuid)}`);const detail=result.group;const group=detail.group;
     const rows=document.getElementById('dispatchGroupProgressRows');if(!rows)return false;
     const focused=document.activeElement;const deferred=Boolean(focused&&rows.contains(focused));
     if(!deferred)rows.innerHTML=this._itemRows(detail.items,`Album #${group.album_id}`);
     const state=document.getElementById('dispatchGroupState');if(state)state.textContent=group.group_state;
-    for(const [id,html] of [['dispatchGroupBlockers',this._groupBlockersHtml(detail)],['dispatchGroupActions',this._groupActionsHtml(detail)]]){
+    for(const [id,html] of [['dispatchGroupBlockers',this._groupBlockersHtml(detail)],['dispatchGroupNextStep',this._groupNextStepHtml(detail)],['dispatchGroupActions',this._groupActionsHtml(detail)]]){
       const target=document.getElementById(id);if(target&&(!focused||!target.contains(focused)))target.innerHTML=html;
     }
     if(manual)this._setPollStatus('Progress refreshed manually.');
