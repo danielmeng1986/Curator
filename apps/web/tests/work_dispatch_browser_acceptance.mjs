@@ -82,7 +82,7 @@ try{
   await page.goto(`${fixture.origin}/#/work-dispatch/groups/${failedGroup.uuid}`);await page.getByText('Album contains fewer usable images than the configured sample count.').waitFor();
   await page.getByRole('button',{name:'Cancel',exact:true}).click();await page.getByRole('heading',{name:'Cancel failed Work Item?'}).waitFor();
   await page.getByRole('button',{name:'Cancel Work Item'}).click();await page.getByText(/Work Item cancelled. The Album remains reserved/).waitFor();
-  assert.equal(await page.getByText('Cancelled',{exact:true}).count(),1);
+  await page.getByText('Cancelled',{exact:true}).waitFor();assert.equal(await page.getByText('Cancelled',{exact:true}).count(),1);
   await page.getByText(/The Album is still reserved/).waitFor();
 
   for(const group of active.payload.data){

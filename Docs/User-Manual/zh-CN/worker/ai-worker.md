@@ -163,6 +163,9 @@ Vision 输出同样会在提交前按照 schema v1 的精确字段、人数范�
 本地校验；模型格式发生偏移时，Worker 会先进行有界纠错重试，而不是把无效结果提交成 HTTP 400。
 多张 Evidence 图片会按照 Manifest 顺序组成该 llama-mtmd build 要求的单个逗号分隔
 `--image` 值。
+当只有部分 Writer 标题未通过语义校验时，Worker 会保留合格标题，只为无效槽位生成替代项。
+Work Dispatch 中的 **Retry Writer** 继续使用已接受 Vision；成本更高的 **Re-run From Vision**
+会创建可审计 successor，重新抽样 Manifest，并再次执行 Vision 与 Writer。
 
 需要排查模型原始输出时，可显式添加 `--model-debug-dir /opt/curator-worker-debug`。Worker 会按
 Work Item 保存 Vision/Writer 的 stdout、stderr 与不含命令参数的 metadata；Writer metadata 会额外

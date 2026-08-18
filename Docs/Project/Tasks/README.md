@@ -27,4 +27,5 @@ database access; Web UI, AI Worker, and tools are API clients.
 | [MT-011](MT-011-harden-llama-mtmd-provider-compatibility.md) | Compatible, diagnosable llama-mtmd provider execution | In Progress |
 | [MT-012](MT-012-isolate-ai-worker-item-failures.md) | Isolated Work Item failures and bounded Worker circuit breaking | Complete |
 | [MT-013](MT-013-resume-retried-ai-worker-results.md) | Stage-aware Retry without conflicting result replay | Complete |
-| [MT-014](MT-014-diversify-writer-validation-repair.md) | Attempt-aware Writer repair without deterministic invalid replay | In Progress |
+| [MT-014](MT-014-diversify-writer-validation-repair.md) | Attempt-aware Writer repair without deterministic invalid replay | Complete |
+| [MT-015](MT-015-repair-writer-slots-and-regenerate-vision.md) | Local Writer title repair and auditable Vision resampling | Complete |

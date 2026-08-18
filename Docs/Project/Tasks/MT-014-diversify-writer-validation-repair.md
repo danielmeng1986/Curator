@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`MT-014` — Status: `In Progress` (implementation complete; manual model validation pending)
+`MT-014` — Status: `Complete`
 
 ## Title
 
@@ -63,5 +63,7 @@ prevent Worker normalization from creating duplicate suggested names.
 
 - Implemented attempt-aware Writer sampling, targeted repair feedback, and
   collision-safe title normalization on 2026-08-18.
-- Automated Worker tests pass; operator Retry validation remains pending before
-  this task is marked Complete and committed.
+- Automated Worker tests passed before operator Retry validation.
+- WSL debug metadata confirmed distinct effective seeds and corrective
+  temperatures on 2026-08-18; MT-015 addresses the remaining model-level title
+  repetition with invalid-slot repair.

@@ -14,6 +14,7 @@ contain no SQL or direct database-connection handling.
 from __future__ import annotations
 
 import re
+import random
 import os
 import shutil
 import uuid as _uuid_mod
@@ -2027,7 +2028,26 @@ class AIWorkItemService:
         self._record("ai_work_item_fail", item, f"AI Work Item failed: {error_code}", OP_INITIATOR_AI_WORKER); return item
 
     def retry(self, item_uuid, expected_version):
-        return self._admin_transition(item_uuid, expected_version, ("Failed",), "Pending", "ai_work_item_retry")
+        item=self._admin_transition(item_uuid, expected_version, ("Failed",), "Pending", "ai_work_item_retry")
+        self._claim_coordinator.notify(item["worker_kind"]);return item
+
+    def regenerate_from_vision(self,item_uuid,expected_version,reason,actor):
+        reason=str(reason or "").strip()
+        if not reason or len(reason)>500:raise ValueError("reason must contain 1 to 500 characters.")
+        current=self.get(item_uuid);workspace=self._workspaces.get(current["workspace_uuid"])
+        if not workspace or workspace["lifecycle_state"]!="Open":
+            raise ServiceConflict("AI_WORKSPACE_READ_ONLY","Open Workspace is required for Vision regeneration.")
+        try:result=self._repo.regenerate_from_vision(item_uuid,expected_version,secrets.randbits(63),reason,actor,self._now().isoformat())
+        except PersistenceConflict as exc:
+            code=exc.details.get("code") if isinstance(exc.details,dict) else "AI_VISION_REGENERATION_CONFLICT"
+            messages={"AI_VISION_REGENERATION_LIMIT":"Vision has already been regenerated three times.",
+                "EVIDENCE_RESAMPLE_UNAVAILABLE":"Album does not contain enough additional usable images for a different sample.",
+                "AI_VISION_REGENERATION_STAGE_INVALID":"Re-run From Vision requires a Failed Work Item with an accepted Vision result.",
+                "AI_REGENERATION_GROUP_REQUIRED":"Work Item is not attached to a Dispatch Group."}
+            raise ServiceConflict(code,messages.get(code,"Vision regeneration could not be created."),exc.details) from exc
+        if not result:raise ServiceConflict("AI_WORK_ITEM_STALE","The Work Item state or version changed.")
+        self._record("ai_work_item_regenerate_vision",result["successor"],f"Vision regeneration {result['generation_number']} queued")
+        self._claim_coordinator.notify(result["successor"]["worker_kind"]);return result
 
     def cancel(self, item_uuid, expected_version):
         return self._admin_transition(item_uuid, expected_version, ("Pending","Failed"), "Cancelled", "ai_work_item_cancel")
@@ -2480,7 +2500,13 @@ class AIPhotoEvidenceManifestService:
             self._report(item,"EVIDENCE_SAMPLE_INSUFFICIENT","Album contains fewer usable images than the configured sample count.",len(images),sample_count)
         mean = sum(item["size_bytes"] for item in images) / len(images); low, high = mean*.7, mean*1.3
         band = [item for item in images if low <= item["size_bytes"] <= high]
-        if len(band) >= sample_count: selected = self._even(band,sample_count)
+        regeneration=self._items.regeneration_context(item_uuid)
+        if regeneration:
+            rng=random.Random(regeneration["selection_seed"]);previous=set(regeneration["previous_paths"])
+            fresh=[item for item in images if item["relative_path"] not in previous];reused=[item for item in images if item["relative_path"] in previous]
+            rng.shuffle(fresh);rng.shuffle(reused);selected=(fresh+reused)[:sample_count]
+            selected.sort(key=lambda item:item["relative_path"].casefold())
+        elif len(band) >= sample_count: selected = self._even(band,sample_count)
         else:
             chosen = list(band); used = {item["relative_path"] for item in chosen}
             remainder = sorted((item for item in images if item["relative_path"] not in used),
@@ -2496,9 +2522,12 @@ class AIPhotoEvidenceManifestService:
             if after.st_size != selected_item["size_bytes"] or after.st_mtime_ns != selected_item["modified_time_ns"]:
                 raise ServiceConflict("EVIDENCE_CONTENT_CHANGED","An evidence image changed during Manifest creation.")
             evidence.append({key:value for key,value in selected_item.items() if key != "path"} | {"sha256":digest.hexdigest()})
+        discovery={"eligible":len(images),**excluded}
+        if regeneration:discovery.update({"selection_seed":regeneration["selection_seed"],"generation_number":regeneration["generation_number"],
+            "predecessor_manifest_uuid":regeneration["predecessor_manifest_uuid"],"previous_sample_overlap":sum(1 for value in selected if value["relative_path"] in set(regeneration["previous_paths"]))})
         return self._repo.create({"work_item_uuid":item_uuid,"album_id":item["album_id"],"sample_count":sample_count,
-            "eligible_image_count":len(images),"average_size_bytes":mean,"selection_method":self.SELECTION_METHOD,
-            "discovery_summary":{"eligible":len(images),**excluded},"selected_at":self._now().isoformat()}, evidence)
+            "eligible_image_count":len(images),"average_size_bytes":mean,"selection_method":"seeded-random-fresh-first-v1" if regeneration else self.SELECTION_METHOD,
+            "discovery_summary":discovery,"selected_at":self._now().isoformat()}, evidence)
 
     def revalidate(self, item_uuid):
         manifest = self._repo.get_by_item(item_uuid)

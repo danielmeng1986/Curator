@@ -42,7 +42,10 @@ const WorkDispatchPage = {
     return (items || []).map(item => {
       const config=item.configuration_snapshot || {};
       const retry=item.run_state === 'Failed'
-        ? `<button class="btn btn-primary" onclick="WorkDispatchPage.retryItem('${esc(item.item_uuid)}',${item.version},this)">Retry</button>`
+        ? `<button class="btn btn-primary" onclick="WorkDispatchPage.retryItem('${esc(item.item_uuid)}',${item.version},this)">Retry Writer</button>`
+        : '';
+      const regenerate=item.run_state === 'Failed' && item.result_state === 'AwaitingWriter'
+        ? `<button class="btn btn-secondary" onclick="WorkDispatchPage.regenerateVision('${esc(item.item_uuid)}',${item.version},this)">Re-run From Vision</button>`
         : '';
       const cancel=item.run_state === 'Failed'
         ? `<button class="btn btn-danger" onclick="WorkDispatchPage.cancelItem('${esc(item.item_uuid)}',${item.version},this)">Cancel</button>`
@@ -50,7 +53,7 @@ const WorkDispatchPage = {
       return `<tr><td>${esc(albumTitle || '—')}</td><td><strong>${esc(config.name || 'Unknown configuration')}</strong><div class="table-secondary"><code>${esc(config.model_file || '—')}</code></div><div class="table-secondary">${esc(config.instruction_profile?.profile_name||'Legacy prompt')} · v${esc(config.instruction_profile?.version||'—')}</div></td>
         <td><span class="chip ${item.run_state === 'Failed' ? 'chip-error' : item.run_state === 'Completed' ? 'chip-ok' : 'chip-warn'}">${esc(this._stage(item))}</span><div class="table-secondary">Run ${esc(item.run_state)}${item.result_state ? ` · Result ${esc(item.result_state)}` : ''}</div></td>
         <td>${item.attempt_count}</td><td>${item.updated_at ? esc(new Date(item.updated_at).toLocaleString()) : '—'}${item.lease_expires_at ? `<div class="table-secondary">Lease until ${esc(new Date(item.lease_expires_at).toLocaleString())}</div>` : ''}</td>
-        <td>${item.last_error ? `<span class="text-error">${esc(item.last_error)}</span>` : '—'}</td><td><div class="detail-actions"><a class="btn btn-secondary" href="#/ai-work-items/${esc(item.item_uuid)}/review">Open</a>${retry}${cancel}</div></td></tr>`;
+        <td>${item.last_error ? `<span class="text-error">${esc(item.last_error)}</span>` : '—'}</td><td><div class="detail-actions"><a class="btn btn-secondary" href="#/ai-work-items/${esc(item.item_uuid)}/review">Open</a>${retry}${regenerate}${cancel}</div></td></tr>`;
     }).join('');
   },
 
@@ -61,6 +64,15 @@ const WorkDispatchPage = {
     const groupMatch=window.location.hash.match(/^#\/work-dispatch\/groups\/([^/?]+)/);
     if(groupMatch)await this.renderGroup({uuid:decodeURIComponent(groupMatch[1])});
     else await this.loadView();
+  },
+
+  async regenerateVision(uuid,version,trigger) {
+    const reason=window.prompt('Reason to re-run Vision with a newly sampled Evidence Manifest:');if(!reason?.trim())return;
+    if(!await ui.confirmDialog({title:'Re-run from Vision?',message:'This preserves the failed Work Item and its accepted Vision as history, cancels that item, and creates a successor at the end of the Worker queue. The successor selects a different reproducible image sample and runs both Vision and Writer.',confirmLabel:'Create Vision Re-run',danger:false}))return;
+    const result=await ui.runAction(`work-item-regenerate-${uuid}`,()=>api.post(`/ai-work-items/${encodeURIComponent(uuid)}/regenerate-vision`,{expected_version:version,reason:reason.trim()}),{trigger,context:'create a new Vision run'});
+    if(!result.ok)return;toast('Vision re-run queued with a new Evidence sample. The previous Work Item was preserved as Cancelled.');
+    const groupMatch=window.location.hash.match(/^#\/work-dispatch\/groups\/([^/?]+)/);
+    if(groupMatch)await this.renderGroup({uuid:decodeURIComponent(groupMatch[1])});else await this.loadView();
   },
 
   async cancelItem(uuid,version,trigger) {

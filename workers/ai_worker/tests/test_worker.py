@@ -339,6 +339,19 @@ class WorkerTests(unittest.TestCase):
         self.assertIn("Writer repair attempt 2 of 3",provider.calls[1][0]);self.assertIn("Writer repair attempt 3 of 3",provider.calls[2][0])
         self.assertNotEqual(provider.calls[1][0],provider.calls[2][0])
 
+    def test_writer_repairs_only_invalid_title_slots_and_preserves_valid_names(self):
+        invalid={"album_summary":"Garden scene","description":"A garden setting.","suggested_names":
+            ["Bamboo Garden","Quiet Retreat","Summer Garden Light","Gentle Summer Elegance","Serene Moments By Water","Private Photo"]}
+        class Provider:
+            def __init__(self):self.full_calls=0;self.title_calls=[]
+            def complete(self,prompt,**kwargs):self.full_calls+=1;return invalid,{}
+            def complete_title(self,prompt,word_count,**kwargs):self.title_calls.append((prompt,word_count,kwargs));return "Moonlit Garden Secrets",{}
+        provider=Provider();result,metrics=AnalysisWorkflow(object(),provider,sleep=lambda _:None).writer({"scene":"garden"},{})
+        self.assertEqual(invalid["suggested_names"][:5],result["suggested_names"][:5])
+        self.assertEqual("Moonlit Garden Secrets",result["suggested_names"][5]);self.assertEqual(1,provider.full_calls)
+        self.assertEqual(1,len(provider.title_calls));self.assertIn("Do not reuse",provider.title_calls[0][0])
+        self.assertEqual("invalid-slots-v1",metrics["writer_repair_mode"])
+
     @patch("workers.ai_worker.provider.subprocess.run")
     def test_text_provider_detects_zero_exit_sampler_failure(self,run):
         run.return_value.stdout="Error: Failed to initialize samplers: std::exception";run.return_value.stderr="error initializing grammar sampler";run.return_value.returncode=0

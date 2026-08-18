@@ -180,6 +180,11 @@ range, arrays, confidence, and text limits. Format drift receives bounded
 corrective retries instead of being submitted as an HTTP 400.
 Multiple Evidence images are passed in Manifest order as the single
 comma-separated `--image` value required by the supported llama-mtmd build.
+When only some Writer titles fail semantic validation, the Worker preserves
+valid titles and generates replacements only for invalid slots. In Work
+Dispatch, **Retry Writer** keeps the accepted Vision; the higher-cost
+**Re-run From Vision** creates an auditable successor with a newly sampled
+Manifest and runs both stages again.
 
 For raw model-output diagnosis, explicitly add
 `--model-debug-dir /opt/curator-worker-debug`. The Worker stores per-Work-Item

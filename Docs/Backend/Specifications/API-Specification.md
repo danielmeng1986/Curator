@@ -243,6 +243,14 @@ requires that the same Token currently owns an unexpired claim on the evidence
 Work Item. No route accepts a path parameter, creates a durable thumbnail, or
 copies image bytes into the database or Web workspace.
 
+`POST /api/v1/ai-work-items/{uuid}/regenerate-vision` is an Admin-only,
+versioned recovery action for a Failed Work Item. It requires a reason,
+preserves the predecessor and its immutable results, changes that predecessor
+to Cancelled, and creates a Pending successor in the same Dispatch Group. The
+successor starts at `AwaitingVision` with a new immutable Evidence Manifest.
+Lineage is limited to three regenerations; Albums without additional eligible
+images return `409 EVIDENCE_RESAMPLE_UNAVAILABLE`.
+
 `POST /api/v1/ai-work-items/{work_item_uuid}/results/vision` and `/writer`
 accept Writer-owned, versioned JSON results in that strict order. Both stages
 are bound to the active claim, immutable evidence Manifest, and snapshotted AI

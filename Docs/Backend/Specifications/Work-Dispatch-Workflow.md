@@ -188,6 +188,12 @@ it with images nearest to the mean size, using relative path as the stable
 tie-breaker. Every selected file retains size, nanosecond modification time,
 SHA-256, MIME type, ordinal, and relative path in one immutable Manifest.
 
+Ordinary Writer Retry reuses this Manifest and its accepted Vision. Explicit
+Vision regeneration creates a successor Work Item with a new Backend-generated
+seed. Its `seeded-random-fresh-first-v1` selection prioritizes images absent
+from the predecessor Manifest and records seed, generation, predecessor
+Manifest, and overlap without modifying historical evidence.
+
 Zero eligible images returns `EVIDENCE_IMAGES_UNAVAILABLE`. Fewer eligible
 images than the configured sample count returns `EVIDENCE_SAMPLE_INSUFFICIENT`.
 Both create an Album evidence Issue and no Manifest. A missing, replaced,

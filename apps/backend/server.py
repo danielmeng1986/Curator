@@ -1325,6 +1325,13 @@ class AppHandler(SimpleHTTPRequestHandler):
                 else:
                     item = service.fail(parts[3], self._principal["token_uuid"], body.get("error_code", ""), body.get("message", ""))
                 self._send_success(200, {"item": item})
+            elif re.match(r"^/api/ai-work-items/[^/]+/regenerate-vision$", path):
+                if not self._require_admin_principal(): return
+                expected=body.get("expected_version")
+                if not isinstance(expected,int):raise ValueError("expected_version is required and must be an integer.")
+                result=self._ai_work_item_service().regenerate_from_vision(path.split("/")[3],expected,
+                    body.get("reason"),self._principal["token_uuid"])
+                self._send_success(201,{"regeneration":result})
             elif re.match(r"^/api/ai-work-items/[^/]+/results/(vision|writer)$", path):
                 if not self._require_worker_principal(): return
                 parts = path.split("/"); stage = parts[5].title()

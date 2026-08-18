@@ -21,3 +21,14 @@ json-char ::= [^"\\\x7F\x00-\x1F] | "\\" (["\\/bfnrt] | "u" hex hex hex hex)
 hex ::= [0-9a-fA-F]
 space ::= [ \t\n\r]*
 '''.strip()
+
+def writer_title_gbnf(word_count):
+    rule={2:"name2",3:"name3",4:"name4"}[word_count]
+    return f'''root ::= "{{" space "\\\"title\\\"" space ":" space {rule} "}}" space
+name2 ::= "\\\"" word " " word "\\\""
+name3 ::= "\\\"" word " " word " " word "\\\""
+name4 ::= "\\\"" word " " word " " word " " word "\\\""
+word ::= upper name-char{{0,23}}
+upper ::= [A-Z]
+name-char ::= [A-Za-z'-]
+space ::= [ \\t\\n\\r]*'''

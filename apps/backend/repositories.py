@@ -2461,7 +2461,14 @@ class AIWorkItemRepository:
             attempt_number INTEGER NOT NULL, worker_token_uuid TEXT NOT NULL,
             claimed_at TEXT NOT NULL, lease_expires_at TEXT NOT NULL, ended_at TEXT,
             outcome TEXT, error_code TEXT, error_message TEXT, worker_kinds_json TEXT,
-            UNIQUE(work_item_uuid,attempt_number), FOREIGN KEY(work_item_uuid) REFERENCES workspace_album_ai_worker(uuid))"""); conn.commit()
+            UNIQUE(work_item_uuid,attempt_number), FOREIGN KEY(work_item_uuid) REFERENCES workspace_album_ai_worker(uuid))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS ai_work_item_regeneration (
+            predecessor_work_item_uuid TEXT NOT NULL UNIQUE,successor_work_item_uuid TEXT NOT NULL UNIQUE,
+            root_work_item_uuid TEXT NOT NULL,generation_number INTEGER NOT NULL CHECK(generation_number BETWEEN 1 AND 3),
+            selection_seed INTEGER NOT NULL,reason TEXT NOT NULL,requested_by_token_uuid TEXT NOT NULL,created_at TEXT NOT NULL,
+            FOREIGN KEY(predecessor_work_item_uuid) REFERENCES workspace_album_ai_worker(uuid),
+            FOREIGN KEY(successor_work_item_uuid) REFERENCES workspace_album_ai_worker(uuid),
+            FOREIGN KEY(root_work_item_uuid) REFERENCES workspace_album_ai_worker(uuid))"""); conn.commit()
 
     @staticmethod
     def _norm(row):
@@ -2563,6 +2570,47 @@ class AIWorkItemRepository:
                 [to_state,now,item_uuid,expected_version,*from_states]); conn.commit()
             row = conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?", (item_uuid,)).fetchone()
         return self._norm(row) if cur.rowcount else None
+
+    def regenerate_from_vision(self,item_uuid,expected_version,selection_seed,reason,actor,now):
+        successor_uuid=str(uuid.uuid4())
+        with self._db() as conn:
+            self._ensure_schema(conn);WorkDispatchRepository._ensure_schema(conn);conn.execute("BEGIN IMMEDIATE")
+            item=conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?",(item_uuid,)).fetchone()
+            if not item or item["version"]!=expected_version or item["run_state"]!="Failed":
+                conn.rollback();return None
+            state=conn.execute("SELECT state FROM ai_work_item_result_state WHERE work_item_uuid=?",(item_uuid,)).fetchone()
+            if not state or state["state"]!="AwaitingWriter":
+                conn.rollback();raise PersistenceConflict({"code":"AI_VISION_REGENERATION_STAGE_INVALID"})
+            link=conn.execute("SELECT group_uuid FROM work_dispatch_group_item WHERE item_uuid=?",(item_uuid,)).fetchone()
+            if not link:conn.rollback();raise PersistenceConflict({"code":"AI_REGENERATION_GROUP_REQUIRED"})
+            previous=conn.execute("SELECT root_work_item_uuid,generation_number FROM ai_work_item_regeneration WHERE successor_work_item_uuid=?",(item_uuid,)).fetchone()
+            root_uuid=previous["root_work_item_uuid"] if previous else item_uuid;generation=(previous["generation_number"]+1) if previous else 1
+            if generation>3:conn.rollback();raise PersistenceConflict({"code":"AI_VISION_REGENERATION_LIMIT","maximum":3})
+            manifest=conn.execute("SELECT sample_count,eligible_image_count FROM ai_photo_evidence_manifest WHERE work_item_uuid=?",(item_uuid,)).fetchone()
+            if not manifest or manifest["eligible_image_count"]<=manifest["sample_count"]:
+                conn.rollback();raise PersistenceConflict({"code":"EVIDENCE_RESAMPLE_UNAVAILABLE"})
+            conn.execute("""INSERT INTO workspace_album_ai_worker
+                (uuid,workspace_uuid,album_id,worker_kind,ai_model_configuration_uuid,configuration_snapshot_json,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?)""",(successor_uuid,item["workspace_uuid"],item["album_id"],item["worker_kind"],
+                item["ai_model_configuration_uuid"],item["configuration_snapshot_json"],now,now))
+            conn.execute("INSERT INTO work_dispatch_group_item(group_uuid,item_kind,item_uuid,configuration_uuid,created_at) VALUES (?,?,?,?,?)",
+                (link["group_uuid"],"workspace_album_ai_worker",successor_uuid,item["ai_model_configuration_uuid"],now))
+            conn.execute("INSERT INTO ai_work_item_regeneration VALUES (?,?,?,?,?,?,?,?)",
+                (item_uuid,successor_uuid,root_uuid,generation,selection_seed,reason,actor,now))
+            conn.execute("""UPDATE workspace_album_ai_worker SET run_state='Cancelled',claimed_by_token_uuid=NULL,
+                lease_expires_at=NULL,version=version+1,updated_at=? WHERE uuid=?""",(now,item_uuid))
+            conn.commit();successor=conn.execute("SELECT * FROM workspace_album_ai_worker WHERE uuid=?",(successor_uuid,)).fetchone()
+        return {"predecessor":self.get(item_uuid),"successor":self._norm(successor),"generation_number":generation,"selection_seed":selection_seed}
+
+    def regeneration_context(self,item_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn);row=conn.execute("""SELECT r.*,m.uuid predecessor_manifest_uuid
+                FROM ai_work_item_regeneration r LEFT JOIN ai_photo_evidence_manifest m
+                ON m.work_item_uuid=r.predecessor_work_item_uuid WHERE r.successor_work_item_uuid=?""",(item_uuid,)).fetchone()
+            if not row:return None
+            result=dict(row);result["previous_paths"]=[item[0] for item in conn.execute(
+                "SELECT relative_path FROM workspace_album_ai_worker_photo WHERE work_item_uuid=? ORDER BY ordinal",(result["predecessor_work_item_uuid"],)).fetchall()]
+        return result
 
     def attempts(self, item_uuid):
         with self._db() as conn:

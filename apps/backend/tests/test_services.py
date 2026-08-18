@@ -1730,8 +1730,8 @@ class TestAIPhotoEvidenceManifestContract(unittest.TestCase):
             "vision_prompt_version":"v1","writer_prompt_version":"w1","sample_count":8,"context_size":4096,
             "threads":8,"gpu_layers":40,"max_tokens":800,"temperature":0.2,"image_max_tokens":384})
         self.item_repo = repo.AIWorkItemRepository(_db_factory(self.conn))
-        self.item = svc.AIWorkItemService(self.item_repo,workspace_repo,repo.AlbumRepository(_db_factory(self.conn)),config_service).create(
-            workspace["uuid"],1,config["uuid"])
+        self.item_service=svc.AIWorkItemService(self.item_repo,workspace_repo,repo.AlbumRepository(_db_factory(self.conn)),config_service)
+        self.item = self.item_service.create(workspace["uuid"],1,config["uuid"])
         self.issues = repo.IssueRepository(_db_factory(self.conn)); self.evidence_repo = repo.AIPhotoEvidenceRepository(_db_factory(self.conn))
         self.service = svc.AIPhotoEvidenceManifestService(self.evidence_repo,self.item_repo,
             repo.AlbumRepository(_db_factory(self.conn)),self.root,self.issues,
@@ -1750,6 +1750,24 @@ class TestAIPhotoEvidenceManifestContract(unittest.TestCase):
         self.assertEqual("mean-size-band-30pct-then-nearest-v1",first["selection_method"])
         self.assertEqual(0,self.conn.execute("SELECT COUNT(*) FROM photo").fetchone()[0])
         self.assertTrue(all(item["relative_path"].startswith("image-") and len(item["sha256"]) == 64 for item in first["evidence"]))
+
+    def test_failed_item_can_create_audited_successor_with_fresh_seeded_sample(self):
+        self._images(12);original_manifest=self.service.create(self.item["uuid"]);now="2026-08-10T00:00:00+00:00"
+        repo.AIResultRepository._ensure_schema(self.conn)
+        self.conn.execute("INSERT INTO ai_work_item_result_state(work_item_uuid,state,version,updated_at) VALUES (?,'AwaitingWriter',1,?)",(self.item["uuid"],now))
+        dispatch=repo.WorkDispatchRepository(_db_factory(self.conn));dispatch.prepare()
+        self.conn.execute("INSERT INTO work_dispatch_batch(uuid,worker_kind,dataset_type,schema_version,batch_state,created_at,updated_at) VALUES ('batch-r','album_name_analysis','album_analysis',1,'Active',?,?)",(now,now))
+        self.conn.execute("INSERT INTO work_dispatch_group(uuid,batch_uuid,album_id,worker_kind,dataset_type,schema_version,group_state,created_at,updated_at) VALUES ('group-r','batch-r',1,'album_name_analysis','album_analysis',1,'Active',?,?)",(now,now))
+        self.conn.execute("INSERT INTO work_dispatch_group_item(group_uuid,item_kind,item_uuid,configuration_uuid,created_at) VALUES ('group-r','workspace_album_ai_worker',?,?,?)",(self.item["uuid"],self.item["ai_model_configuration_uuid"],now))
+        self.conn.execute("UPDATE workspace_album_ai_worker SET run_state='Failed',version=2 WHERE uuid=?",(self.item["uuid"],));self.conn.commit()
+        result=self.item_service.regenerate_from_vision(self.item["uuid"],2,"Try a different image sample","admin-one")
+        self.assertEqual("Cancelled",result["predecessor"]["run_state"]);self.assertEqual("Pending",result["successor"]["run_state"])
+        self.assertEqual("AwaitingVision",self.item_service.claim_next("worker-one",60)["result_state"])
+        successor_manifest=self.service.create(result["successor"]["uuid"])
+        self.assertEqual("seeded-random-fresh-first-v1",successor_manifest["selection_method"])
+        self.assertEqual(result["selection_seed"],successor_manifest["discovery_summary"]["selection_seed"])
+        old={item["relative_path"] for item in original_manifest["evidence"]};new={item["relative_path"] for item in successor_manifest["evidence"]}
+        self.assertLess(len(old & new),8)
 
     def test_insufficient_images_create_issue_and_no_manifest(self):
         self._images(7)

@@ -91,6 +91,21 @@ def validate_writer_payload(payload):
     return {"album_summary":_bounded_text(payload["album_summary"],"album_summary",500),
         "description":_bounded_text(payload["description"],"description",2000),"suggested_names":normalized}
 
+def _invalid_title_indices(names):
+    if not isinstance(names,list) or len(names)!=6 or any(not isinstance(name,str) for name in names):return set(range(6))
+    invalid=set();seen={};expected=({2},{2},{3},{3},{3,4},{3,4})
+    for index,value in enumerate(names):
+        name=value.strip();words=name.split()
+        if len(words) not in expected[index] or any(not re.fullmatch(r"[A-Z][A-Za-z'’-]*",word) for word in words) \
+                or any(word.casefold() in FORBIDDEN_NAME_WORDS for word in words) or not name or len(name)>120:
+            invalid.add(index)
+        folded=name.casefold()
+        if folded in seen:invalid.add(index)
+        else:seen[folded]=index
+        if index in (4,5) and len(words)==4 and (re.fullmatch(r"[IVXLCDM]{2,}",words[-1]) or re.fullmatch(r"(.)\1{3,}",words[-1],re.I)):
+            invalid.add(index)
+    return invalid
+
 def normalize_writer_titles(payload):
     """Remove obvious constrained-decoding filler while preserving natural titles."""
     if not isinstance(payload,dict) or not isinstance(payload.get("suggested_names"),list):return payload,0
@@ -156,8 +171,39 @@ class AnalysisWorkflow:
                 return validated,metrics
             except ProviderError as exc:
                 if attempt==self.retries:raise
+                if hasattr(self.writer_provider,"complete_title") and isinstance(payload,dict):
+                    try:return self._repair_writer_titles(payload,vision,settings),{"writer_repair_mode":"invalid-slots-v1"}
+                    except ProviderError as repair_exc:exc=repair_exc
                 previous_names=json.dumps(payload.get("suggested_names") if isinstance(payload,dict) else None,ensure_ascii=True)
                 prompt=(f"{base}\nWriter repair attempt {attempt+2} of {self.retries+1}. "
                     f"Your previous suggested_names were: {previous_names}. Your previous response failed validation: {exc} "
                     "Replace every invalid or duplicated suggested name, regenerate the complete JSON object, and do not repeat the invalid title or forbidden word.")
                 self.sleep(2**attempt)
+
+    def _repair_writer_titles(self,payload,vision,settings):
+        summary=_bounded_text(payload.get("album_summary"),"album_summary",500)
+        description=_bounded_text(payload.get("description"),"description",2000)
+        names=list(payload.get("suggested_names") or [])
+        invalid=_invalid_title_indices(names)
+        if len(names)!=6 or not invalid:raise ProviderError("Writer output cannot be repaired by title slot.",error_code="MODEL_OUTPUT_INVALID")
+        accepted=[name for index,name in enumerate(names) if index not in invalid]
+        for index in sorted(invalid):
+            word_count=2 if index<2 else 3
+            repaired=None
+            for repair_attempt in range(self.retries+1):
+                repair_settings=_writer_attempt_settings(settings,10+index*(self.retries+1)+repair_attempt)
+                prompt=("Return one JSON object with only a title field. Create one distinct English Album title "
+                    f"of exactly {word_count} capitalized words. Do not use Photo, Photos, Collection, Session, or Gallery. "
+                    f"Do not reuse any of these accepted titles: {json.dumps(accepted,ensure_ascii=True)}. "
+                    f"Vision evidence: {json.dumps(vision,sort_keys=True)}")
+                try:candidate,_=self.writer_provider.complete_title(prompt,word_count,settings=repair_settings)
+                except ProviderError:
+                    if repair_attempt==self.retries:break
+                    self.sleep(2**repair_attempt);continue
+                trial=list(names);trial[index]=candidate
+                if index not in _invalid_title_indices([candidate if position==index else value for position,value in enumerate(trial)]):
+                    repaired=candidate;break
+            if repaired is None:raise ProviderError(f"Writer could not repair suggested name slot {index+1}.",error_code="MODEL_OUTPUT_INVALID")
+            names[index]=repaired;accepted.append(repaired)
+        normalized,_=normalize_writer_titles({"album_summary":summary,"description":description,"suggested_names":names})
+        return validate_writer_payload(normalized)

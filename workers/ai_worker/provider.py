@@ -6,7 +6,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from .constraints import WRITER_GBNF,WRITER_GRAMMAR_VERSION
+from .constraints import WRITER_GBNF,WRITER_GRAMMAR_VERSION,writer_title_gbnf
 
 class ProviderError(RuntimeError):
     def __init__(self,message: str,*,error_code: str="MODEL_PROVIDER_FAILED"):
@@ -141,10 +141,11 @@ class LlamaTextCliProvider(LlamaCliProvider):
         if isinstance(writer_seed,bool) or not isinstance(writer_seed,int) or not 0<=writer_seed<=0x7fffffff:
             raise ProviderError("Writer seed must be an integer from 0 to 2147483647.",error_code="MODEL_PROVIDER_ARGUMENT_INVALID")
         generation={"attempt":settings.get("writer_generation_attempt",1),"seed":writer_seed,"temperature":writer_temperature}
+        grammar=settings.get("_writer_grammar",WRITER_GBNF)
         args=[self.cli,"-m",self.model,"-p",prompt,
             "-c",str(settings.get("context_size",4096)),"-t",str(settings.get("threads",1)),
             "-ngl",str(settings.get("gpu_layers",0)),"-n",str(settings.get("max_tokens",512)),
-            "--temp",str(writer_temperature),"--seed",str(writer_seed),"--grammar",WRITER_GBNF,"--single-turn","--simple-io",
+            "--temp",str(writer_temperature),"--seed",str(writer_seed),"--grammar",grammar,"--single-turn","--simple-io",
             "--no-display-prompt","--no-show-timings"]
         started=time.monotonic()
         try:
@@ -172,3 +173,10 @@ class LlamaTextCliProvider(LlamaCliProvider):
         return payload,{"duration_ms":round((time.monotonic()-started)*1000),"provider":"llama_cpp",
             "constrained_decoding":WRITER_GRAMMAR_VERSION,"effective_temperature":writer_temperature,
             "effective_seed":writer_seed,"writer_generation_attempt":generation["attempt"]}
+
+    def complete_title(self,prompt,word_count,*,settings=None):
+        scoped=dict(settings or {});scoped["_writer_grammar"]=writer_title_gbnf(word_count)
+        payload,metrics=self.complete(prompt,settings=scoped)
+        if not isinstance(payload,dict) or set(payload)!={"title"} or not isinstance(payload["title"],str):
+            raise ProviderError("Writer title repair must return exactly one title.",error_code="MODEL_OUTPUT_INVALID")
+        return payload["title"],metrics
