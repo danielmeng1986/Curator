@@ -211,7 +211,8 @@ changed, oversized, or containment-invalid selected image returns
 The Backend owns the projections used by the dispatch and review consoles:
 
 - the Worker-kind catalog describes supported adapters;
-- the global Group collection provides bounded Active, History, and All views,
+- the global Group collection provides bounded Worker-active, Review, Closure,
+  History, and All views,
   filterable by Workspace, Worker kind, or Album;
 - the Workspace overview combines lifecycle state, Group/Item/review counts,
   closure preflight, retention, and permitted actions;

@@ -62,7 +62,7 @@ try{
   await page.getByRole('button',{name:'Preview dispatch'}).click(); await page.getByText('6',{exact:true}).waitFor();
   await page.getByLabel('I reviewed this zero-write preview.').check(); await page.getByRole('button',{name:'Dispatch reviewed Albums'}).click();
   await page.getByText('Dispatched 3 Album Group(s). Album Status was unchanged.').waitFor();
-  await page.getByRole('button',{name:'Active'}).click();
+  await page.getByRole('button',{name:'Worker Queue'}).click();
   const active=await fixture.request('/work-dispatch/groups?view=active',{role:'admin'});
   assert.equal(active.payload.data.length,3); assert.equal(active.payload.data.every(item=>item.item_count===2),true);
   assert.equal(active.payload.data.every(item=>item.items.length===2),true);
@@ -70,15 +70,35 @@ try{
   await page.getByText('Fixture Balanced').first().waitFor();
   await page.getByText('Fixture Fast').first().waitFor();
   await page.getByText(/Auto refresh on/).waitFor();
-  const polledGroup=active.payload.data[0];
-  for(const item of polledGroup.items){const cancelled=await fixture.request(`/ai-work-items/${item.item_uuid}/cancel`,{method:'POST',role:'admin',body:{expected_version:item.version}});assert.equal(cancelled.status,200);}
-  await page.getByText('Cancelled',{exact:true}).first().waitFor({timeout:10000});
+  assert.equal(await page.getByRole('button',{name:'Previous'}).count(),2,'pagination must be available above and below long content');
+  assert.equal(await page.getByRole('button',{name:'First'}).count(),2);assert.equal(await page.getByRole('button',{name:'Last'}).count(),2);
+  assert.equal(await page.getByLabel('Go to page').count(),2);assert.equal(await page.getByRole('button',{name:'Go',exact:true}).count(),2);
+
+  const claim=await fixture.request('/ai-work-items/claim',{method:'POST',role:'writer',body:{worker_kinds:['album_name_analysis'],lease_seconds:300,wait_seconds:0}});
+  assert.equal(claim.status,200);const failedItem=claim.payload.data.item;
+  const failed=await fixture.request(`/ai-work-items/${failedItem.uuid}/fail`,{method:'POST',role:'writer',body:{error_code:'EVIDENCE_SAMPLE_INSUFFICIENT',message:'Album contains fewer usable images than the configured sample count.'}});
+  assert.equal(failed.status,200);
+  const failedGroup=active.payload.data.find(group=>group.items.some(item=>item.item_uuid===failedItem.uuid));assert.ok(failedGroup);
+  await page.goto(`${fixture.origin}/#/work-dispatch/groups/${failedGroup.uuid}`);await page.getByText('EVIDENCE_SAMPLE_INSUFFICIENT').waitFor();
+  await page.getByRole('button',{name:'Cancel',exact:true}).click();await page.getByRole('heading',{name:'Cancel failed Work Item?'}).waitFor();
+  await page.getByRole('button',{name:'Cancel Work Item'}).click();await page.getByText('Work Item cancelled. The Dispatch Group was preserved.').waitFor();
+  assert.equal(await page.getByText('Cancelled',{exact:true}).count(),1);
+
+  for(const group of active.payload.data){
+    const detail=await fixture.request(`/work-dispatch/groups/${group.uuid}`,{role:'admin'});
+    for(const item of detail.payload.data.group.items){if(item.run_state==='Pending'||item.run_state==='Failed'){
+      const cancelled=await fixture.request(`/ai-work-items/${item.item_uuid}/cancel`,{method:'POST',role:'admin',body:{expected_version:item.version}});assert.equal(cancelled.status,200);
+    }}
+  }
+  await page.goto(`${fixture.origin}/#/work-dispatch`);await page.getByRole('button',{name:'Closure',exact:true}).click();
+  await page.getByText('Cancelled',{exact:true}).first().waitFor();
+  const closure=await fixture.request('/work-dispatch/groups?view=closure',{role:'admin'});assert.equal(closure.payload.data.length,3);
+  const review=await fixture.request('/work-dispatch/groups?view=review',{role:'admin'});assert.equal(review.payload.data.length,0);
   const after=(await fixture.request('/albums',{role:'admin'})).payload.data.map(item=>[item.id,item.status_id]); assert.deepEqual(after,before);
 
   for(const group of active.payload.data){
     await page.goto(`${fixture.origin}/#/work-dispatch/groups/${group.uuid}`); await page.getByRole('heading',{name:'Dispatch Group'}).waitFor();
     assert.equal(await page.getByRole('columnheader',{name:'Current stage'}).isVisible(),true);
-    assert.equal(await page.getByText('Waiting for Worker').count(),group.uuid===polledGroup.uuid?0:2);
     page.once('dialog',dialog=>dialog.accept('Browser acceptance terminal cancellation'));
     const cancel=page.getByRole('button',{name:'cancel',exact:true});if(await cancel.count())await cancel.click();else await page.getByRole('button',{name:'release',exact:true}).click();await page.getByText('Released').waitFor();
   }

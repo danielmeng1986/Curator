@@ -2291,7 +2291,7 @@ class WorkDispatchService:
         return result
 
     def groups(self,view="active",workspace_uuid=None,worker_kind=None,album_id=None,limit=50,offset=0):
-        if view not in {"active","history","all"}: raise ValueError("Group view must be active, history, or all.")
+        if view not in {"active","review","closure","history","all"}: raise ValueError("Group view must be active, review, closure, history, or all.")
         if not isinstance(limit,int) or not 1<=limit<=100 or not isinstance(offset,int) or offset<0:
             raise ValueError("Group pagination is invalid.")
         if album_id is not None and (not isinstance(album_id,int) or album_id<=0): raise ValueError("album_id is invalid.")

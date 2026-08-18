@@ -1382,6 +1382,14 @@ class TestAIWorkItemClaimContract(unittest.TestCase):
         reclaimed = self.service.claim_next("worker-two", 60); self.assertEqual(item["uuid"], reclaimed["uuid"])
         self.assertEqual("LeaseExpired", self.service.get(item["uuid"], True)["attempts"][0]["outcome"])
 
+    def test_failed_item_can_be_cancelled_without_group_abandonment(self):
+        item=self.service.create(self.workspace["uuid"],self.album_id,self.config["uuid"])
+        self.service.claim_next("worker-one",60)
+        failed=self.service.fail(item["uuid"],"worker-one","EVIDENCE_SAMPLE_INSUFFICIENT","Not enough usable images")
+        cancelled=self.service.cancel(item["uuid"],failed["version"])
+        self.assertEqual("Cancelled",cancelled["run_state"])
+        self.assertEqual(1,cancelled["attempt_count"])
+
     def test_claim_skips_incompatible_head_and_snapshots_declared_capabilities(self):
         first=self.service.create(self.workspace["uuid"],self.album_id,self.config["uuid"])
         self.conn.execute("UPDATE workspace_album_ai_worker SET worker_kind='metadata_enrichment' WHERE uuid=?",(first["uuid"],))
@@ -2023,6 +2031,20 @@ class TestWorkDispatchReleaseSafety(unittest.TestCase):
         abandoned=self.dispatch.close_group("group-close",1,"abandon","No longer needed","admin-one")
         self.assertEqual("Abandoned",abandoned["disposition"])
         self.assertEqual(2,self.conn.execute("SELECT COUNT(*) FROM ai_work_item_result_stage WHERE work_item_uuid=?",(self.item["uuid"],)).fetchone()[0])
+
+    def test_worker_queue_and_review_views_partition_active_groups(self):
+        closure=self.dispatch.groups("closure")
+        self.assertEqual(["group-close"],[group["uuid"] for group in closure["items"]])
+        self.assertEqual([],self.dispatch.groups("review")["items"])
+        self.assertEqual([],self.dispatch.groups("active")["items"])
+        self.conn.execute("UPDATE ai_work_item_review SET state='ReadyForReview' WHERE work_item_uuid=?",(self.item["uuid"],));self.conn.commit()
+        self.assertEqual(["group-close"],[group["uuid"] for group in self.dispatch.groups("review")["items"]])
+        self.assertEqual([],self.dispatch.groups("closure")["items"])
+        self.conn.execute("UPDATE workspace_album_ai_worker SET run_state='Failed' WHERE uuid=?",(self.item["uuid"],));self.conn.commit()
+        self.assertEqual(["group-close"],[group["uuid"] for group in self.dispatch.groups("active")["items"]])
+        self.assertEqual([],self.dispatch.groups("review")["items"])
+        self.assertEqual([],self.dispatch.groups("closure")["items"])
+        with self.assertRaises(ValueError):self.dispatch.groups("unknown")
 
     def test_cancel_before_material_execution_marks_item_cancelled(self):
         self.conn.execute("UPDATE workspace_album_ai_worker SET run_state='Pending',attempt_count=0 WHERE uuid=?",(self.item["uuid"],))

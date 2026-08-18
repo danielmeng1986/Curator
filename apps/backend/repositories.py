@@ -2728,7 +2728,15 @@ class WorkDispatchRepository:
 
     def search_groups(self,view="active",workspace_uuid=None,worker_kind=None,album_id=None,limit=50,offset=0):
         conditions=[]; params=[]
-        if view=="active": conditions.append("g.group_state='Active'")
+        worker_work="""EXISTS (SELECT 1 FROM work_dispatch_group_item vgi
+            JOIN workspace_album_ai_worker vi ON vi.uuid=vgi.item_uuid
+            WHERE vgi.group_uuid=g.uuid AND vi.run_state IN ('Pending','Claimed','Failed'))"""
+        review_work="""EXISTS (SELECT 1 FROM work_dispatch_group_item rgi
+            JOIN ai_work_item_review rv ON rv.work_item_uuid=rgi.item_uuid
+            WHERE rgi.group_uuid=g.uuid AND rv.state IN ('ReadyForReview','InReview','ReworkRequested'))"""
+        if view=="active": conditions.extend(["g.group_state='Active'",worker_work])
+        elif view=="review": conditions.extend(["g.group_state='Active'",f"NOT {worker_work}",review_work])
+        elif view=="closure": conditions.extend(["g.group_state='Active'",f"NOT {worker_work}",f"NOT {review_work}"])
         elif view=="history": conditions.append("g.group_state='Released'")
         if workspace_uuid: conditions.append("b.workspace_uuid=?"); params.append(workspace_uuid)
         if worker_kind: conditions.append("g.worker_kind=?"); params.append(worker_kind)

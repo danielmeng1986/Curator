@@ -52,15 +52,22 @@ Dispatch Group across Worker kinds, so comparison configurations share the same
 Group and reservation. Dispatch does not change `album.status_id`; Album
 business Status, Worker run state, and human Review state remain distinct.
 
-Active and History views, stable Group routes, and Workspace summaries provide
+Worker Queue, Review, Closure, and History views, stable Group routes, and Workspace summaries provide
 resume points after navigation, browser refresh, delayed Worker activity, or a
 Backend restart. Cancellation, abandonment, and release are explicit
 Backend-controlled Group actions with visible blockers and Operation evidence.
-Active and History render every Album/configuration run separately with a
+Worker Queue contains unreleased Groups with Pending, Claimed, or Failed runs.
+Review contains unreleased Groups with ReadyForReview, InReview, or
+ReworkRequested work and no earlier Worker obligation. Closure contains
+unreleased Groups whose Worker and review work is terminal, including Approved,
+Rejected, and Cancelled outcomes that still need Promotion, release, or closure.
+History contains Released Groups. These views render every Album/configuration run separately with a
 human-readable stage, durable run/result states, attempt count, last activity,
 active lease deadline, redacted failure, and a stable detail route. The stage is
 a projection of authoritative Backend state, not a browser-owned progress bar.
-While Active or an Active Group detail route is visible, bounded native-JavaScript
+Long Dispatch pages provide synchronized navigation above and below the content,
+including First, Previous, direct page entry, Next, and Last.
+While Worker Queue or an Active Group detail route is visible, bounded native-JavaScript
 polling refreshes only the progress region every five seconds. It pauses in a
 hidden tab, avoids overlapping requests, backs off after failure, preserves an
 active control and scroll position, stops on route exit or terminal Group state,

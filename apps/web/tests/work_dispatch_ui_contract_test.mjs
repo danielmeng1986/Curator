@@ -33,6 +33,10 @@ assert.match(pageSource, /Status will not change/);
 assert.match(pageSource, /preview_token/);
 assert.match(pageSource, /configuration_uuids/);
 assert.match(pageSource, /view=\$\{this\._view\}/);
+assert.match(pageSource, /\['review','Review'\]/);
+assert.match(pageSource, /\['closure','Closure'\]/);
+assert.match(pageSource, /\['active','Worker Queue'\]/);
+assert.match(pageSource, /dispatchPaginationTop/);
 assert.match(pageSource, /image_max_tokens/);
 assert.match(pageSource, /Preparing evidence \/ Vision analysis/);
 assert.match(pageSource, /Writer analysis/);
@@ -46,6 +50,9 @@ assert.match(pageSource, /dispatchViewContent/);
 assert.match(pageSource, /dispatchGroupProgressRows/);
 assert.match(pageSource, />Retry<\/button>/);
 assert.match(pageSource, /\/ai-work-items\/\$\{encodeURIComponent\(uuid\)\}\/retry/);
+assert.match(pageSource, />Cancel<\/button>/);
+assert.match(pageSource, /\/ai-work-items\/\$\{encodeURIComponent\(uuid\)\}\/cancel/);
+assert.match(pageSource, /Dispatch Group was preserved/);
 assert.match(pageSource, /No Open AI Workspace exists/);
 assert.match(pageSource, /Create and select an Open AI Workspace/);
 assert.match(pageSource, /Select all Albums on current page/);
@@ -61,6 +68,7 @@ assert.equal(page._stage({run_state:'Claimed',result_state:'AwaitingWriter'}),'W
 assert.equal(page._stage({run_state:'Completed',review_state:'ReadyForReview'}),'ReadyForReview');
 const failedRows=page._itemRows([{item_uuid:'item-1',version:3,run_state:'Failed',attempt_count:1,configuration_snapshot:{name:'Balanced',model_file:'qwen.gguf'}}],'Fixture Album');
 assert.match(failedRows,/>Retry<\/button>/);assert.match(failedRows,/retryItem\('item-1',3,this\)/);
+assert.match(failedRows,/>Cancel<\/button>/);assert.match(failedRows,/cancelItem\('item-1',3,this\)/);
 const pendingRows=page._itemRows([{item_uuid:'item-2',version:1,run_state:'Pending',attempt_count:0,configuration_snapshot:{name:'Balanced',model_file:'qwen.gguf'}}],'Fixture Album');
 assert.doesNotMatch(pendingRows,/>Retry<\/button>/);
 
@@ -99,6 +107,13 @@ assert.equal(page._selected.size,0);
 page._meta={total:121,limit:50,offset:50};
 assert.match(page._paginationHtml(),/Showing 51–100 of 121/);
 assert.match(page._paginationHtml(),/Page 2 of 3/);
+assert.match(page._paginationHtml(),/>First<\/button>/);assert.match(page._paginationHtml(),/>Last<\/button>/);
+assert.match(page._paginationHtml(),/aria-label="Go to page"/);assert.match(page._paginationHtml(),/>Go<\/button>/);
+assert.equal((page._renderShell.toString().match(/_paginationHtml/g)||[]).length,2);
+
+let loaded=0;page.loadView=async()=>{loaded+=1;};page._view='active';page._state.active={limit:50,offset:0};
+page.goToPage(3);await new Promise(resolve=>setTimeout(resolve,0));assert.equal(page._state.active.offset,100);assert.equal(loaded,1);
+page.goToPage(4);assert.equal(page._state.active.offset,100);assert.equal(loaded,1);
 
 page._state.available={status_id:'2',studio_id:'1',model_id:'3',limit:50,offset:50};
 page._resetSelection();page._selectionMode='first_n';page._firstN=75;

@@ -11,7 +11,7 @@ const WorkDispatchPage = {
   _meta: { total:0, limit:50, offset:0 },
   _state: {
     available:{status_id:'',studio_id:'',model_id:'',limit:50,offset:0},
-    active:{limit:50,offset:0},history:{limit:50,offset:0},
+    active:{limit:50,offset:0},review:{limit:50,offset:0},closure:{limit:50,offset:0},history:{limit:50,offset:0},
   },
   _selectionMode: 'ids',
   _firstN: null,
@@ -44,10 +44,13 @@ const WorkDispatchPage = {
       const retry=item.run_state === 'Failed'
         ? `<button class="btn btn-primary" onclick="WorkDispatchPage.retryItem('${esc(item.item_uuid)}',${item.version},this)">Retry</button>`
         : '';
+      const cancel=item.run_state === 'Failed'
+        ? `<button class="btn btn-danger" onclick="WorkDispatchPage.cancelItem('${esc(item.item_uuid)}',${item.version},this)">Cancel</button>`
+        : '';
       return `<tr><td>${esc(albumTitle || '—')}</td><td><strong>${esc(config.name || 'Unknown configuration')}</strong><div class="table-secondary"><code>${esc(config.model_file || '—')}</code></div><div class="table-secondary">${esc(config.instruction_profile?.profile_name||'Legacy prompt')} · v${esc(config.instruction_profile?.version||'—')}</div></td>
         <td><span class="chip ${item.run_state === 'Failed' ? 'chip-error' : item.run_state === 'Completed' ? 'chip-ok' : 'chip-warn'}">${esc(this._stage(item))}</span><div class="table-secondary">Run ${esc(item.run_state)}${item.result_state ? ` · Result ${esc(item.result_state)}` : ''}</div></td>
         <td>${item.attempt_count}</td><td>${item.updated_at ? esc(new Date(item.updated_at).toLocaleString()) : '—'}${item.lease_expires_at ? `<div class="table-secondary">Lease until ${esc(new Date(item.lease_expires_at).toLocaleString())}</div>` : ''}</td>
-        <td>${item.last_error ? `<span class="text-error">${esc(item.last_error)}</span>` : '—'}</td><td><div class="detail-actions"><a class="btn btn-secondary" href="#/ai-work-items/${esc(item.item_uuid)}/review">Open</a>${retry}</div></td></tr>`;
+        <td>${item.last_error ? `<span class="text-error">${esc(item.last_error)}</span>` : '—'}</td><td><div class="detail-actions"><a class="btn btn-secondary" href="#/ai-work-items/${esc(item.item_uuid)}/review">Open</a>${retry}${cancel}</div></td></tr>`;
     }).join('');
   },
 
@@ -60,8 +63,18 @@ const WorkDispatchPage = {
     else await this.loadView();
   },
 
+  async cancelItem(uuid,version,trigger) {
+    if(!await ui.confirmDialog({title:'Cancel failed Work Item?',message:'This removes only this failed run from Worker processing. Other runs and the Dispatch Group are preserved.',confirmLabel:'Cancel Work Item',danger:true}))return;
+    const result=await ui.runAction(`work-item-cancel-${uuid}`,()=>api.post(`/ai-work-items/${encodeURIComponent(uuid)}/cancel`,{expected_version:version}),{trigger,context:'cancel the failed Work Item'});
+    if(!result.ok)return;
+    toast('Work Item cancelled. The Dispatch Group was preserved.');
+    const groupMatch=window.location.hash.match(/^#\/work-dispatch\/groups\/([^/?]+)/);
+    if(groupMatch)await this.renderGroup({uuid:decodeURIComponent(groupMatch[1])});
+    else await this.loadView();
+  },
+
   async render({ view = 'available' } = {}) {
-    this._view = ['available', 'active', 'history'].includes(view) ? view : 'available';
+    this._view = ['available', 'active', 'review', 'closure', 'history'].includes(view) ? view : 'available';
     this._selected = new Set();
     this._selectionMode='ids';this._firstN=null;
     const el = document.getElementById('page-content');
@@ -135,7 +148,7 @@ const WorkDispatchPage = {
 
   _renderShell({ workerKind = '' } = {}) {
     const el = document.getElementById('page-content');
-    const tabs = [['available','Available'],['active','Active'],['history','History']];
+    const tabs = [['available','Available'],['active','Worker Queue'],['review','Review'],['closure','Closure'],['history','History']];
     el.innerHTML = `<div class="page-header"><div><h1 class="page-title">Album Work Dispatch</h1>
       <p class="page-subtitle">Assign selected Albums to a Worker without changing Album Status.</p></div>${this._view !== 'available' ? `<div><button class="btn btn-secondary" onclick="WorkDispatchPage.refreshProgress(true)">Refresh progress</button>${this._view==='active'?'<div id="dispatchAutoRefreshStatus" class="table-secondary" role="status">Auto refresh on</div>':''}</div>` : ''}</div>
       <div class="dispatch-tabs" role="tablist">${tabs.map(([key,label]) => `<button class="btn ${this._view === key ? 'btn-primary' : 'btn-secondary'}" onclick="WorkDispatchPage.changeView('${key}')">${label}</button>`).join('')}</div>
@@ -144,7 +157,7 @@ const WorkDispatchPage = {
         ${this._view === 'available' ? this._filterHtml() : ''}
         <label>Per page <select id="dispatchPageSize" onchange="WorkDispatchPage.pageSizeChanged(this.value)">${[25,50,100].map(value=>`<option value="${value}" ${this._meta.limit===value?'selected':''}>${value}</option>`).join('')}</select></label>
       </div>
-      <div id="dispatchViewContent">${this._view === 'available' ? this._availableHtml() : this._groupsHtml()}</div><div id="dispatchPagination">${this._paginationHtml()}</div>`;
+      <div id="dispatchPaginationTop">${this._paginationHtml()}</div><div id="dispatchViewContent">${this._view === 'available' ? this._availableHtml() : this._groupsHtml()}</div><div id="dispatchPagination">${this._paginationHtml()}</div>`;
     if(this._view==='active')this._startPolling('active',()=>this.refreshProgress(false),()=>window.location.hash.startsWith('#/work-dispatch')&&this._view==='active');
     else this._stopPolling();
   },
@@ -154,11 +167,11 @@ const WorkDispatchPage = {
     const workerKind=document.getElementById('dispatchWorkerKind')?.value||this._workerKinds[0]?.worker_kind||'';const state=this._state.active;
     const result=await api.get(`/work-dispatch/groups?view=active&worker_kind=${encodeURIComponent(workerKind)}&limit=${state.limit}&offset=${state.offset}`);
     this._candidates=result.items||[];this._meta={total:result.total||0,limit:result.limit||state.limit,offset:state.offset};
-    const content=document.getElementById('dispatchViewContent');const pagination=document.getElementById('dispatchPagination');
-    if(!content||!pagination)return false;
+    const content=document.getElementById('dispatchViewContent');const pagination=document.getElementById('dispatchPagination');const paginationTop=document.getElementById('dispatchPaginationTop');
+    if(!content||!pagination||!paginationTop)return false;
     if(document.activeElement&&content.contains(document.activeElement))return 'deferred';
     const scrollX=window.scrollX,scrollY=window.scrollY;
-    content.innerHTML=this._groupsHtml();pagination.innerHTML=this._paginationHtml();window.scrollTo(scrollX,scrollY);
+    content.innerHTML=this._groupsHtml();pagination.innerHTML=this._paginationHtml();paginationTop.innerHTML=this._paginationHtml();window.scrollTo(scrollX,scrollY);
     if(manual)this._setPollStatus('Progress refreshed manually.');
     return this._candidates.some(group=>group.group_state==='Active');
   },
@@ -185,9 +198,12 @@ const WorkDispatchPage = {
       <label>Model <select id="dispatchModelFilter" onchange="WorkDispatchPage.filterChanged()">${options(this._models,state.model_id,'models')}</select></label>
       <button class="btn btn-secondary" onclick="WorkDispatchPage.clearFilters()">Clear filters</button>`;},
 
-  _paginationHtml(){const {total,limit,offset}=this._meta;const start=total?offset+1:0,end=Math.min(offset+limit,total);return `<div class="pagination">
-    <span>Showing ${start}–${end} of ${total}</span><button class="btn btn-secondary" ${offset<=0?'disabled':''} onclick="WorkDispatchPage.changePage(-1)">Previous</button>
-    <span>Page ${total?Math.floor(offset/limit)+1:1} of ${Math.max(1,Math.ceil(total/limit))}</span><button class="btn btn-secondary" ${offset+limit>=total?'disabled':''} onclick="WorkDispatchPage.changePage(1)">Next</button></div>`;},
+  _paginationHtml(){const {total,limit,offset}=this._meta;const start=total?offset+1:0,end=Math.min(offset+limit,total);const page=total?Math.floor(offset/limit)+1:1,pages=Math.max(1,Math.ceil(total/limit));return `<div class="pagination">
+    <span>Showing ${start}–${end} of ${total}</span><button class="btn btn-secondary" ${page<=1?'disabled':''} onclick="WorkDispatchPage.goToPage(1)">First</button>
+    <button class="btn btn-secondary" ${page<=1?'disabled':''} onclick="WorkDispatchPage.changePage(-1)">Previous</button><span>Page ${page} of ${pages}</span>
+    <label class="pagination-jump">Go to page <input type="number" min="1" max="${pages}" value="${page}" aria-label="Go to page" onkeydown="if(event.key==='Enter')WorkDispatchPage.goToPage(this.value)"></label>
+    <button class="btn btn-secondary" onclick="WorkDispatchPage.goToPage(this.previousElementSibling.querySelector('input').value)">Go</button>
+    <button class="btn btn-secondary" ${page>=pages?'disabled':''} onclick="WorkDispatchPage.changePage(1)">Next</button><button class="btn btn-secondary" ${page>=pages?'disabled':''} onclick="WorkDispatchPage.goToPage(${pages})">Last</button></div>`;},
 
   _availableHtml() {
     const rows = Array.isArray(this._candidates) ? this._candidates : [];
@@ -211,7 +227,7 @@ const WorkDispatchPage = {
     const rows = Array.isArray(this._candidates) ? this._candidates : [];
     return rows.map(group => `<section class="card dispatch-group-card"><div class="dispatch-group-heading"><div><a href="#/albums/${group.album_id}"><strong>${esc(group.album_title)}</strong></a><div class="table-secondary"><a href="#/work-dispatch/groups/${esc(group.uuid)}">Group details</a> · Workspace <a href="#/ai-workspaces/${esc(group.workspace_uuid)}">${esc(group.workspace_uuid)}</a></div></div><span class="chip ${group.group_state === 'Active' ? 'chip-warn' : 'chip-ok'}">${esc(group.group_state)}</span></div>
       <div class="table-wrap"><table class="work-progress"><thead><tr><th>Album</th><th>Configuration</th><th>Current stage</th><th>Attempts</th><th>Last activity</th><th>Failure</th><th>Details</th></tr></thead><tbody>${this._itemRows(group.items, group.album_title)}</tbody></table></div>
-      <div class="dispatch-group-footer">${group.item_count} runs · ${group.open_review_count} open reviews · ${group.promotion_count} promotions${group.closure_operation_uuid ? ` · <a href="#/operations/${esc(group.closure_operation_uuid)}">Operation</a>` : ''}</div></section>`).join('') || `<div class="card empty-state">No ${esc(this._view)} Groups.</div>`;
+      <div class="dispatch-group-footer">${group.item_count} runs · ${group.open_review_count} open reviews · ${group.promotion_count} promotions${group.closure_operation_uuid ? ` · <a href="#/operations/${esc(group.closure_operation_uuid)}">Operation</a>` : ''}</div></section>`).join('') || `<div class="card empty-state">${this._view==='active'?'No Work Items currently need AI Worker action.':this._view==='review'?'No Groups are waiting for review.':this._view==='closure'?'No Groups are ready for closure.':`No ${esc(this._view)} Groups.`}</div>`;
   },
 
   changeView(view) { this._view = view; this._resetSelection(); void this.loadView(); },
@@ -221,6 +237,7 @@ const WorkDispatchPage = {
   clearFilters(){Object.assign(this._state.available,{status_id:'',studio_id:'',model_id:'',offset:0});this._resetSelection();void this.loadView();},
   pageSizeChanged(value){const size=Number(value);if(![25,50,100].includes(size))return;this._state[this._view].limit=size;this._state[this._view].offset=0;this._resetSelection();void this.loadView();},
   changePage(direction){const state=this._state[this._view];const next=state.offset+direction*state.limit;if(next<0||next>=this._meta.total)return;state.offset=next;this._resetSelection();void this.loadView();},
+  goToPage(value){const page=Number(value),pages=Math.max(1,Math.ceil(this._meta.total/this._meta.limit));if(!Number.isInteger(page)||page<1||page>pages){toast(`Enter a page from 1 to ${pages}.`,'error');return;}const state=this._state[this._view];state.offset=(page-1)*state.limit;this._resetSelection();void this.loadView();},
   toggle(id, checked, event={}) {
     this._selectionMode='ids';this._firstN=null;
     const rows=Array.isArray(this._candidates)?this._candidates:[];

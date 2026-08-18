@@ -187,11 +187,16 @@ Promotion remains active. Read models expose the links needed to move between
 candidate, active-work, history, Workspace review, and Operation detail views.
 
 `GET /api/v1/work-dispatch/worker-kinds` returns the Backend adapter catalog.
-`GET /api/v1/work-dispatch/groups` accepts `view=active|history|all`, optional
+`GET /api/v1/work-dispatch/groups` accepts `view=active|review|closure|history|all`, optional
 `workspace_uuid`, `worker_kind`, and `album_id`, plus bounded `limit`/`offset`.
 Each row joins stable Album, Workspace, Batch, reservation, Work Item, review,
 Promotion, and closure summaries and includes Backend-calculated permitted
-actions. It is the global Active/History list; clients do not enumerate Albums
+actions. `active` contains unreleased Groups with Pending, Claimed, or Failed
+Worker execution; `review` contains unreleased Groups with ReadyForReview,
+InReview, or ReworkRequested obligations and no remaining Worker execution;
+`closure` contains unreleased Groups with neither Worker nor open-review work,
+including Approved, Rejected, and fully Cancelled outcomes that now require
+Promotion, release, or closure; `history` contains Released Groups. Clients do not enumerate Albums
 and request Group detail one row at a time.
 
 `GET /api/v1/work-dispatch/groups/{group_uuid}` returns Group-wide obligations,
