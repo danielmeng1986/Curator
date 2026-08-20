@@ -32,6 +32,13 @@ UI may offer an Album removal action only after the Digital Asset Trash
 lifecycle defines and implements reviewed movement of the Album and its
 contained Photos, recovery, and administrator-confirmed permanent purge.
 
+When implemented, Writer and Admin see Backend-provided Trash readiness on an
+active Album. An ineligible action names the blocker and links to the relevant
+Work/Review record when authorized. Successful Trash removes the Album from the
+normal collection without changing `status_id`; Administrator Center owns
+Trash inspection, restore, hold, and permanent asset purge. Purged Album and
+Photo records remain historical evidence and are not editable active entities.
+
 ## Models and Studios
 
 `#/models` and `#/studios` share browse-and-detail behavior: search, filter, sort, grid, direct creation, and details. Each may be created either from its dedicated list or from an Album/Import inline selector.

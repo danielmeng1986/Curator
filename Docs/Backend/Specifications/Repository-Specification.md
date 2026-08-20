@@ -48,6 +48,8 @@ Representative workflow-owned Read Models include:
 | --- | --- | --- | --- |
 | `AlbumImportPreviewReadModel` | Import Preview | imported album workspace records, import batch/context, validation outcomes | preview summary, duplicate/conflict indicators, validation counts |
 | `AlbumListReadModel` | Album List | albums, status lookups, relevant aggregate relationships | display status, aggregate counts, sortable display values |
+| `AlbumTrashReadinessReadModel` | Album entity management | Album/Photo lifecycle, Work Dispatch, Review, Workspace, Operation, Issue, and Repair state | `can_trash`, lifecycle version, impact summary, stable blockers, authorized navigation references |
+| `DigitalAssetTrashReadModel` | Admin Trash/history | retained Album/Photo lifecycle and inventory evidence, retention/hold, Operations, Issues, Repairs | restore/purge eligibility, asset availability, count/bytes, safe historical location, allowed actions |
 | `ValidationIssueReadModel` | Validation | workspace or production records, Issues, validation outcomes | severity summary, affected-record context, resolution state |
 | `AiAlbumReviewReadModel` | AI Review | AI album workspace records, raw AI output, reviewer selections, validation outcomes | selected candidate values, review readiness, approval state |
 | `RepairCandidateReadModel` | Repair | candidate records, detected conflicts or Issues, repair analysis | repair rationale, confidence or risk indicators, proposed action |
@@ -65,6 +67,13 @@ Each Read Model must be documented in its owning workflow or API Specification w
 - intended workflow or UI.
 
 Simple lookups, such as a Status dropdown, should return only the data needed by that workflow.
+
+The normal `AlbumListReadModel` includes only `catalog_state = ACTIVE`; its
+Status projection remains independent of catalog and asset lifecycle. Trashed
+and asset-deleted records remain durable and are available only through the
+workflow-specific Admin read models defined by Digital Asset Trash. Repository
+contracts must not expose a generic Album hard delete or physically remove
+retained catalog/workflow identities as a shortcut for purge.
 
 ## Validity and error handling
 

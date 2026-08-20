@@ -37,6 +37,7 @@ Specifications define observable behavior, valid and invalid states, responsibil
 | [AI Workspace Acceptance Fixture](AI-Workspace-Acceptance-Fixture.md) | Disposable Backend contract for BT-053 and UI-011D. |
 | [Work Dispatch Workflow](Work-Dispatch-Workflow.md) | Album selection, exclusive reservations, dispatch batches, Worker groups, and redispatch safety. |
 | [Import Workflow](Import-Workflow.md) | Import preview, validation, persistence, filesystem work, and repair hand-off. |
+| [Digital Asset Trash](Digital-Asset-Trash.md) | Catalog visibility, recoverable Trash, restore, retention/hold, permanent asset purge, and retained evidence. |
 | [Repair Workflow](Repair-Workflow.md) | Detection, repair states, user confirmation, and verification. |
 | [Snapshot Specification](Snapshot-Specification.md) | Risk-based snapshot decisions, restore, retention, and metadata. |
 | [Operation Logging](Operation-Logging.md) | Database-first operation history and supporting JSONL logs. |

@@ -125,6 +125,13 @@ parameters. Dates use `YYYY-MM-DD`; an invalid or inverted range is a `400`
 request error. Free-text search covers Album title and description, Studio,
 location, scene, and linked Model display/primary names.
 
+The normal Album collection, count, search, ordinary selectors, and editable
+detail contract include only `catalog_state = ACTIVE`. `status_id` remains an
+independent Album business field and is never interpreted as Trash or asset
+availability. An ordinary detail request for a Trashed Album returns a stable
+not-active outcome and, for an authorized Admin, may include a safe link to its
+Trash or deleted-asset history projection.
+
 Album create/update accepts Album fields plus complete `models` and `relations`
 sets at the service transaction boundary. Relationship target identifiers must
 exist. A Model may occur once per Album, an Album cannot relate to itself, and
@@ -144,6 +151,40 @@ reviewed overwrite policy.
 atomically rejects expired, invalid, replayed-after-change, or stale previews
 with `409`; it never partially applies the batch. Success returns per-Album
 outcomes, an aggregate summary, and the durable batch Operation identifier.
+
+### Digital Asset Trash contracts
+
+The controlling state, eligibility, retention, and evidence rules are defined
+by [Digital Asset Trash](Digital-Asset-Trash.md). The API exposes Backend-owned
+policy rather than accepting paths or client-calculated transitions.
+
+`POST /api/v1/albums/{uuid}/trash/preview` is available to Writer and Admin. It
+returns `can_trash`, stable blockers with authorized workflow links, lifecycle
+version, reviewed Album/Photo count and bytes, retention consequence, warnings,
+and a signed short-lived token when eligible. Preview performs no lifecycle,
+filesystem, Snapshot, or Operation mutation.
+
+`POST /api/v1/albums/trash/execute` accepts only that token. It is single-use,
+revalidates all workflow and filesystem state, and returns the durable
+Operation and verified lifecycle outcome. The normal Album read model excludes
+the Album only after the Backend has durably accepted the lifecycle transition;
+an incomplete material outcome is `NeedsRepair`, never success.
+
+Admin-only `/api/v1/admin/digital-asset-trash` collection/detail routes expose
+recoverable Trash, holds, retention, Missing/NeedsRepair outcomes, and deleted-
+asset history. Admin-only restore, hold, hold-release, and purge Preview/Execute
+routes use signed, expiring, single-use tokens bound to lifecycle version,
+Backend-resolved paths, inventory fingerprints, destination occupancy, policy,
+and authenticated principal. Execution accepts no replacement path or scope.
+
+Successful restore returns the same Album/Photo identities as Active/Present.
+Successful purge returns them as Trashed/Deleted with
+`assets_available: false`; it never deletes catalog rows. Stable conflicts and
+replay behavior use the error vocabulary in Digital Asset Trash.
+
+`DELETE /api/v1/albums/{id|uuid}` is not a supported Album lifecycle operation.
+It returns `409 ALBUM_HARD_DELETE_UNAVAILABLE` with no catalog or filesystem
+mutation. Relationship-removal endpoints retain their narrower meanings.
 
 ## Import preview and execution contracts
 

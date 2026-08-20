@@ -68,6 +68,13 @@ Even with this evidence, fuzzy matching is an Assisted action and requires expli
 
 Quarantine is a temporary isolation mechanism, not deletion and not a substitute for validation. Quarantined directories must be moved intact to the Curator-controlled quarantine root configured outside the managed archive namespace. Each item must be stored under a unique quarantine identifier and retain its original path, repair identifier, initiating Operation, timestamps, reason, and content inventory sufficient to identify it for restoration.
 
+Repair Quarantine is not Digital Asset Trash. Quarantine responds to an
+unexpected conflict or discrepancy and is owned by a Repair case; Trash is a
+user-intended lifecycle transition owned by an Album/Photo and its reviewed
+Trash Operation. The two use separate identities, roots, retention decisions,
+read models, and UI labels. Repair must never make a quarantined conflict purge-
+eligible merely by relabelling it as Trash.
+
 The Backend retains quarantined items for 30 days from quarantine, unless an Administrator explicitly places the item on hold or extends retention. Only Administrators may list, inspect, restore, extend, or release quarantined items; normal repair clients may see only the repair-safe status and identifier. All access and retention decisions require audit records.
 
 Restoration requires an Administrator to select the quarantined item and a destination, confirm that the destination is safe and non-conflicting, create any required snapshot, move the item intact, and run the applicable consistency validation. Restoration must not overwrite an existing path. At retention expiry, the Backend must create an auditable expiry disposition: a held item remains retained; an unheld item may be permanently removed only by an authorized retention job after recording the item identity, expiry decision, and deletion outcome. Expiry removal is irreversible and must follow the snapshot policy below when it affects multiple directories or otherwise meets the required-snapshot criteria.
@@ -96,6 +103,10 @@ The canonical database path is the intended source of truth. A real path that di
 - A repair action records an Operation and supporting audit log.
 - A failed or incomplete repair remains visible in `NeedsRepair` or `ManualConflict`; it is never represented as resolved.
 - A detected discrepancy creates or updates a related Issue when persistent review is required.
+- An incomplete Trash, restore, or permanent asset purge creates or updates a
+  linked Issue/Repair and retains the asset lifecycle as `NEEDS_REPAIR` until
+  verification establishes Active/Present, Trashed/Trashed, or
+  Trashed/Deleted truth.
 - Ignoring a repair requires an explicit decision and remains auditable.
 - UI decisions bind the Repair `updated_at` observed during review and may use
   only the Backend-returned allowed actions. Confirmation and verification

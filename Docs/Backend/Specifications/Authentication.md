@@ -122,11 +122,18 @@ Roles express the maximum authorization requested by a device, and scopes expres
 
 | Role | Permitted capability |
 | --- | --- |
-| `admin` | Manage tokens, migrations, restores, backups, and other high-risk administration. |
-| `writer` | Perform authorized data writes; cannot perform administrative operations. |
+| `admin` | Manage tokens, migrations, database restores, backups, Digital Asset Trash restore/hold/purge, and other high-risk administration. |
+| `writer` | Perform authorized data writes, including eligible recoverable Album Trash; cannot inspect or administer Trash or permanently purge assets. |
 | `reader` | Perform read-only queries. |
 
 `writer` is the highest role normal devices SHOULD request. `admin` privileges are reserved for administrator-controlled devices. The AI Worker normally receives a `writer` token only. Administrator approval is required before any registered device receives a long-lived token, including a token with a reduced role or scope. Scope checking occurs before the protected Service operation runs.
+
+Digital Asset Trash authorization is action-specific. Writer and Admin may
+preview and execute eligible Album Trash from entity management. Only Admin may
+list/detail Trash, restore assets, manage holds, view deleted-asset history, or
+preview/execute permanent asset purge. Authentication and scope failure occurs
+before eligibility evaluation or filesystem work and produces no lifecycle
+mutation.
 
 Future versions MAY add richer role or scope management while preserving this role vocabulary and the bearer-token API contract.
 

@@ -82,7 +82,7 @@ The Archive contains the original digital assets.
 
 Characteristics:
 
-- immutable
+- protected from ordinary metadata and organizational mutation
 - authoritative
 - reproducible
 - independent of Curator
@@ -90,6 +90,17 @@ Characteristics:
 Curator never relies on modifying the Archive to maintain metadata.
 
 The Archive should always remain recoverable.
+
+User-authorized Digital Asset Trash is the explicit exception to ordinary
+Archive immutability. It may move a reviewed Album asset unit to a separate
+Curator-controlled Trash root and, after retention and Administrator review,
+permanently delete only those digital assets. This destructive lifecycle is
+not metadata maintenance and cannot be reached through ordinary CRUD.
+
+Catalog identity is more durable than asset availability. Album, Photo,
+relationship, AI Work, Review, and Operation records remain historical evidence
+after digital assets are deleted. Album business Status, active-catalog
+visibility, and digital-asset availability are independent state dimensions.
 
 ---
 
@@ -294,6 +305,20 @@ Every important operation should be visible.
 ## Human Review
 
 Critical decisions require confirmation.
+
+---
+
+## Durable Catalog Identity
+
+Removal from the active catalog does not erase Curator's knowledge. Digital
+Asset Trash changes catalog visibility and asset location; permanent purge
+deletes reviewed bytes while retaining stable entity identities and linked
+history. Destructive asset actions require Backend-owned paths, eligibility,
+reviewed scope, authorization, durable Operations, and verified outcomes.
+
+Repair Quarantine isolates unexpected conflicts and is not user Trash.
+Database Snapshot Restore recovers database state and cannot be represented as
+recovery of permanently deleted asset bytes.
 
 ---
 

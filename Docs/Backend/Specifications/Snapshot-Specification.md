@@ -14,6 +14,7 @@ Snapshot decisions are based on operation risk and recoverability, not on row co
 | Always high-risk | Restore | Required before altering recoverable state; see the restore workflow below. |
 | Conditionally high-risk | Bulk import or bulk delete | Snapshot candidate; required when the service-side risk assessment classifies the operation as high-risk. |
 | Conditionally high-risk | Bulk filesystem rename or quarantine | Snapshot candidate; required when the service-side risk assessment classifies the operation as high-risk. |
+| Conditionally high-risk | Batch Digital Asset Trash, restore, or permanent asset purge | Snapshot candidate for database recoverability; required when service-side risk assessment classifies the database transition as high-risk. |
 | Conditionally high-risk | Workspace-to-production promotion | Snapshot candidate; required when the service-side risk assessment classifies the operation as high-risk. |
 | Conditionally high-risk | Cross-table relationship rebuild | Snapshot candidate; required when the service-side risk assessment classifies the operation as high-risk. |
 | Ordinary | Single-entity CRUD | No snapshot by default; Operation record required according to policy. |
@@ -58,6 +59,14 @@ Cleanup eligibility is a hard gate: automated cleanup may delete a snapshot only
 Restore is an explicit high-risk workflow. Before altering recoverable state, it must create a safety snapshot and create an Operation record. Through `/api/v1`, restore must first be represented as a distinct pending-confirmation step, not as an immediate effect. The API workflow must express at least `pending_confirmation`, `confirmed`, `executing`, `completed`, `failed`, and `cancelled` states, or an equivalent explicit state model. Confirmation is required before execution begins.
 
 Snapshots provide recovery material only. They do not replace Operation records, which describe what was attempted and why, or JSONL diagnostic logs, which retain diagnostic detail. Each remains required for its own purpose.
+
+A database snapshot never contains or restores digital-asset bytes and must not
+be presented as making permanent asset purge reversible. Lifecycle-schema
+migration requires a snapshot. Ordinary single-Album Trash or restore does not
+require a database snapshot solely because it moves files, but still requires
+the Digital Asset Trash preview, Operation, filesystem verification, and repair
+policy. Purge remains irreversible for verified deleted bytes whether or not a
+database snapshot is required by risk assessment.
 
 ## Validation and error handling
 

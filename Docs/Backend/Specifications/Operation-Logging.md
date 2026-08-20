@@ -56,6 +56,7 @@ When an Operation is unsuccessful, cancelled because of an error, or enters `Nee
 | Work Dispatch execution, Group cancellation, or reservation release | Required, linked to the Dispatch Batch/Group and affected Albums. |
 | Snapshot and restore | Required. |
 | Repair action | Required. |
+| Digital Asset Trash, restore, hold change, or permanent asset purge | Required, linked to the retained Album/Photo identity and reviewed scope. |
 | Authentication approval, issuance, revocation, or security-relevant event | Required or linked Issue as specified by Authentication. |
 | Read-only simple query | Not required by default. |
 
@@ -66,6 +67,8 @@ Every Operation requires its own stable `operation_uuid`. It must additionally i
 | Major operation type | Mandatory contextual UUIDs |
 | --- | --- |
 | Entity or asset action | `entity_uuid` |
+| Digital Asset Trash or restore | Album `entity_uuid`; affected Photo UUIDs or a bounded manifest digest in related-entity evidence |
+| Permanent digital-asset purge | Album `entity_uuid`; reviewed asset count/bytes, manifest digest, and related Trash Operation UUID |
 | Import execution | `import_uuid` |
 | Batch execution or workspace promotion | `batch_uuid` |
 | Work Dispatch execution | `batch_uuid`; affected Group and Album UUIDs in bounded related-entity evidence |
@@ -99,6 +102,12 @@ JSONL may contain diagnostic detail suitable for human investigation. It must re
 - A failed filesystem stage after persistence is represented as `NeedsRepair`, not a completed success.
 - Existing Operation history is append-only in business meaning: corrections or follow-up repair results are recorded as linked subsequent activity, not by erasing the fact that an earlier action failed.
 - Sensitive diagnostic information must not be exposed to unauthorized API clients.
+
+Digital Asset Trash Operation families use `digital_asset_trash`,
+`digital_asset_restore`, and `digital_asset_purge`. A successful purge records
+verified deletion of asset bytes, not deletion of catalog identity. A failed or
+partial asset move/deletion is `NeedsRepair`; it must retain observed inventory
+and recovery context and must not be rewritten as success after a later repair.
 
 ## Operations and Issues
 

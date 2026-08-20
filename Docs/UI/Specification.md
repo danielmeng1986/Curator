@@ -83,6 +83,10 @@ the page owned by one Backend resource.
 - Feedback names what happened, the affected scope, and the next useful action.
   Material operations link to their Operation, Snapshot, Issue, or result when
   that evidence exists.
+- Album business Status, catalog visibility, and digital-asset availability are
+  displayed as separate facts wherever more than one applies. The UI never
+  labels retained Album/Photo records as deleted merely because asset bytes
+  were removed.
 
 ### 4.3 Continuity and recovery
 
@@ -136,6 +140,15 @@ must be designed as asynchronous workflows even if they often complete quickly.
   displayed current/resulting values instead of requiring the user to retype an
   authoritative value already bound by a signed Backend Preview.
 - Cancel is always safe and never represented as a failure.
+
+For Digital Asset Trash, Writer/Admin Album pages use Backend readiness and
+blocker reasons; the client does not infer eligibility. Trash confirmation
+names the Album and contained-Photo impact. Administrator Trash management is a
+stable Admin Center route, and restore, hold, purge, and deleted-asset history
+remain Admin-only. Purge confirmation states that asset deletion is
+irreversible while catalog and workflow evidence remains. A deleted-asset
+record offers no open-folder, Photo-content, restore, or redispatch affordance
+that depends on missing bytes.
 
 ### 4.7 Accessibility and comprehensibility
 

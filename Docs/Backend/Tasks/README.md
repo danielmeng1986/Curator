@@ -95,3 +95,27 @@ the Backend contract required by UI-033.
 Recommended implementation order:
 
 `BT-054 → BT-055 → BT-056 → BT-047 → BT-048 → BT-049 → BT-050 → BT-051 → BT-057 → BT-052 → BT-053`.
+
+## Digital Asset Trash implementation sequence
+
+Digital Asset Trash preserves Album and Photo database identities permanently.
+Album business `status_id`, catalog visibility, and digital-asset availability
+are independent dimensions. The recommended cross-stack delivery order is:
+
+1. [BT-033](BT-033-specify-digital-asset-trash-lifecycle.md) approves the
+   normative state machine, eligibility blockers, read models, API contracts,
+   retained evidence, and retirement of legacy Album hard delete.
+2. [BT-034](BT-034-implement-digital-asset-trash.md) adds migration-safe
+   lifecycle persistence, Backend-owned readiness, Trash/Restore, filesystem
+   verification, and workflow acceptance.
+3. [UI-010E](../../UI/Tasks/UI-010E-administer-digital-asset-trash.md) phase 1
+   delivers Album Trash readiness plus Administrator Trash/Restore and its
+   isolated browser/filesystem acceptance.
+4. [BT-035](BT-035-implement-digital-asset-purge.md) adds Admin-only permanent
+   digital-asset deletion while retaining catalog tombstone evidence.
+5. `UI-010E` phase 2 delivers purge, empty-Trash, deleted-asset history, and
+   final destructive-path acceptance.
+
+Do not begin steps 2–5 by interpreting the task documents as controlling
+product specifications. BT-033 must first update and obtain approval for the
+referenced Architecture and Backend/UI specifications.

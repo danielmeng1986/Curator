@@ -37,6 +37,7 @@ Routes below use the browser hash form implemented by the client.
 | `#/repairs`, `#/repairs/:uuid` | Browse and act on Repair cases. | Reader+; actions depend on role/policy |
 | `#/quarantine`, `#/quarantine/:uuid` | Review and restore quarantined assets. | Admin |
 | `#/admin`, `#/admin/devices`, `#/admin/backups`, `#/admin/restore` | Device, Token, recovery-point, and database Restore administration. | Admin |
+| `#/admin/trash`, `#/admin/trash/:uuid` | Review Digital Asset Trash, restore/hold assets, inspect deleted-asset history, and permanently purge eligible bytes. | Admin |
 | `#/work-dispatch`, `#/work-dispatch/groups/:uuid` | Dispatch Albums and inspect active/history Groups. | Admin |
 | `#/ai-workspaces`, `#/ai-workspaces/:uuid` | Inspect AI Workspace lifecycle and summary. | Admin |
 | `#/ai-reviews`, `#/ai-work-items/:uuid/review` | Review Worker results and promote an approved Album name. | Admin |
