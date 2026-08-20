@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS album (
     rating REAL,
     path TEXT,
     remark TEXT,
+    catalog_state TEXT NOT NULL DEFAULT 'ACTIVE',
+    asset_state TEXT NOT NULL DEFAULT 'PRESENT',
+    lifecycle_version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT,
     updated_at TEXT
 );
@@ -96,6 +99,7 @@ CREATE TABLE IF NOT EXISTS photo (
     width INTEGER,
     height INTEGER,
     capture_time TEXT,
+    asset_state TEXT NOT NULL DEFAULT 'PRESENT',
     created_at TEXT
 );
 CREATE TABLE IF NOT EXISTS workspace_album (
@@ -747,24 +751,23 @@ class TestAlbumRepositoryDelete(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    def test_delete_removes_album(self):
-        self.repo.delete(1)
-        row = self.conn.execute("SELECT id FROM album WHERE id = 1").fetchone()
-        self.assertIsNone(row)
+    def test_delete_is_unavailable(self):
+        with self.assertRaises(repo.PersistenceConflict): self.repo.delete(1)
+        self.assertIsNotNone(self.conn.execute("SELECT id FROM album WHERE id = 1").fetchone())
 
-    def test_delete_cascades_to_album_model(self):
-        self.repo.delete(1)
+    def test_delete_preserves_album_model(self):
+        with self.assertRaises(repo.PersistenceConflict): self.repo.delete(1)
         count = self.conn.execute(
             "SELECT COUNT(*) FROM album_model WHERE album_id = 1"
         ).fetchone()[0]
-        self.assertEqual(count, 0)
+        self.assertEqual(count, 1)
 
-    def test_delete_cascades_to_photos(self):
-        self.repo.delete(1)
+    def test_delete_preserves_photos(self):
+        with self.assertRaises(repo.PersistenceConflict): self.repo.delete(1)
         count = self.conn.execute(
             "SELECT COUNT(*) FROM photo WHERE album_id = 1"
         ).fetchone()[0]
-        self.assertEqual(count, 0)
+        self.assertEqual(count, 1)
 
 
 # ---------------------------------------------------------------------------

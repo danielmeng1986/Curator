@@ -29,6 +29,7 @@ Curator Backend 负责目录数据库、文件变更工作流、认证、审计�
 | --- | --- |
 | `import_source_root` | 经审核的 Import 可读取的根目录 |
 | `archive_root` | 受管数字资产归档根目录 |
+| `trash_root` | 可选的独立数字资产废纸篓根目录；默认位于运行目录下 |
 | `default_import_studio` | Import 时默认分配的 Studio |
 | `quarantine_root` | Quarantine 操作使用的可选隔离根目录 |
 

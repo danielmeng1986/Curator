@@ -1248,6 +1248,8 @@ class AlbumRepository:
         conditions: list[str] = []
         params: list = []
 
+        conditions.append("a.catalog_state = 'ACTIVE'")
+
         if q:
             pattern = f"%{q}%"
             conditions.append(
@@ -1405,7 +1407,7 @@ class AlbumRepository:
                 FROM album a
                 LEFT JOIN studio s ON s.id = a.studio_id
                 LEFT JOIN status st ON st.id = a.status_id
-                WHERE a.id = ?
+                WHERE a.id = ? AND a.catalog_state = 'ACTIVE'
                 """,
                 (album_id,),
             ).fetchone()
@@ -1592,27 +1594,103 @@ class AlbumRepository:
                 conn.rollback()
                 raise
 
-    def delete(self, album_id: int) -> None:
-        """Atomically delete an album and all its associated records."""
+    def trash_readiness(self, album_id: int) -> dict | None:
+        """Return Backend-owned Album Trash eligibility and blocker evidence."""
+        with self._db() as conn:
+            album = conn.execute("SELECT * FROM album WHERE id=?", (album_id,)).fetchone()
+            if not album:
+                return None
+            blockers = []
+            if album["catalog_state"] != "ACTIVE": blockers.append({"code":"ALBUM_NOT_ACTIVE"})
+            if album["asset_state"] != "PRESENT": blockers.append({"code":"ASSETS_NOT_PRESENT"})
+            reservation = conn.execute("SELECT group_uuid FROM album_work_reservation WHERE album_id=?",(album_id,)).fetchone()
+            if reservation: blockers.append({"code":"ACTIVE_WORK_RESERVATION","group_uuid":reservation[0]})
+            for row in conn.execute("SELECT uuid FROM work_dispatch_group WHERE album_id=? AND group_state<>'Released'",(album_id,)):
+                blockers.append({"code":"WORK_GROUP_NOT_RELEASED","group_uuid":row[0]})
+            work = conn.execute("SELECT COUNT(*) FROM workspace_album_ai_worker WHERE album_id=? AND run_state IN ('Pending','Claimed')",(album_id,)).fetchone()[0]
+            if work: blockers.append({"code":"WORK_ITEM_NOT_TERMINAL","count":work})
+            reviews=conn.execute("""SELECT COUNT(*) FROM ai_work_item_review r JOIN workspace_album_ai_worker w
+                ON w.uuid=r.work_item_uuid WHERE w.album_id=? AND r.state IN ('ReadyForReview','InReview','ReworkRequested')""",(album_id,)).fetchone()[0]
+            if reviews: blockers.append({"code":"REVIEW_NOT_FINAL","count":reviews})
+            open_workspaces = conn.execute("""SELECT COUNT(DISTINCT w.workspace_uuid)
+                FROM workspace_album_ai_worker w JOIN ai_workspace a ON a.uuid=w.workspace_uuid
+                WHERE w.album_id=? AND a.lifecycle_state NOT IN ('Closed','Archived')""",(album_id,)).fetchone()[0]
+            if open_workspaces: blockers.append({"code":"WORKSPACE_NOT_CLOSED","count":open_workspaces})
+            active_ops=conn.execute("SELECT COUNT(*) FROM operation WHERE entity_uuid=? AND status IN ('Pending','Running')",(album["uuid"],)).fetchone()[0]
+            if active_ops: blockers.append({"code":"ACTIVE_OPERATION","count":active_ops})
+            photo_count = conn.execute("SELECT COUNT(*) FROM photo WHERE album_id=?",(album_id,)).fetchone()[0]
+            return {"album":dict(album),"can_trash":not blockers,"blockers":blockers,"photo_count":photo_count}
+
+    def create_trash_item(self, album_id: int, expected_version: int, item: dict, now: str) -> None:
         with self._db() as conn:
             try:
                 conn.execute("BEGIN")
-                conn.execute(
-                    "DELETE FROM album_model WHERE album_id = ?", (album_id,)
-                )
-                conn.execute(
-                    "DELETE FROM album_relation"
-                    " WHERE album_id = ? OR related_album_id = ?",
-                    (album_id, album_id),
-                )
-                conn.execute(
-                    "DELETE FROM photo WHERE album_id = ?", (album_id,)
-                )
-                conn.execute("DELETE FROM album WHERE id = ?", (album_id,))
+                changed=conn.execute("""UPDATE album SET catalog_state='TRASHED',asset_state='TRASHED',
+                    lifecycle_version=lifecycle_version+1,updated_at=? WHERE id=? AND lifecycle_version=?
+                    AND catalog_state='ACTIVE' AND asset_state='PRESENT'""",(now,album_id,expected_version))
+                if changed.rowcount != 1: raise PersistenceConflict({"album_id":album_id,"reason":"lifecycle_stale"})
+                conn.execute("UPDATE photo SET asset_state='TRASHED' WHERE album_id=?",(album_id,))
+                conn.execute("""INSERT INTO digital_asset_trash_item
+                    (uuid,album_id,original_relative_path,trash_relative_path,photo_count,byte_count,
+                     inventory_digest,retention_until,trash_operation_uuid,created_at,updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",(item["uuid"],album_id,item["original_relative_path"],
+                    item["trash_relative_path"],item["photo_count"],item["byte_count"],item["inventory_digest"],
+                    item["retention_until"],item["trash_operation_uuid"],now,now))
                 conn.commit()
             except Exception:
-                conn.rollback()
-                raise
+                conn.rollback(); raise
+
+    def list_trash(self) -> list[dict]:
+        with self._db() as conn:
+            rows=conn.execute("""SELECT t.*,a.uuid AS album_uuid,a.title,a.status_id,a.asset_state,a.catalog_state,
+                a.lifecycle_version FROM digital_asset_trash_item t JOIN album a ON a.id=t.album_id
+                ORDER BY t.created_at DESC""").fetchall()
+        return [dict(row) for row in rows]
+
+    def get_trash(self, trash_uuid: str) -> dict | None:
+        with self._db() as conn:
+            row=conn.execute("""SELECT t.*,a.uuid AS album_uuid,a.title,a.status_id,a.asset_state,a.catalog_state,
+                a.lifecycle_version FROM digital_asset_trash_item t JOIN album a ON a.id=t.album_id WHERE t.uuid=?""",(trash_uuid,)).fetchone()
+        return dict(row) if row else None
+
+    def restore_trash_item(self, trash_uuid: str, expected_version: int, operation_uuid: str, now: str) -> None:
+        with self._db() as conn:
+            try:
+                conn.execute("BEGIN"); item=conn.execute("SELECT * FROM digital_asset_trash_item WHERE uuid=?",(trash_uuid,)).fetchone()
+                if not item: raise PersistenceConflict({"reason":"trash_missing"})
+                changed=conn.execute("""UPDATE album SET catalog_state='ACTIVE',asset_state='PRESENT',
+                    lifecycle_version=lifecycle_version+1,updated_at=? WHERE id=? AND lifecycle_version=?
+                    AND catalog_state='TRASHED' AND asset_state='TRASHED'""",(now,item["album_id"],expected_version))
+                if changed.rowcount != 1: raise PersistenceConflict({"reason":"lifecycle_stale"})
+                conn.execute("UPDATE photo SET asset_state='PRESENT' WHERE album_id=?",(item["album_id"],))
+                conn.execute("UPDATE digital_asset_trash_item SET restore_operation_uuid=?,updated_at=? WHERE uuid=?",(operation_uuid,now,trash_uuid))
+                conn.commit()
+            except Exception:
+                conn.rollback(); raise
+
+    def mark_asset_needs_repair(self, album_id: int, now: str) -> None:
+        with self._db() as conn:
+            conn.execute("UPDATE album SET asset_state='NEEDS_REPAIR',lifecycle_version=lifecycle_version+1,updated_at=? WHERE id=?",(now,album_id))
+            conn.execute("UPDATE photo SET asset_state='NEEDS_REPAIR' WHERE album_id=?",(album_id,))
+            conn.commit()
+
+    def set_trash_hold(self, trash_uuid: str, expected_version: int, reason: str | None,
+                       actor: str, operation_uuid: str, now: str) -> dict:
+        with self._db() as conn:
+            try:
+                conn.execute("BEGIN"); item=conn.execute("SELECT album_id FROM digital_asset_trash_item WHERE uuid=?",(trash_uuid,)).fetchone()
+                if not item: raise PersistenceConflict({"reason":"trash_missing"})
+                changed=conn.execute("UPDATE album SET lifecycle_version=lifecycle_version+1,updated_at=? WHERE id=? AND lifecycle_version=? AND catalog_state='TRASHED'",(now,item["album_id"],expected_version))
+                if changed.rowcount != 1: raise PersistenceConflict({"reason":"lifecycle_stale"})
+                conn.execute("UPDATE digital_asset_trash_item SET hold_reason=?,hold_by_token_uuid=?,hold_at=?,updated_at=? WHERE uuid=?",
+                    (reason,actor,now if reason else None,now,trash_uuid))
+                conn.commit()
+            except Exception: conn.rollback(); raise
+        return self.get_trash(trash_uuid)
+
+    def delete(self, album_id: int) -> None:
+        """Reject legacy hard deletion; retained catalog identity is invariant."""
+        raise PersistenceConflict({"album_id":album_id,"reason":"hard_delete_unavailable"})
 
     def find_by_studio_and_title(
         self, studio_id: int, title: str

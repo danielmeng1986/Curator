@@ -19,7 +19,12 @@
     "0015_ui_device_enrollment",
     "0016_capability_aware_work_claim",
     "0017_ai_instruction_profile",
-    "0018_normalize_ai_profile_dataset"
+    "0018_normalize_ai_profile_dataset",
+    "0019_sensual_editorial_writer_profile",
+    "0020_writer_four_word_placeholder",
+    "0021_natural_writer_titles",
+    "0022_ai_vision_regeneration",
+    "0023_digital_asset_trash"
   ],
   "excluded_tables": [
     "sqlite_sequence"
@@ -870,6 +875,119 @@
         }
       ]
     },
+    "ai_work_item_regeneration": {
+      "columns": [
+        {
+          "name": "predecessor_work_item_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "successor_work_item_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "root_work_item_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "generation_number",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "selection_seed",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "requested_by_token_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "predecessor_work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "root_work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        },
+        {
+          "from": "successor_work_item_uuid",
+          "table": "workspace_album_ai_worker",
+          "to": "uuid",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "predecessor_work_item_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "successor_work_item_uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": "idx_ai_work_item_regeneration_root",
+          "columns": [
+            "root_work_item_uuid",
+            "generation_number"
+          ],
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        }
+      ]
+    },
     "ai_work_item_result_stage": {
       "columns": [
         {
@@ -1707,6 +1825,27 @@
           "primary_key_position": 0
         },
         {
+          "name": "catalog_state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'ACTIVE'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "asset_state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'PRESENT'",
+          "primary_key_position": 0
+        },
+        {
+          "name": "lifecycle_version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_position": 0
+        },
+        {
           "name": "created_at",
           "type": "TEXT",
           "not_null": false,
@@ -2236,6 +2375,184 @@
         }
       ]
     },
+    "digital_asset_trash_item": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "album_id",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "original_relative_path",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "trash_relative_path",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "photo_count",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "byte_count",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "inventory_digest",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "retention_until",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "hold_reason",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "hold_by_token_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "hold_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "trash_operation_uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "restore_operation_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "repair_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "issue_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "album_id",
+          "table": "album",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "album_id"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "trash_relative_path"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": "idx_digital_asset_trash_retention",
+          "columns": [
+            "retention_until",
+            "hold_at"
+          ],
+          "unique": false,
+          "origin": "c",
+          "partial": false
+        }
+      ]
+    },
     "import_preview_claim": {
       "columns": [
         {
@@ -2742,6 +3059,13 @@
           "type": "TEXT",
           "not_null": false,
           "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "asset_state",
+          "type": "TEXT",
+          "not_null": true,
+          "default": "'PRESENT'",
           "primary_key_position": 0
         },
         {

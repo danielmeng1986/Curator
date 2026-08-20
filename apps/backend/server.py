@@ -48,6 +48,7 @@ DEFAULT_APP_CONFIG = {
     "archive_root": "",
     "default_import_studio": "",
     "quarantine_root": "",
+    "trash_root": "",
 }
 
 # ---------------------------------------------------------------------------
@@ -68,7 +69,7 @@ def load_app_config() -> dict:
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
                 on_disk = json.load(fh)
-            for key in ("import_source_root", "archive_root", "default_import_studio", "quarantine_root"):
+            for key in ("import_source_root", "archive_root", "default_import_studio", "quarantine_root", "trash_root"):
                 if key in on_disk:
                     cfg[key] = on_disk[key]
         except Exception:
@@ -81,6 +82,7 @@ AUTH_REGISTRATION_SECRET = os.environ.get("CURATOR_REGISTRATION_SECRET", "")
 ALBUM_BATCH_PREVIEW_SECRET = secrets.token_bytes(32)
 IMPORT_PREVIEW_SECRET = secrets.token_bytes(32)
 QUARANTINE_PREVIEW_SECRET = secrets.token_bytes(32)
+ASSET_TRASH_PREVIEW_SECRET = secrets.token_bytes(32)
 SNAPSHOT_CLEANUP_PREVIEW_SECRET = secrets.token_bytes(32)
 WORK_DISPATCH_PREVIEW_SECRET = secrets.token_bytes(32)
 AI_PROMOTION_PREVIEW_SECRET = secrets.token_bytes(32)
@@ -745,6 +747,14 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif re.match(r"^/api/albums/\d+$", path):
                 album_id = int(path.split("/")[-1])
                 self._get_album(album_id)
+            elif re.match(r"^/api/albums/\d+/trash-readiness$", path):
+                self._send_success(200,{"readiness":self._asset_trash_service().readiness(int(path.split("/")[3]))})
+            elif path == "/api/admin/digital-asset-trash":
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"items":self._asset_trash_service().list()})
+            elif re.match(r"^/api/admin/digital-asset-trash/[^/]+$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"item":self._asset_trash_service().get(path.split("/")[-1])})
             elif path == "/api/workspace/albums" or re.match(r"^/api/workspace/albums/\d+$", path):
                 self._send_error(410, "HISTORICAL_WORKSPACE_RETIRED", "The historical Workspace Album API is retired.")
             elif path == "/api/admin/history/workspace-albums":
@@ -1247,6 +1257,14 @@ class AppHandler(SimpleHTTPRequestHandler):
             operation_service=svc.OperationService(repo.OperationRepository(open_db)),
         )
 
+    def _asset_trash_service(self):
+        archive_root=APP_CONFIG.get("archive_root","")
+        trash_root=APP_CONFIG.get("trash_root") or str(RUNTIME_DIR/"trash")
+        return svc.DigitalAssetTrashService(repo.AlbumRepository(open_db),
+            svc.OperationService(repo.OperationRepository(open_db)),archive_root,trash_root,
+            ASSET_TRASH_PREVIEW_SECRET,
+            svc.RepairService(repo.RepairRepository(open_db),repo.IssueRepository(open_db)))
+
     def _get_auth_admin_state(self):
         if not self._require_admin_principal(): return
         self._send_success(200, self._auth_admin_service().admin_read_model())
@@ -1269,6 +1287,20 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._post_album_batch_preview(body)
             elif path == "/api/albums/batch/execute":
                 self._post_album_batch_execute(body)
+            elif re.match(r"^/api/albums/\d+/trash/preview$", path):
+                album_id=int(path.split("/")[3]); self._send_success(200,{"preview":self._asset_trash_service().preview_trash(album_id,self._principal["token_uuid"])})
+            elif path == "/api/albums/trash/execute":
+                self._send_success(200,{"result":self._asset_trash_service().execute_trash(body.get("preview_token",""),self._principal["token_uuid"])})
+            elif re.match(r"^/api/admin/digital-asset-trash/[^/]+/restore/preview$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"preview":self._asset_trash_service().preview_restore(path.split("/")[4],self._principal["token_uuid"])})
+            elif path == "/api/admin/digital-asset-trash/restore/execute":
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"result":self._asset_trash_service().execute_restore(body.get("preview_token",""),self._principal["token_uuid"])})
+            elif re.match(r"^/api/admin/digital-asset-trash/[^/]+/(hold|release-hold)$", path):
+                if not self._require_admin_principal(): return
+                parts=path.split("/"); reason=body.get("reason") if parts[-1]=="hold" else None
+                self._send_success(200,{"result":self._asset_trash_service().set_hold(parts[4],body.get("expected_version"),reason,self._principal["token_uuid"])})
             elif re.match(r"^/api/albums/\d+/models$", path):
                 album_id = int(path.split("/")[3])
                 self._post_album_model(album_id, body)
@@ -1929,8 +1961,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 studio_id = int(path.split("/")[-1])
                 self._delete_studio(studio_id)
             elif re.match(r"^/api/albums/\d+$", path):
-                album_id = int(path.split("/")[-1])
-                self._delete_album(album_id)
+                self._send_error(409,"ALBUM_HARD_DELETE_UNAVAILABLE",
+                    "Album records are retained; use the Digital Asset Trash workflow.")
             elif re.match(r"^/api/albums/\d+/models/\d+$", path):
                 parts = path.split("/")
                 album_id = int(parts[3])

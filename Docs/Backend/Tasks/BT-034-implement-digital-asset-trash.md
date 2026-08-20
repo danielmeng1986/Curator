@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-034` — Status: `Ready`
+`BT-034` — Status: `Complete`
 
 ## Title
 
@@ -32,7 +32,9 @@ Album business `status_id` is unchanged.
   for active reservation, unreleased Group, unfinished Work Item/Review/
   promotion, unclosed Workspace, and active Operation/Issue/Repair ownership.
 - Impact preview/version and Writer/Admin-authorized Album Trash entry points for `apps.web`.
-- Photo-level entry points suitable for a future native client.
+- Photo lifecycle persistence and Album-scope Photo transitions; independent
+  Photo entry points remain a future native-client extension under the
+  controlling Specification.
 - Safe filesystem moves below configured roots, restore collision protection, retention/hold metadata, and post-action verification.
 - Durable Operation and Issue/Repair hand-off for every attempted material transition.
 
@@ -92,3 +94,28 @@ Album business `status_id` is unchanged.
 - A first release may separate catalog hiding from asynchronous filesystem
   movement, but it must expose the truthful intermediate `asset_state` and may
   not report the operation as fully Trashed before verification succeeds.
+
+## Completion Record
+
+- Added ordered migration `0023_digital_asset_trash` with Active/Trashed
+  catalog state, Present/Trashed/Deleted/Missing/NeedsRepair asset state,
+  lifecycle versioning, retained Photo state, and durable Trash identity,
+  inventory, retention, hold, and Operation evidence.
+- Defaulted existing and new catalog rows to Active/Present without modifying
+  Album `status_id`; normal Album list/count/detail projections exclude
+  Trashed records.
+- Added Backend-owned readiness with structured reservation, Group, Work Item,
+  Review, Workspace, and active-Operation blockers.
+- Added signed, expiring, actor-bound Trash/Restore Preview and execution,
+  Backend-resolved root containment, symlink rejection, inventory drift and
+  destination collision checks, 30-day retention, Admin hold/release, durable
+  Operations, and explicit NeedsRepair hand-off for partial outcomes.
+- Added Writer/Admin Album Trash routes and Admin-only Trash list/detail,
+  restore, and hold routes. The legacy Album hard-delete route now returns
+  `ALBUM_HARD_DELETE_UNAVAILABLE` and preserves every database record.
+- Added disposable three-Photo Album workflow acceptance for Trash, hidden
+  normal ReadModel, retained identities, restore, active-reservation blocker,
+  hold/release, and filesystem outcomes.
+- Updated canonical schema bootstrap, ordered migration runner, schema catalog
+  and inventory, example configuration, and English/Chinese server manuals.
+- Passed the complete Backend suite: 783 tests on 2026-08-20.

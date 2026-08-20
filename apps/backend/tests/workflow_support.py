@@ -58,6 +58,9 @@ CREATE TABLE album (
     rating REAL,
     path TEXT,
     remark TEXT,
+    catalog_state TEXT NOT NULL DEFAULT 'ACTIVE',
+    asset_state TEXT NOT NULL DEFAULT 'PRESENT',
+    lifecycle_version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT,
     updated_at TEXT
 );
@@ -86,6 +89,7 @@ CREATE TABLE photo (
     width INTEGER,
     height INTEGER,
     capture_time TEXT,
+    asset_state TEXT NOT NULL DEFAULT 'PRESENT',
     created_at TEXT
 );
 CREATE TABLE workspace_album (

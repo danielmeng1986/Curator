@@ -880,12 +880,155 @@ class AlbumService:
         }
 
     def delete(self, album_id: int) -> None:
-        """Delete an album and all its associated records atomically."""
-        now = _utc_now_iso()
-        self._repo.delete(album_id)
-        self._log(
-            {"timestamp": now, "action": "delete_album", "album_id": album_id, "success": True}
-        )
+        """The historical hard-delete path is intentionally unavailable."""
+        raise ServiceConflict("ALBUM_HARD_DELETE_UNAVAILABLE",
+            "Album records are retained; use the Digital Asset Trash workflow.")
+
+
+class DigitalAssetTrashService:
+    """Recoverable Album Trash and restore workflow owner."""
+
+    def __init__(self, album_repo, operation_service, archive_root, trash_root,
+                 preview_secret, repair_service=None, now_fn=None):
+        self._repo=album_repo; self._operations=operation_service
+        self._archive=Path(archive_root).resolve(); self._trash=Path(trash_root).resolve()
+        self._secret=preview_secret; self._repairs=repair_service
+        self._now=now_fn or (lambda: datetime.now(timezone.utc))
+
+    def _sign(self,payload):
+        raw=json.dumps(payload,sort_keys=True,separators=(",",":")).encode()
+        encoded=base64.urlsafe_b64encode(raw).decode().rstrip("=")
+        return f"{encoded}.{hmac.new(self._secret,encoded.encode(),hashlib.sha256).hexdigest()}"
+
+    def _read(self,token,kind):
+        try:
+            encoded,sig=token.rsplit(".",1)
+            expected=hmac.new(self._secret,encoded.encode(),hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(sig,expected): raise ValueError
+            payload=json.loads(base64.urlsafe_b64decode(encoded+"="*(-len(encoded)%4)))
+            if payload["kind"]!=kind: raise ValueError
+            if datetime.fromisoformat(payload["expires_at"]) <= self._now():
+                raise ServiceConflict("ASSET_PREVIEW_EXPIRED","The asset preview has expired.")
+            return payload
+        except ServiceConflict: raise
+        except Exception as exc: raise ServiceConflict("ASSET_PREVIEW_INVALID","The asset preview is invalid.") from exc
+
+    @staticmethod
+    def _safe(root,relative):
+        if not relative or Path(relative).is_absolute(): raise ServiceConflict("ASSET_PATH_INVALID","Album path is invalid.")
+        target=(root/relative).resolve()
+        try: target.relative_to(root)
+        except ValueError as exc: raise ServiceConflict("ASSET_PATH_INVALID","Album path escapes its configured root.") from exc
+        return target
+
+    @staticmethod
+    def _inventory(path):
+        if not path.is_dir() or path.is_symlink(): raise ServiceConflict("ASSETS_NOT_PRESENT","Album assets are not available.")
+        rows=[]; total=0
+        for item in sorted(path.rglob("*")):
+            if item.is_symlink(): raise ServiceConflict("ASSET_PATH_INVALID","Symlinks are not permitted in Trash scope.")
+            if item.is_file():
+                stat=item.stat(); rel=item.relative_to(path).as_posix(); rows.append(f"{rel}:{stat.st_size}"); total+=stat.st_size
+        return len(rows),total,hashlib.sha256("\n".join(rows).encode()).hexdigest()
+
+    def readiness(self,album_id):
+        result=self._repo.trash_readiness(album_id)
+        if not result: raise ServiceNotFound("Album not found.")
+        return {k:v for k,v in result.items() if k!="album"} | {"album_uuid":result["album"]["uuid"],"title":result["album"]["title"],"lifecycle_version":result["album"]["lifecycle_version"]}
+
+    def preview_trash(self,album_id,actor):
+        state=self._repo.trash_readiness(album_id)
+        if not state: raise ServiceNotFound("Album not found.")
+        if state["blockers"]: return self.readiness(album_id) | {"preview_token":None}
+        album=state["album"]; source=self._safe(self._archive,album["path"])
+        files,byte_count,digest=self._inventory(source); trash_uuid=str(_uuid_mod.uuid4())
+        payload={"kind":"trash","album_id":album_id,"album_uuid":album["uuid"],"version":album["lifecycle_version"],
+            "path":album["path"],"trash_uuid":trash_uuid,"trash_path":f"albums/{trash_uuid}","photo_count":state["photo_count"],
+            "file_count":files,"byte_count":byte_count,"digest":digest,"actor":actor,
+            "expires_at":(self._now()+timedelta(minutes=10)).isoformat()}
+        return self.readiness(album_id) | {"file_count":files,"byte_count":byte_count,"inventory_digest":digest,"preview_token":self._sign(payload)}
+
+    def execute_trash(self,token,actor):
+        payload=self._read(token,"trash")
+        if payload["actor"]!=actor: raise ServiceConflict("ASSET_PREVIEW_INVALID","The preview belongs to another principal.")
+        current=self._repo.trash_readiness(payload["album_id"])
+        if not current or current["album"]["lifecycle_version"]!=payload["version"] or current["blockers"]:
+            raise ServiceConflict("ASSET_LIFECYCLE_STALE","Album lifecycle changed after preview.")
+        source=self._safe(self._archive,payload["path"]); destination=self._safe(self._trash,payload["trash_path"])
+        files,bytes_now,digest=self._inventory(source)
+        if (files,bytes_now,digest)!=(payload["file_count"],payload["byte_count"],payload["digest"]): raise ServiceConflict("ASSET_SCOPE_CHANGED","Album assets changed after preview.")
+        if destination.exists(): raise ServiceConflict("ASSET_PATH_COLLISION","Trash destination is occupied.")
+        op=self._operations.begin("digital_asset_trash","WebUI",entity_uuid=payload["album_uuid"],summary="Moving Album to Digital Asset Trash")
+        destination.parent.mkdir(parents=True,exist_ok=True)
+        try:
+            shutil.move(str(source),str(destination)); self._inventory(destination)
+            now=self._now(); self._repo.create_trash_item(payload["album_id"],payload["version"],{
+                "uuid":payload["trash_uuid"],"original_relative_path":payload["path"],"trash_relative_path":payload["trash_path"],
+                "photo_count":payload["photo_count"],"byte_count":payload["byte_count"],"inventory_digest":payload["digest"],
+                "retention_until":(now+timedelta(days=30)).isoformat(),"trash_operation_uuid":op["uuid"]},now.isoformat())
+            self._operations.succeed(op["uuid"],"Album moved to Digital Asset Trash")
+        except Exception as exc:
+            if source.exists() and not destination.exists():
+                self._operations.fail(op["uuid"],"filesystem","asset.trash-failed",summary="Album Trash failed before mutation",error_details=str(exc))
+                raise ServiceConflict("ASSET_TRASH_FAILED","Album Trash failed before filesystem mutation.") from exc
+            self._repo.mark_asset_needs_repair(payload["album_id"],self._now().isoformat())
+            self._operations.mark_needs_repair(op["uuid"],"filesystem","asset.trash-incomplete",summary="Album Trash requires repair",error_details=str(exc))
+            if self._repairs: self._repairs.detect(op["uuid"],payload["album_uuid"],payload["path"],failure_reason=str(exc))
+            raise ServiceConflict("ASSET_NEEDS_REPAIR","Album Trash requires repair.") from exc
+        return {"trash_uuid":payload["trash_uuid"],"album_uuid":payload["album_uuid"],"catalog_state":"TRASHED","asset_state":"TRASHED","operation_uuid":op["uuid"]}
+
+    def list(self): return self._repo.list_trash()
+    def get(self,trash_uuid):
+        item=self._repo.get_trash(trash_uuid)
+        if not item: raise ServiceNotFound("Trash item not found.")
+        return item
+
+    def preview_restore(self,trash_uuid,actor):
+        item=self.get(trash_uuid)
+        source=self._safe(self._trash,item["trash_relative_path"]); destination=self._safe(self._archive,item["original_relative_path"])
+        if destination.exists(): raise ServiceConflict("ASSET_PATH_COLLISION","Restore destination is occupied.")
+        files,byte_count,digest=self._inventory(source)
+        if digest!=item["inventory_digest"]: raise ServiceConflict("ASSET_SCOPE_CHANGED","Trash inventory changed.")
+        payload={"kind":"restore","trash_uuid":trash_uuid,"album_uuid":item["album_uuid"],"version":item["lifecycle_version"],
+            "source":item["trash_relative_path"],"destination":item["original_relative_path"],"digest":digest,"file_count":files,
+            "byte_count":byte_count,"actor":actor,"expires_at":(self._now()+timedelta(minutes=10)).isoformat()}
+        return {"item":item,"preview_token":self._sign(payload)}
+
+    def set_hold(self,trash_uuid,expected_version,reason,actor):
+        if not isinstance(expected_version,int): raise ValueError("expected_version is required.")
+        if reason is not None and not str(reason).strip(): raise ValueError("Hold reason must not be blank.")
+        item=self.get(trash_uuid); op=self._operations.begin("digital_asset_trash_hold","WebUI",
+            entity_uuid=item["album_uuid"],summary="Updating Digital Asset Trash hold")
+        try:
+            updated=self._repo.set_trash_hold(trash_uuid,expected_version,str(reason).strip() if reason else None,
+                actor,op["uuid"],self._now().isoformat())
+        except repo.PersistenceConflict as exc:
+            self._operations.fail(op["uuid"],"conflict","asset.lifecycle-stale",summary="Trash hold update rejected")
+            raise ServiceConflict("ASSET_LIFECYCLE_STALE","Trash item changed after review.",exc.details) from exc
+        self._operations.succeed(op["uuid"],"Digital Asset Trash hold updated")
+        return {"item":updated,"operation_uuid":op["uuid"]}
+
+    def execute_restore(self,token,actor):
+        payload=self._read(token,"restore")
+        if payload["actor"]!=actor: raise ServiceConflict("ASSET_PREVIEW_INVALID","The preview belongs to another principal.")
+        item=self.get(payload["trash_uuid"])
+        if item["lifecycle_version"]!=payload["version"]: raise ServiceConflict("ASSET_LIFECYCLE_STALE","Trash item changed after preview.")
+        source=self._safe(self._trash,payload["source"]); destination=self._safe(self._archive,payload["destination"])
+        if destination.exists(): raise ServiceConflict("ASSET_PATH_COLLISION","Restore destination is occupied.")
+        op=self._operations.begin("digital_asset_restore","WebUI",entity_uuid=payload["album_uuid"],summary="Restoring Album from Digital Asset Trash")
+        destination.parent.mkdir(parents=True,exist_ok=True)
+        try:
+            shutil.move(str(source),str(destination)); self._inventory(destination)
+            self._repo.restore_trash_item(payload["trash_uuid"],payload["version"],op["uuid"],self._now().isoformat())
+            self._operations.succeed(op["uuid"],"Album restored from Digital Asset Trash")
+        except Exception as exc:
+            if source.exists() and not destination.exists():
+                self._operations.fail(op["uuid"],"filesystem","asset.restore-failed",summary="Album restore failed before mutation",error_details=str(exc))
+                raise ServiceConflict("ASSET_RESTORE_FAILED","Album restore failed before filesystem mutation.") from exc
+            self._repo.mark_asset_needs_repair(item["album_id"],self._now().isoformat())
+            self._operations.mark_needs_repair(op["uuid"],"filesystem","asset.restore-incomplete",summary="Album restore requires repair",error_details=str(exc))
+            raise ServiceConflict("ASSET_NEEDS_REPAIR","Album restore requires repair.") from exc
+        return {"album_uuid":payload["album_uuid"],"catalog_state":"ACTIVE","asset_state":"PRESENT","operation_uuid":op["uuid"]}
 
 
 # Lifecycle state labels as module-level constants so callers can reference

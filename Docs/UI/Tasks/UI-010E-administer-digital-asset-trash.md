@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-010E` — Status: `Blocked`
+`UI-010E` — Status: `Ready`
 
 ## Title
 

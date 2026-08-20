@@ -232,6 +232,22 @@ def _apply_0021(conn: sqlite3.Connection, source: Path) -> None:
         (now,DEFAULT_PROFILE_UUID))
 
 
+def _apply_0023(conn: sqlite3.Connection, source: Path) -> None:
+    """Adopt lifecycle columns for upgraded and fresh canonical databases."""
+    album_columns = {
+        "catalog_state": "TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(catalog_state IN ('ACTIVE','TRASHED'))",
+        "asset_state": "TEXT NOT NULL DEFAULT 'PRESENT' CHECK(asset_state IN ('PRESENT','TRASHED','DELETED','MISSING','NEEDS_REPAIR'))",
+        "lifecycle_version": "INTEGER NOT NULL DEFAULT 1",
+    }
+    existing = _columns(conn, "album")
+    for name, declaration in album_columns.items():
+        if name not in existing:
+            conn.execute(f'ALTER TABLE album ADD COLUMN "{name}" {declaration}')
+    if "asset_state" not in _columns(conn, "photo"):
+        conn.execute("ALTER TABLE photo ADD COLUMN asset_state TEXT NOT NULL DEFAULT 'PRESENT' CHECK(asset_state IN ('PRESENT','TRASHED','DELETED','MISSING','NEEDS_REPAIR'))")
+    _apply_sql(conn, source)
+
+
 def _recorded(conn: sqlite3.Connection) -> set[str]:
     if not _table_exists(conn, "schema_migration"):
         return set()
@@ -285,6 +301,8 @@ def migrate(
                     _apply_0020(conn, source)
                 elif migration_id == "0021_natural_writer_titles":
                     _apply_0021(conn, source)
+                elif migration_id == "0023_digital_asset_trash":
+                    _apply_0023(conn, source)
                 else:
                     _apply_sql(conn, source)
                 _verify_connection(conn)

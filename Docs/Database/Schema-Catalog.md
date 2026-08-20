@@ -34,10 +34,10 @@ validated by Repository/Service code rather than a declared SQLite foreign key.
 | `status` | Current reference data | integer `id`; unique behavior enforced by service for `name` | Referenced by Album; referenced historically by Workspace Album | Base deployed schema; Repository/API contracts |
 | `model` | Current business entity | integer `id`, business `uuid`; `display_name`, `primary_name` | Many-to-many Album relation through `album_model` | Base deployed schema; Model Repository |
 | `studio` | Current business entity | integer `id`, business `uuid`; `name` | One Studio to many Albums | Base deployed schema; Studio Repository |
-| `album` | Current aggregate and apps.web management unit | integer `id`, business `uuid`; canonical `path`, title, dates, rating, `remark` | FK intent to Studio/Status; Photos, Models, relations, Operations, Dispatch and AI work refer to Album | Base deployed schema plus `0001`; Album/Import Specifications |
+| `album` | Current or retained historical aggregate and apps.web management unit | integer `id`, business `uuid`; canonical `path`, title, dates, rating, `remark`; catalog/asset state and lifecycle version | FK intent to Studio/Status; Photos, Models, relations, Operations, Dispatch and AI work refer to Album | Base schema plus `0001`/`0023`; Album/Trash Specifications |
 | `album_model` | Current relationship entity | integer `id`; Album/Model pair plus role, age, remarks | `album_id` → Album, `model_id` → Model; duplicate policy in Service | Base deployed schema; Repository Specification |
 | `album_relation` | Current Album self-relationship | integer `id`; source/target/type tuple | source and related IDs → Album; no self relation; unique tuple required by current contract | Base deployed schema; Database model and Album API |
-| `photo` | Current asset/evidence metadata | integer `id`, business `uuid`; Album, filename/relative path, hash, dimensions | `album_id` → Album; apps.web does not expose general Photo browsing | Base deployed schema; Photo Repository and AI evidence contract |
+| `photo` | Current or retained historical asset/evidence metadata | integer `id`, business `uuid`; Album, filename/relative path, hash, dimensions, asset state | `album_id` → Album; apps.web does not expose general Photo browsing | Base schema plus `0023`; Photo/Trash and AI evidence contracts |
 
 ## Historical Workspace
 
@@ -72,6 +72,7 @@ a retired import/review model; the latter is the active AI Work Item table.
 | `restore_preview_claim` | Claim | preview UUID PK and claim time | single-use reviewed protected Restore | `RestorePreviewRepository`; BT-042 |
 | `quarantine_item` | Current recoverable filesystem item plus retained outcome | integer ID, unique UUID; original/quarantine path, inventory, expiry/hold and restore fields | Repair/Operation UUID evidence; restore never overwrites | `QuarantineRepository`; BT-039 |
 | `quarantine_preview_claim` | Claim | preview UUID PK and claim time | prevents replay of reviewed action | `QuarantineRepository`; BT-039 |
+| `digital_asset_trash_item` | Recoverable Album asset Trash identity and retained outcome | integer ID, unique UUID/Album; original/Trash relative paths, inventory digest/count/bytes, retention/hold and Operation fields | FK → retained Album; one Trash identity per Album; path identity unique | migration `0023`; Digital Asset Trash Specification/BT-034 |
 
 Snapshot database files are filesystem recovery artifacts, not rows in a
 Snapshot table. Their listing and validation are Backend-controlled.
@@ -104,6 +105,7 @@ Snapshot table. Their listing and validation are Backend-controlled.
 | --- | --- | --- | --- | --- |
 | `workspace_album_ai_worker` | Current Work Item plus retained execution history | integer `id`, unique UUID; Workspace, Album, configuration UUID/snapshot, run state, lease/version | FK → Workspace, Album, configuration; adapter item linked from Dispatch Group | migration `0005`; BT-046 |
 | `ai_work_item_attempt` | Immutable attempt history | integer `id`; Work Item UUID + attempt number unique; Worker token, lease, outcome/error | FK → Work Item | migration `0005`; BT-046 |
+| `ai_work_item_regeneration` | Immutable failed-Work-Item regeneration lineage | predecessor/successor/root Work Item UUIDs, generation, actor/reason/time/Operation | FKs → Work Items; unique successor and bounded lineage enforced by Service | migration `0022`; UI-034 |
 | `ai_photo_evidence_manifest` | Immutable evidence selection | integer `id`, unique UUID and Work Item; Album, sample/discovery summary, method/time | FK → Work Item and Album; one Manifest per item | migration `0008`; BT-047 |
 | `workspace_album_ai_worker_photo` | Immutable selected Photo evidence | integer `id`, unique UUID; Manifest/Item/Album, ordinal, relative path, size/mtime/hash/MIME | FK → Manifest, Work Item, Album; unique ordinal and relative path within Manifest | migration `0008`; BT-047/048 |
 | `ai_work_item_result_state` | Current result-stage projection | Work Item UUID PK; stage state, Vision/Writer result UUIDs, version/time | FK → Work Item; AwaitingVision → AwaitingWriter → ReadyForReview | migration `0009`; BT-049 |

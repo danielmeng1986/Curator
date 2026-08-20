@@ -339,6 +339,9 @@ CREATE TABLE IF NOT EXISTS album (
     rating REAL,
     path TEXT,
     remark TEXT,
+    catalog_state TEXT NOT NULL DEFAULT 'ACTIVE',
+    asset_state TEXT NOT NULL DEFAULT 'PRESENT',
+    lifecycle_version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT,
     updated_at TEXT
 );
@@ -367,6 +370,7 @@ CREATE TABLE IF NOT EXISTS photo (
     width INTEGER,
     height INTEGER,
     capture_time TEXT,
+    asset_state TEXT NOT NULL DEFAULT 'PRESENT',
     created_at TEXT
 );
 CREATE TABLE IF NOT EXISTS workspace_album (
@@ -475,9 +479,9 @@ class _TestServerBase(unittest.TestCase):
         resp = conn.getresponse(); body = json.loads(resp.read().decode()); conn.close()
         return resp.status, body
 
-    def _delete(self, path: str) -> tuple[int, dict]:
+    def _delete(self, path: str, headers: dict | None = None) -> tuple[int, dict]:
         conn = HTTPConnection("127.0.0.1", self._port, timeout=5)
-        conn.request("DELETE", path)
+        conn.request("DELETE", path, headers=headers or {})
         resp = conn.getresponse()
         body = json.loads(resp.read().decode())
         conn.close()
@@ -758,6 +762,14 @@ class TestVersionedApiAuthorization(_TestServerBase):
         status, body = self._post("/api/v1/statuses", {"name": "Blocked"}, self._bearer(issued))
         self.assertEqual(status, 403)
         self.assertEqual(body["error"]["code"], "AUTHORIZATION_INSUFFICIENT_SCOPE")
+
+    def test_album_hard_delete_is_unavailable_and_preserves_record(self):
+        writer=self._bearer(self._issue(role="writer"))
+        self._db.execute("INSERT INTO album(uuid,title,created_at,updated_at) VALUES ('retained-delete','Retained','n','n')")
+        album_id=self._db.execute("SELECT last_insert_rowid()").fetchone()[0]; self._db.commit()
+        status,body=self._delete(f"/api/v1/albums/{album_id}",writer)
+        self.assertEqual(409,status); self.assertEqual("ALBUM_HARD_DELETE_UNAVAILABLE",body["error"]["code"])
+        self.assertIsNotNone(self._db.execute("SELECT id FROM album WHERE id=?",(album_id,)).fetchone())
 
     def test_historical_workspace_active_client_api_is_retired(self):
         reader, writer = self._bearer(self._issue(role="reader")), self._bearer(self._issue(role="writer"))

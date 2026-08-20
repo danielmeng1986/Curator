@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS album (
     publish_date TEXT,
     rating REAL,
     path TEXT,
+    catalog_state TEXT NOT NULL DEFAULT 'ACTIVE'
+        CHECK(catalog_state IN ('ACTIVE','TRASHED')),
+    asset_state TEXT NOT NULL DEFAULT 'PRESENT'
+        CHECK(asset_state IN ('PRESENT','TRASHED','DELETED','MISSING','NEEDS_REPAIR')),
+    lifecycle_version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT,
     updated_at TEXT
 );
@@ -73,6 +78,8 @@ CREATE TABLE IF NOT EXISTS photo (
     width INTEGER,
     height INTEGER,
     capture_time TEXT,
+    asset_state TEXT NOT NULL DEFAULT 'PRESENT'
+        CHECK(asset_state IN ('PRESENT','TRASHED','DELETED','MISSING','NEEDS_REPAIR')),
     created_at TEXT
 );
 CREATE TABLE IF NOT EXISTS workspace_album (
@@ -90,4 +97,3 @@ CREATE TABLE IF NOT EXISTS workspace_album (
     belongs_to_album_id INTEGER REFERENCES workspace_album(id),
     album_id INTEGER REFERENCES album(id)
 );
-

@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-035` — Status: `Blocked`
+`BT-035` — Status: `Ready`
 
 ## Title
 
@@ -41,7 +41,8 @@ Work, Review, Operation, and public-identifier database evidence is retained.
 
 ## Dependencies
 
-- `BT-033` and `BT-034` — blocked until the normative contract and recoverable Trash lifecycle exist.
+- `BT-033` and `BT-034` — supply the approved normative contract and
+  recoverable Trash lifecycle.
 - `BT-012`, `BT-013`, and `BT-015` — Operation, Admin authorization, and failure escalation.
 
 ## Implementation Steps

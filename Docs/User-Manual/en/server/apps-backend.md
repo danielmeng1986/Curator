@@ -30,6 +30,7 @@ the example absolute paths. Do not commit the local file.
 | --- | --- |
 | `import_source_root` | Root from which reviewed Imports may read |
 | `archive_root` | Managed digital-asset archive root |
+| `trash_root` | Optional separate Digital Asset Trash root; defaults below the runtime directory |
 | `default_import_studio` | Default Studio assigned during Import |
 | `quarantine_root` | Optional isolated root for Quarantine operations |
 
