@@ -24,11 +24,12 @@ try {
   await admin.getByRole('heading', { name: 'Administrator Center' }).waitFor();
   await admin.locator('.card .form-section-title', { hasText: 'Devices and Tokens' }).waitFor();
   await admin.locator('.card .form-section-title', { hasText: 'Repair Quarantine' }).waitFor();
+  await admin.locator('.card .form-section-title', { hasText: 'Digital Asset Trash' }).waitFor();
   await admin.locator('.card .form-section-title', { hasText: 'AI Work Dispatch' }).waitFor();
   await admin.locator('.card .form-section-title', { hasText: 'AI Model Configurations' }).waitFor();
   await admin.locator('.card .form-section-title', { hasText: 'AI Workspaces and Review' }).waitFor();
   assert.equal((await admin.locator('body').innerText()).includes(fixture.devices.admin.token), false);
   assert.equal(await admin.getByRole('button', { name: 'Not available yet' }).count(), 0);
-  assert.equal(await admin.getByRole('link', { name: 'Open' }).count(), 8);
+  assert.equal(await admin.getByRole('link', { name: 'Open' }).count(), 10);
   await admin.close(); console.log('UI-010 Administrator Center browser acceptance: OK');
 } finally { await browser.close(); await fixture.stop(); }

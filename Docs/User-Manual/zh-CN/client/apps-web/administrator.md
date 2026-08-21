@@ -50,10 +50,22 @@ Administrator 在 Writer 能力上增加认证、恢复、Quarantine 与 AI 工�
 对于已批准的修复冲突，选择 **Review Quarantine move**，核对原始与隔离目标，再执行
 **Execute reviewed Quarantine**。Quarantine 不会解决 Issue。要返回隔离条目，打开
 **Repair Quarantine**，选择条目和 **Review restore to original path**，检查冲突并执行
-新 Preview。它不是 Digital Asset Trash；后者尚不可用。
+新 Preview。它不是 Digital Asset Trash；后者在 Administrator Center 中有独立工作流。
+
+<!-- manual-section: digital-asset-trash -->
+## 5. Digital Asset Trash
+
+打开 **Administrator Center → Digital Asset Trash**，审核已从活动目录移出的 Album。
+页面分别显示业务状态、目录状态和数字资产状态。符合资格的恢复必须使用新的 Preview，
+且绝不会覆盖原受管目标。如因审计或政策原因必须保留资产，应填写原因设置 Hold；原因结束后
+再释放。
+
+永久清理只删除已经审核的数字资产。只选择 Backend 标记为可清理的项目，核对 Album、Photo
+和字节范围，并输入完全一致的确认短语。清理后 Album、Photo、AI 工作流和 Operation 记录
+继续作为历史证据保留，资产状态为 `DELETED`，但 Curator 无法再恢复这些文件。
 
 <!-- manual-section: backup -->
-## 5. Backups、Snapshots 与数据库 Restore
+## 6. Backups、Snapshots 与数据库 Restore
 
 通过 **Backups and Snapshots** 查看已登记恢复点、创建管理员 Snapshot，并在依赖前验证。
 Snapshot 清理要求新 Preview 和高风险确认；必须保留所需恢复点。
@@ -68,7 +80,7 @@ Snapshot 清理要求新 Preview 和高风险确认；必须保留所需恢复�
 5. 失败时停止操作并保留 Operation、日志和恢复证据。不要盲目重试或手动替换数据库文件。
 
 <!-- manual-section: ai-config -->
-## 6. AI 配置、Workspace 与 Dispatch
+## 7. AI 配置、Workspace 与 Dispatch
 
 在 **Administrator Center → AI Model Configurations** 创建/版本化 llama.cpp 模型与采样
 参数，包括要求的样本数。应禁用过时配置，不要重写历史证据。
@@ -84,7 +96,7 @@ Dispatch 不改变 Album Status。活动 dispatch key 会防止同一 Album 同�
 release/closure 后才恢复可派发资格。
 
 <!-- manual-section: ai-review -->
-## 7. AI 审核、rework、Promotion 与关闭
+## 8. AI 审核、rework、Promotion 与关闭
 
 打开 **AI Review**，筛选队列并查看 Work Item。决定前审核分析 JSON、推荐名称、模型配置
 和准确的采样照片证据。
@@ -103,14 +115,14 @@ Promotion 独立执行：为 Album 选择恰好一个获批候选或有效人工
 而 purge 审计证据。
 
 <!-- manual-section: risk -->
-## 8. 高风险行为与预期拒绝
+## 9. 高风险行为与预期拒绝
 
 输入确认短语、阅读确认、新 Preview token、当前版本与最后管理员校验都是安全控制，绝不能
 绕过。`400` 表示输入/转换需要修正；`409` 表示当前状态冲突或已陈旧，应刷新后重新判断。
 Reader/Writer 被拒绝访问本手册各项内容属于预期行为。
 
 <!-- manual-section: checklist -->
-## 9. 核验清单
+## 10. 核验清单
 
 - [ ] Admin Token 安全保存，未出现在截图/日志中。
 - [ ] 授权采用最小权限，最后管理员安全仍然有效。

@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+
+const source=fs.readFileSync(new URL('../static/pages/admin-trash.js',import.meta.url),'utf8');
+const context={URLSearchParams,document:{getElementById:()=>null},window:{},api:{},ui:{},esc:value=>String(value),closeModal(){},toast(){}};
+vm.createContext(context); vm.runInContext(`${source}\nthis.page=AdminTrashPage;`,context);
+assert.match(source,/allowed_actions\.includes\('restore'\)/);
+assert.match(source,/restore_blockers/);
+assert.match(source,/include_restored/);
+assert.match(source,/Business status/);
+assert.match(source,/Catalog state/);
+assert.match(source,/Asset state/);
+assert.match(source,/restore\/preview/);
+assert.match(source,/release-hold/);
+assert.match(source,/allowed_actions\.includes\('purge'\)/);
+assert.match(source,/purge\/batch\/preview/);
+assert.match(source,/EMPTY TRASH/);
+assert.match(source,/purge_operation_uuid/);
+assert.equal(context.page._restoreToken,'');
+console.log('admin trash UI contract passed');

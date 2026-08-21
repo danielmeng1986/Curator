@@ -999,14 +999,59 @@ class DigitalAssetTrashService:
             raise ServiceConflict("ASSET_NEEDS_REPAIR","Album Trash requires repair.") from exc
         return {"trash_uuid":payload["trash_uuid"],"album_uuid":payload["album_uuid"],"catalog_state":"TRASHED","asset_state":"TRASHED","operation_uuid":op["uuid"]}
 
-    def list(self): return self._repo.list_trash()
+    @staticmethod
+    def _restore_read_model(item):
+        blockers=[]
+        if item["catalog_state"]!="TRASHED":
+            blockers.append({"code":"ALBUM_NOT_TRASHED","message":"The Album is not currently in Digital Asset Trash."})
+        if item["asset_state"]!="TRASHED":
+            blockers.append({"code":"ASSETS_NOT_RECOVERABLE","message":"The Album assets are not in a recoverable Trash state."})
+        if item.get("hold_at"):
+            blockers.append({"code":"LIFECYCLE_HELD","message":"A lifecycle hold prevents restore."})
+        can_restore=not blockers
+        actions=[]
+        if item["catalog_state"]=="TRASHED":
+            actions.append("release_hold" if item.get("hold_at") else "hold")
+        if can_restore: actions.insert(0,"restore")
+        return dict(item) | {
+            "assets_available":item["asset_state"]!="DELETED",
+            "can_restore":can_restore,
+            "restore_blockers":blockers,
+            "allowed_actions":actions,
+        }
+
+    def _purge_readiness(self,item):
+        state=self._repo.purge_readiness(item["uuid"])
+        blockers=list(state["blockers"])
+        if datetime.fromisoformat(item["retention_until"])>self._now():
+            blockers.append({"code":"ASSET_RETENTION_ACTIVE","message":"The retention period has not expired."})
+        messages={"ASSET_NOT_PURGE_ELIGIBLE":"Assets are not in a recoverable Trash state.",
+            "ASSET_HOLD_ACTIVE":"A lifecycle hold prevents permanent purge.",
+            "ACTIVE_OPERATION":"An active Operation owns this Album.","ACTIVE_ISSUE_OR_REPAIR":"An Issue or Repair owns this asset transition."}
+        for blocker in blockers: blocker.setdefault("message",messages.get(blocker["code"],"Related workflow work must be completed first."))
+        return {"can_purge":not blockers,"purge_blockers":blockers}
+
+    def _admin_read_model(self,item):
+        result=self._restore_read_model(item); purge=self._purge_readiness(item); result.update(purge)
+        if purge["can_purge"]: result["allowed_actions"].append("purge")
+        return result
+
+    def list(self,include_restored=False,asset_state=None):
+        return [self._admin_read_model(item) for item in self._repo.list_trash(include_restored,asset_state)]
     def get(self,trash_uuid):
         item=self._repo.get_trash(trash_uuid)
         if not item: raise ServiceNotFound("Trash item not found.")
-        return item
+        return self._admin_read_model(item)
+
+    @staticmethod
+    def _require_restore_eligible(item):
+        blockers=item["restore_blockers"]
+        if blockers:
+            raise ServiceConflict(blockers[0]["code"],blockers[0]["message"],{"blockers":blockers})
 
     def preview_restore(self,trash_uuid,actor):
         item=self.get(trash_uuid)
+        self._require_restore_eligible(item)
         source=self._safe(self._trash,item["trash_relative_path"]); destination=self._safe(self._archive,item["original_relative_path"])
         if destination.exists(): raise ServiceConflict("ASSET_PATH_COLLISION","Restore destination is occupied.")
         files,byte_count,digest=self._inventory(source)
@@ -1028,13 +1073,14 @@ class DigitalAssetTrashService:
             self._operations.fail(op["uuid"],"conflict","asset.lifecycle-stale",summary="Trash hold update rejected")
             raise ServiceConflict("ASSET_LIFECYCLE_STALE","Trash item changed after review.",exc.details) from exc
         self._operations.succeed(op["uuid"],"Digital Asset Trash hold updated")
-        return {"item":updated,"operation_uuid":op["uuid"]}
+        return {"item":self._restore_read_model(updated),"operation_uuid":op["uuid"]}
 
     def execute_restore(self,token,actor):
         payload=self._read(token,"restore")
         if payload["actor"]!=actor: raise ServiceConflict("ASSET_PREVIEW_INVALID","The preview belongs to another principal.")
         item=self.get(payload["trash_uuid"])
         if item["lifecycle_version"]!=payload["version"]: raise ServiceConflict("ASSET_LIFECYCLE_STALE","Trash item changed after preview.")
+        self._require_restore_eligible(item)
         source=self._safe(self._trash,payload["source"]); destination=self._safe(self._archive,payload["destination"])
         if destination.exists(): raise ServiceConflict("ASSET_PATH_COLLISION","Restore destination is occupied.")
         op=self._operations.begin("digital_asset_restore","WebUI",entity_uuid=payload["album_uuid"],summary="Restoring Album from Digital Asset Trash")
@@ -1051,6 +1097,105 @@ class DigitalAssetTrashService:
             self._operations.mark_needs_repair(op["uuid"],"filesystem","asset.restore-incomplete",summary="Album restore requires repair",error_details=str(exc))
             raise ServiceConflict("ASSET_NEEDS_REPAIR","Album restore requires repair.") from exc
         return {"album_uuid":payload["album_uuid"],"catalog_state":"ACTIVE","asset_state":"PRESENT","operation_uuid":op["uuid"]}
+
+    def preview_purge(self,trash_uuid,actor):
+        item=self.get(trash_uuid)
+        if not item["can_purge"]:
+            blocker=item["purge_blockers"][0]
+            raise ServiceConflict(blocker["code"],blocker["message"],{"blockers":item["purge_blockers"]})
+        source=self._safe(self._trash,item["trash_relative_path"])
+        files,byte_count,digest=self._inventory(source)
+        if (byte_count,digest)!=(item["byte_count"],item["inventory_digest"]):
+            raise ServiceConflict("ASSET_SCOPE_CHANGED","Trash inventory changed.")
+        payload={"kind":"purge","trash_uuid":trash_uuid,"album_uuid":item["album_uuid"],"version":item["lifecycle_version"],
+            "source":item["trash_relative_path"],"digest":digest,"file_count":files,"byte_count":byte_count,"actor":actor,
+            "expires_at":(self._now()+timedelta(minutes=10)).isoformat()}
+        return {"item":item,"consequence":"Digital assets will be permanently deleted; database evidence will remain.","preview_token":self._sign(payload)}
+
+    def execute_purge(self,token,actor):
+        payload=self._read(token,"purge")
+        if payload["actor"]!=actor: raise ServiceConflict("ASSET_PREVIEW_INVALID","The preview belongs to another principal.")
+        item=self.get(payload["trash_uuid"])
+        if item["asset_state"]=="DELETED" and item.get("purge_operation_uuid"):
+            if item.get("purged_by_token_uuid")==actor:
+                return {"trash_uuid":item["uuid"],"album_uuid":item["album_uuid"],"catalog_state":"TRASHED","asset_state":"DELETED",
+                    "assets_available":False,"operation_uuid":item["purge_operation_uuid"],"replayed":True}
+            raise ServiceConflict("ASSET_PREVIEW_REPLAYED","The purge preview was already executed.")
+        if item["lifecycle_version"]!=payload["version"]: raise ServiceConflict("ASSET_LIFECYCLE_STALE","Trash item changed after preview.")
+        if not item["can_purge"]:
+            blocker=item["purge_blockers"][0]; raise ServiceConflict(blocker["code"],blocker["message"],{"blockers":item["purge_blockers"]})
+        source=self._safe(self._trash,payload["source"])
+        op=self._operations.begin("digital_asset_purge","WebUI",entity_uuid=item["album_uuid"],summary="Permanently deleting reviewed Album assets")
+        try:
+            files,byte_count,digest=self._inventory(source)
+        except ServiceConflict as exc:
+            if exc.code=="ASSETS_NOT_PRESENT":
+                self._repo.mark_asset_missing(item["album_id"],payload["version"],self._now().isoformat())
+                self._operations.mark_needs_repair(op["uuid"],"filesystem","asset.purge-source-missing",summary="Trash assets are missing before purge",error_details=str(exc))
+                if self._repairs:
+                    evidence=self._repairs.detect(op["uuid"],item["album_uuid"],item["trash_relative_path"],failure_reason=str(exc))
+                    self._repo.link_trash_repair(item["uuid"],evidence["issue"]["uuid"],evidence["repair"]["uuid"],self._now().isoformat())
+                raise ServiceConflict("ASSET_NOT_PURGE_ELIGIBLE","Trash assets are missing and require investigation.") from exc
+            self._operations.fail(op["uuid"],"filesystem","asset.purge-preflight-failed",summary="Purge preflight failed",error_details=str(exc)); raise
+        if (files,byte_count,digest)!=(payload["file_count"],payload["byte_count"],payload["digest"]):
+            self._operations.fail(op["uuid"],"conflict","asset.scope-changed",summary="Purge scope changed after review")
+            raise ServiceConflict("ASSET_SCOPE_CHANGED","Trash inventory changed after preview.")
+        try:
+            shutil.rmtree(source)
+            if source.exists(): raise OSError("Reviewed Trash scope still exists after deletion.")
+            final=self._repo.finalize_purge(item["uuid"],payload["version"],op["uuid"],actor,self._now().isoformat())
+            self._operations.succeed(op["uuid"],"Reviewed Album assets permanently deleted")
+        except Exception as exc:
+            if source.exists():
+                self._repo.mark_asset_needs_repair(item["album_id"],self._now().isoformat())
+                self._operations.mark_needs_repair(op["uuid"],"filesystem","asset.purge-incomplete",summary="Digital asset purge requires repair",error_details=str(exc))
+                if self._repairs:
+                    evidence=self._repairs.detect(op["uuid"],item["album_uuid"],item["trash_relative_path"],failure_reason=str(exc))
+                    self._repo.link_trash_repair(item["uuid"],evidence["issue"]["uuid"],evidence["repair"]["uuid"],self._now().isoformat())
+                raise ServiceConflict("ASSET_NEEDS_REPAIR","Digital asset purge requires repair.") from exc
+            self._operations.mark_needs_repair(op["uuid"],"database","asset.purge-finalization-incomplete",summary="Deleted assets require lifecycle repair",error_details=str(exc))
+            raise ServiceConflict("ASSET_NEEDS_REPAIR","Deleted assets require lifecycle repair.") from exc
+        return {"trash_uuid":final["uuid"],"album_uuid":final["album_uuid"],"catalog_state":"TRASHED","asset_state":"DELETED",
+            "assets_available":False,"operation_uuid":op["uuid"],"replayed":False}
+
+    def preview_purge_batch(self,trash_uuids,actor):
+        if not isinstance(trash_uuids,list) or not trash_uuids: raise ValueError("trash_uuids must contain at least one item.")
+        if len(trash_uuids)>100 or len(set(trash_uuids))!=len(trash_uuids): raise ValueError("trash_uuids must contain 1 to 100 unique items.")
+        eligible=[]; excluded=[]
+        for trash_uuid in trash_uuids:
+            item=self.get(str(trash_uuid))
+            if item["can_purge"]:
+                preview=self.preview_purge(item["uuid"],actor); eligible.append({"item":item,"purge_token":preview["preview_token"]})
+            else: excluded.append({"item":item,"blockers":item["purge_blockers"]})
+        batch_uuid=str(_uuid_mod.uuid4())
+        payload={"kind":"purge_batch","batch_uuid":batch_uuid,"actor":actor,
+            "items":[{"trash_uuid":row["item"]["uuid"],"purge_token":row["purge_token"]} for row in eligible],
+            "expires_at":(self._now()+timedelta(minutes=10)).isoformat()}
+        return {"batch_uuid":batch_uuid,"eligible_items":[row["item"] for row in eligible],"excluded_items":excluded,
+            "summary":{"requested":len(trash_uuids),"eligible":len(eligible),"excluded":len(excluded),
+                "photo_count":sum(row["item"]["photo_count"] for row in eligible),"byte_count":sum(row["item"]["byte_count"] for row in eligible)},
+            "preview_token":self._sign(payload) if eligible else None}
+
+    def execute_purge_batch(self,token,actor):
+        payload=self._read(token,"purge_batch")
+        if payload["actor"]!=actor: raise ServiceConflict("ASSET_PREVIEW_INVALID","The preview belongs to another principal.")
+        previous=self._operations.get_by_batch(payload["batch_uuid"],"digital_asset_purge_batch")
+        if previous:
+            items=[self.get(row["trash_uuid"]) for row in payload["items"]]
+            if all(item["asset_state"]=="DELETED" for item in items):
+                return {"batch_uuid":payload["batch_uuid"],"operation_uuid":previous["uuid"],"items":items,
+                    "summary":{"total":len(items),"succeeded":len(items),"failed":0},"replayed":True}
+            raise ServiceConflict("ASSET_PREVIEW_REPLAYED","The batch purge preview was already executed.")
+        parent=self._operations.begin("digital_asset_purge_batch","WebUI",batch_uuid=payload["batch_uuid"],summary=f"Permanently deleting {len(payload['items'])} reviewed Trash items")
+        outcomes=[]
+        for row in payload["items"]:
+            try: outcomes.append({"trash_uuid":row["trash_uuid"],"status":"Succeeded","result":self.execute_purge(row["purge_token"],actor)})
+            except ServiceConflict as exc: outcomes.append({"trash_uuid":row["trash_uuid"],"status":"Failed","error":{"code":exc.code,"message":str(exc)}})
+        succeeded=sum(item["status"]=="Succeeded" for item in outcomes); failed=len(outcomes)-succeeded
+        if failed: self._operations.fail(parent["uuid"],"conflict","asset.purge-batch-partial",summary=f"Purged {succeeded} of {len(outcomes)} reviewed Trash items")
+        else: self._operations.succeed(parent["uuid"],f"Purged {succeeded} reviewed Trash items")
+        return {"batch_uuid":payload["batch_uuid"],"operation_uuid":parent["uuid"],"items":outcomes,
+            "summary":{"total":len(outcomes),"succeeded":succeeded,"failed":failed},"replayed":False}
 
 
 # Lifecycle state labels as module-level constants so callers can reference
@@ -4385,6 +4530,9 @@ class OperationService:
 
     def __init__(self, operation_repo):
         self._repo = operation_repo
+
+    def get_by_batch(self,batch_uuid: str,operation_type: str) -> dict | None:
+        return self._repo.get_by_batch(batch_uuid,operation_type)
 
     # ------------------------------------------------------------------
     # Public API

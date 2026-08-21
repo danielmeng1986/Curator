@@ -72,7 +72,7 @@ a retired import/review model; the latter is the active AI Work Item table.
 | `restore_preview_claim` | Claim | preview UUID PK and claim time | single-use reviewed protected Restore | `RestorePreviewRepository`; BT-042 |
 | `quarantine_item` | Current recoverable filesystem item plus retained outcome | integer ID, unique UUID; original/quarantine path, inventory, expiry/hold and restore fields | Repair/Operation UUID evidence; restore never overwrites | `QuarantineRepository`; BT-039 |
 | `quarantine_preview_claim` | Claim | preview UUID PK and claim time | prevents replay of reviewed action | `QuarantineRepository`; BT-039 |
-| `digital_asset_trash_item` | Recoverable Album asset Trash identity and retained outcome | integer ID, unique UUID/Album; original/Trash relative paths, inventory digest/count/bytes, retention/hold and Operation fields | FK → retained Album; one Trash identity per Album; path identity unique | migration `0023`; Digital Asset Trash Specification/BT-034 |
+| `digital_asset_trash_item` | Recoverable Album asset Trash identity and retained restore/purge outcome | integer ID, unique UUID/Album; original/Trash relative paths, inventory digest/count/bytes, retention/hold, Trash/restore/purge Operations, purge actor/time and tombstone scope | FK → retained Album; one Trash identity per Album; path identity unique | migrations `0023`–`0024`; Digital Asset Trash Specification/BT-034/BT-035 |
 
 Snapshot database files are filesystem recovery artifacts, not rows in a
 Snapshot table. Their listing and validation are Backend-controlled.

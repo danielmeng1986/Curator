@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-035` — Status: `Ready`
+`BT-035` — Status: `Complete`
 
 ## Title
 
@@ -83,3 +83,18 @@ Work, Review, Operation, and public-identifier database evidence is retained.
 - “Database-only deletion” is not a purge mode. If catalog unregistration is
   ever required, it needs a separately named and specified lifecycle action
   that still preserves historical identity.
+
+## Completion Record
+
+- Added migration `0024_digital_asset_purge` for permanent-deletion actor,
+  timestamp, Operation, reviewed Photo/byte scope, and manifest evidence.
+- Added Backend-owned purge readiness covering lifecycle state, retention,
+  hold, unfinished workflows, active Operations, and Issue/Repair ownership.
+- Added Admin-only individual and reviewed batch Preview/Execute routes with
+  actor/version/inventory binding, durable Operations, replay handling, and
+  partial batch outcomes.
+- Verified deletion only below the configured Trash root, preserved all Album
+  and Photo rows and business status, and finalized successful outcomes as
+  `TRASHED/DELETED` with `assets_available = false`.
+- Added disposable workflow tests for retention, hold, individual purge,
+  retained tombstones, and durable batch replay.

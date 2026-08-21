@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-010E` — Status: `Ready`
+`UI-010E` — Status: `Complete`
 
 ## Title
 
@@ -91,3 +91,17 @@ database evidence as deleted when only assets were removed.
 ## Risks or Notes
 
 - UI copy must clearly distinguish Digital Asset Trash, Repair Quarantine, and database Restore.
+
+## Completion Record
+
+- Added Admin Center Digital Asset Trash list/detail routes with lifecycle and
+  asset-state filters, retained business status, current-versus-restored
+  history, scope, retention, hold, and Operation evidence.
+- Added Backend-authorized restore, hold, and release-hold controls with
+  reviewed Preview/Execute behavior and explicit blocker presentation.
+- Added individual permanent purge and selected eligible empty-Trash review
+  with exact typed confirmation and Backend-owned batch scope.
+- Added `DELETED` history presentation showing retained Photo/byte tombstone
+  evidence without folder, Photo-content, restore, or redispatch affordances.
+- Added UI contract coverage for state separation, Backend action ownership,
+  restore, hold, purge, batch purge, and durable purge evidence.

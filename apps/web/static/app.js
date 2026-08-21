@@ -25,6 +25,8 @@ const ROUTES = [
   { pattern: /^#\/admin\/devices$/, page: 'admin-devices', params: [], scope: 'admin' },
   { pattern: /^#\/admin\/backups$/, page: 'admin-backups', params: [], scope: 'admin' },
   { pattern: /^#\/admin\/restore$/, page: 'admin-restore', params: [], scope: 'admin' },
+  { pattern: /^#\/admin\/trash(?:\?.*)?$/, page: 'admin-trash', params: [], scope: 'admin' },
+  { pattern: /^#\/admin\/trash\/([^/?]+)$/, page: 'admin-trash-detail', params: ['uuid'], scope: 'admin' },
   { pattern: /^#\/admin\/ai-model-configurations$/, page: 'admin-ai-model-configurations', params: [], scope: 'admin' },
   { pattern: /^#\/admin\/ai-instruction-profiles$/, page: 'admin-ai-instruction-profiles', params: [], scope: 'admin' },
   { pattern: /^#\/work-dispatch(?:\?view=(available|active|history))?$/, page: 'work-dispatch', params: ['view'], scope: 'admin' },
@@ -91,6 +93,8 @@ function route() {
         case 'admin-devices':   renderPage(AdminAuthPage.render(paramValues)); break;
         case 'admin-backups':   renderPage(AdminBackupsPage.render(paramValues)); break;
         case 'admin-restore':   renderPage(AdminRestorePage.render(paramValues)); break;
+        case 'admin-trash':     renderPage(AdminTrashPage.renderList(paramValues)); break;
+        case 'admin-trash-detail': renderPage(AdminTrashPage.renderDetail(paramValues)); break;
         case 'admin-ai-model-configurations': renderPage(AIModelConfigurationsPage.render(paramValues)); break;
         case 'admin-ai-instruction-profiles': renderPage(AIInstructionProfilesPage.render(paramValues)); break;
         case 'work-dispatch':   renderPage(WorkDispatchPage.render(paramValues)); break;

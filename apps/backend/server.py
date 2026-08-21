@@ -751,7 +751,11 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._send_success(200,{"readiness":self._asset_trash_service().readiness(int(path.split("/")[3]))})
             elif path == "/api/admin/digital-asset-trash":
                 if not self._require_admin_principal(): return
-                self._send_success(200,{"items":self._asset_trash_service().list()})
+                include_restored=qs.get("include_restored",["false"])[0].lower()=="true"
+                asset_state=qs.get("asset_state",[None])[0]
+                if asset_state is not None and asset_state not in {"TRASHED","DELETED","MISSING","NEEDS_REPAIR","PRESENT"}:
+                    raise ValueError("Invalid Digital Asset Trash asset_state filter.")
+                self._send_success(200,{"items":self._asset_trash_service().list(include_restored,asset_state)})
             elif re.match(r"^/api/admin/digital-asset-trash/[^/]+$", path):
                 if not self._require_admin_principal(): return
                 self._send_success(200,{"item":self._asset_trash_service().get(path.split("/")[-1])})
@@ -1297,6 +1301,18 @@ class AppHandler(SimpleHTTPRequestHandler):
             elif path == "/api/admin/digital-asset-trash/restore/execute":
                 if not self._require_admin_principal(): return
                 self._send_success(200,{"result":self._asset_trash_service().execute_restore(body.get("preview_token",""),self._principal["token_uuid"])})
+            elif re.match(r"^/api/admin/digital-asset-trash/[^/]+/purge/preview$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"preview":self._asset_trash_service().preview_purge(path.split("/")[4],self._principal["token_uuid"])})
+            elif path == "/api/admin/digital-asset-trash/purge/execute":
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"result":self._asset_trash_service().execute_purge(body.get("preview_token",""),self._principal["token_uuid"])})
+            elif path == "/api/admin/digital-asset-trash/purge/batch/preview":
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"preview":self._asset_trash_service().preview_purge_batch(body.get("trash_uuids"),self._principal["token_uuid"])})
+            elif path == "/api/admin/digital-asset-trash/purge/batch/execute":
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"result":self._asset_trash_service().execute_purge_batch(body.get("preview_token",""),self._principal["token_uuid"])})
             elif re.match(r"^/api/admin/digital-asset-trash/[^/]+/(hold|release-hold)$", path):
                 if not self._require_admin_principal(): return
                 parts=path.split("/"); reason=body.get("reason") if parts[-1]=="hold" else None

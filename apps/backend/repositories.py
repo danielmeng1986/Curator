@@ -1670,11 +1670,16 @@ class AlbumRepository:
             except Exception:
                 conn.rollback(); raise
 
-    def list_trash(self) -> list[dict]:
+    def list_trash(self, include_restored: bool = False, asset_state: str | None = None) -> list[dict]:
         with self._db() as conn:
-            rows=conn.execute("""SELECT t.*,a.uuid AS album_uuid,a.title,a.status_id,a.asset_state,a.catalog_state,
+            clauses=[]; params=[]
+            if not include_restored: clauses.append("a.catalog_state='TRASHED'")
+            if asset_state:
+                clauses.append("a.asset_state=?"); params.append(asset_state)
+            where=f" WHERE {' AND '.join(clauses)}" if clauses else ""
+            rows=conn.execute(f"""SELECT t.*,a.uuid AS album_uuid,a.title,a.status_id,a.asset_state,a.catalog_state,
                 a.lifecycle_version FROM digital_asset_trash_item t JOIN album a ON a.id=t.album_id
-                ORDER BY t.created_at DESC""").fetchall()
+                {where} ORDER BY t.created_at DESC""",params).fetchall()
         return [dict(row) for row in rows]
 
     def get_trash(self, trash_uuid: str) -> dict | None:
@@ -1682,6 +1687,52 @@ class AlbumRepository:
             row=conn.execute("""SELECT t.*,a.uuid AS album_uuid,a.title,a.status_id,a.asset_state,a.catalog_state,
                 a.lifecycle_version FROM digital_asset_trash_item t JOIN album a ON a.id=t.album_id WHERE t.uuid=?""",(trash_uuid,)).fetchone()
         return dict(row) if row else None
+
+    def purge_readiness(self, trash_uuid: str) -> dict | None:
+        item=self.get_trash(trash_uuid)
+        if not item: return None
+        blockers=[]
+        if item["catalog_state"]!="TRASHED" or item["asset_state"]!="TRASHED":
+            blockers.append({"code":"ASSET_NOT_PURGE_ELIGIBLE"})
+        if item.get("hold_at"): blockers.append({"code":"ASSET_HOLD_ACTIVE"})
+        with self._db() as conn:
+            album_id=item["album_id"]
+            reservation=conn.execute("SELECT group_uuid FROM album_work_reservation WHERE album_id=?",(album_id,)).fetchone()
+            if reservation: blockers.append({"code":"ACTIVE_WORK_RESERVATION","group_uuid":reservation[0]})
+            for row in conn.execute("SELECT uuid FROM work_dispatch_group WHERE album_id=? AND group_state<>'Released'",(album_id,)):
+                blockers.append({"code":"WORK_GROUP_NOT_RELEASED","group_uuid":row[0]})
+            work=conn.execute("SELECT COUNT(*) FROM workspace_album_ai_worker WHERE album_id=? AND run_state IN ('Pending','Claimed')",(album_id,)).fetchone()[0]
+            if work: blockers.append({"code":"WORK_ITEM_NOT_TERMINAL","count":work})
+            reviews=conn.execute("""SELECT COUNT(*) FROM ai_work_item_review r JOIN workspace_album_ai_worker w
+                ON w.uuid=r.work_item_uuid WHERE w.album_id=? AND r.state IN ('ReadyForReview','InReview','ReworkRequested')""",(album_id,)).fetchone()[0]
+            if reviews: blockers.append({"code":"REVIEW_NOT_FINAL","count":reviews})
+            workspaces=conn.execute("""SELECT COUNT(DISTINCT w.workspace_uuid) FROM workspace_album_ai_worker w
+                JOIN ai_workspace a ON a.uuid=w.workspace_uuid WHERE w.album_id=?
+                AND a.lifecycle_state NOT IN ('Closed','Archived')""",(album_id,)).fetchone()[0]
+            if workspaces: blockers.append({"code":"WORKSPACE_NOT_CLOSED","count":workspaces})
+            active_ops=conn.execute("SELECT COUNT(*) FROM operation WHERE entity_uuid=? AND status IN ('Pending','Running')",(item["album_uuid"],)).fetchone()[0]
+            if active_ops: blockers.append({"code":"ACTIVE_OPERATION","count":active_ops})
+        if item.get("issue_uuid") or item.get("repair_uuid"):
+            blockers.append({"code":"ACTIVE_ISSUE_OR_REPAIR","issue_uuid":item.get("issue_uuid"),"repair_uuid":item.get("repair_uuid")})
+        return {"item":item,"blockers":blockers}
+
+    def finalize_purge(self,trash_uuid: str,expected_version: int,operation_uuid: str,actor: str,now: str) -> dict:
+        with self._db() as conn:
+            try:
+                conn.execute("BEGIN"); item=conn.execute("SELECT * FROM digital_asset_trash_item WHERE uuid=?",(trash_uuid,)).fetchone()
+                if not item: raise PersistenceConflict({"reason":"trash_missing"})
+                changed=conn.execute("""UPDATE album SET asset_state='DELETED',lifecycle_version=lifecycle_version+1,updated_at=?
+                    WHERE id=? AND lifecycle_version=? AND catalog_state='TRASHED' AND asset_state='TRASHED'""",
+                    (now,item["album_id"],expected_version))
+                if changed.rowcount!=1: raise PersistenceConflict({"reason":"lifecycle_stale"})
+                conn.execute("UPDATE photo SET asset_state='DELETED' WHERE album_id=?",(item["album_id"],))
+                conn.execute("""UPDATE digital_asset_trash_item SET purge_operation_uuid=?,purged_at=?,purged_by_token_uuid=?,
+                    purge_photo_count=photo_count,purge_byte_count=byte_count,purge_inventory_digest=inventory_digest,updated_at=? WHERE uuid=?""",
+                    (operation_uuid,now,actor,now,trash_uuid))
+                conn.commit()
+            except Exception:
+                conn.rollback(); raise
+        return self.get_trash(trash_uuid)
 
     def restore_trash_item(self, trash_uuid: str, expected_version: int, operation_uuid: str, now: str) -> None:
         with self._db() as conn:
@@ -1703,6 +1754,19 @@ class AlbumRepository:
             conn.execute("UPDATE album SET asset_state='NEEDS_REPAIR',lifecycle_version=lifecycle_version+1,updated_at=? WHERE id=?",(now,album_id))
             conn.execute("UPDATE photo SET asset_state='NEEDS_REPAIR' WHERE album_id=?",(album_id,))
             conn.commit()
+
+    def mark_asset_missing(self, album_id: int, expected_version: int, now: str) -> None:
+        with self._db() as conn:
+            changed=conn.execute("""UPDATE album SET asset_state='MISSING',lifecycle_version=lifecycle_version+1,updated_at=?
+                WHERE id=? AND lifecycle_version=? AND catalog_state='TRASHED' AND asset_state='TRASHED'""",
+                (now,album_id,expected_version))
+            if changed.rowcount!=1: raise PersistenceConflict({"reason":"lifecycle_stale"})
+            conn.execute("UPDATE photo SET asset_state='MISSING' WHERE album_id=?",(album_id,)); conn.commit()
+
+    def link_trash_repair(self,trash_uuid: str,issue_uuid: str | None,repair_uuid: str | None,now: str) -> None:
+        with self._db() as conn:
+            conn.execute("UPDATE digital_asset_trash_item SET issue_uuid=?,repair_uuid=?,updated_at=? WHERE uuid=?",
+                (issue_uuid,repair_uuid,now,trash_uuid)); conn.commit()
 
     def set_trash_hold(self, trash_uuid: str, expected_version: int, reason: str | None,
                        actor: str, operation_uuid: str, now: str) -> dict:
@@ -4440,6 +4504,14 @@ class OperationRepository:
             row = conn.execute(
                 "SELECT * FROM operation WHERE uuid = ?", (op_uuid,)
             ).fetchone()
+        return _norm_operation(dict(row)) if row else None
+
+    def get_by_batch(self, batch_uuid: str, operation_type: str) -> dict | None:
+        """Return the newest Operation for one stable batch identity."""
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row=conn.execute("""SELECT * FROM operation WHERE batch_uuid=? AND operation_type=?
+                ORDER BY id DESC LIMIT 1""",(batch_uuid,operation_type)).fetchone()
         return _norm_operation(dict(row)) if row else None
 
     def list_recent(self, limit: int = 50) -> list[dict]:

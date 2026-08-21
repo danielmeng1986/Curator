@@ -54,10 +54,25 @@ For an approved repair conflict, choose **Review Quarantine move**, inspect orig
 isolated destinations, then **Execute reviewed Quarantine**. Quarantine does not resolve
 the Issue. To return an isolated item, open **Repair Quarantine**, select it, choose
 **Review restore to original path**, inspect conflicts, and execute the fresh Preview.
-It is not Digital Asset Trash, which remains unavailable.
+It is not Digital Asset Trash, which has its own Administrator Center workflow.
+
+<!-- manual-section: digital-asset-trash -->
+## 5. Digital Asset Trash
+
+Open **Administrator Center → Digital Asset Trash** to review Albums removed
+from the active catalog. Business status, catalog state, and asset state are
+shown separately. An eligible restore uses a fresh Preview and never
+overwrites the original managed destination. Use a documented hold when assets
+must be preserved; release it only after that reason ends.
+
+Permanent purge deletes only the reviewed digital assets. Select only items
+the Backend marks eligible, review Album/Photo/byte scope, and type the exact
+confirmation phrase. Album, Photo, AI workflow, and Operation records remain as
+historical evidence with asset state `DELETED`; the assets cannot be restored
+from Curator after purge.
 
 <!-- manual-section: backup -->
-## 5. Backups, Snapshots, and database Restore
+## 6. Backups, Snapshots, and database Restore
 
 Use **Backups and Snapshots** to inspect catalogued recovery points, create an
 Administrator Snapshot, and verify it before reliance. Snapshot cleanup requires a
@@ -75,7 +90,7 @@ Database Restore replaces the active catalog:
    or replace database files manually.
 
 <!-- manual-section: ai-config -->
-## 6. AI configuration, Workspace, and Dispatch
+## 7. AI configuration, Workspace, and Dispatch
 
 In **Administrator Center → AI Model Configurations**, create/version the llama.cpp model
 and sampling parameters, including requested sample count. Disable obsolete
@@ -92,7 +107,7 @@ Dispatch does not change Album Status. An active dispatch key prevents the same 
 from being concurrently assigned to another Worker; release/closure restores eligibility.
 
 <!-- manual-section: ai-review -->
-## 7. AI review, rework, Promotion, and closure
+## 8. AI review, rework, Promotion, and closure
 
 Open **AI Review**, filter the queue, and inspect a Work Item. Review the analysis JSON,
 recommended names, model configuration, and exact sampled photo evidence before deciding.
@@ -113,7 +128,7 @@ Release completed Groups, then close/archive a Workspace only after its active w
 retention requirements permit it. Do not purge audit evidence to tidy the queue.
 
 <!-- manual-section: risk -->
-## 8. High-risk behavior and expected denials
+## 9. High-risk behavior and expected denials
 
 Typed confirmation, acknowledgements, fresh Preview tokens, current versions, and final-
 Admin checks are safety controls. Never bypass them. A `400` means input/transition needs
@@ -121,7 +136,7 @@ correction; `409` means current state conflicts or became stale; refresh and rea
 Reader/Writer denial is expected for every section in this manual.
 
 <!-- manual-section: checklist -->
-## 9. Verification checklist
+## 10. Verification checklist
 
 - [ ] Admin Token is stored securely and never disclosed in screenshots/logs.
 - [ ] Grants use least privilege and final-Admin safety remains intact.

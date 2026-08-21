@@ -4,13 +4,14 @@ const AdminCenterPage = {
     document.getElementById('pageActionBtn').classList.add('hidden');
     el.innerHTML = '<div class="loading">Loading Administrator Center…</div>';
     try {
-      const [health, backups, quarantine, operations] = await Promise.all([
-        api.get('/health'), api.get('/backups'), api.get('/quarantine-items'), api.get('/operations?limit=5'),
+      const [health, backups, quarantine, operations, trash] = await Promise.all([
+        api.get('/health'), api.get('/backups'), api.get('/quarantine-items'), api.get('/operations?limit=5'), api.get('/admin/digital-asset-trash'),
       ]);
       const cards = [
         ['Devices and Tokens', 'Review registrations, renewals, roles, scopes, and revocation.', '#/admin/devices', 'Available'],
         ['Backups and Snapshots', 'Inspect and create Backend-controlled recovery points.', '#/admin/backups', 'Available'],
         ['Database Restore', 'Protected restore from a verified recovery point.', '#/admin/restore', 'Available'],
+        ['Digital Asset Trash', `${(trash.items || []).length} retained asset item(s) currently outside the active catalog.`, '#/admin/trash', 'Available'],
         ['Repair Quarantine', `${(quarantine.items || []).filter(item => !item.restored_at).length} item(s) currently isolated.`, '#/quarantine', 'Available'],
         ['Operation History', 'Read durable administrative and workflow outcomes.', '#/operations?operation_type=backup', 'Available'],
         ['AI Work Dispatch', 'Select available Albums and assign exclusive Worker Groups.', '#/work-dispatch', 'Available'],

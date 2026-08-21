@@ -24,7 +24,8 @@
     "0020_writer_four_word_placeholder",
     "0021_natural_writer_titles",
     "0022_ai_vision_regeneration",
-    "0023_digital_asset_trash"
+    "0023_digital_asset_trash",
+    "0024_digital_asset_purge"
   ],
   "excluded_tables": [
     "sqlite_sequence"
@@ -2500,6 +2501,48 @@
           "name": "updated_at",
           "type": "TEXT",
           "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "purge_operation_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "purged_at",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "purged_by_token_uuid",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "purge_photo_count",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "purge_byte_count",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "purge_inventory_digest",
+          "type": "TEXT",
+          "not_null": false,
           "default": null,
           "primary_key_position": 0
         }
