@@ -263,3 +263,9 @@ All conflict outcomes are zero-write outcomes and use the shared API envelope.
 - Release and redispatch tests preserve history and reject premature release.
 - Browser acceptance proves dispatched Albums leave the default candidate list
   and remain discoverable in active/history views.
+
+AI Review may display persistent machine-generated Simplified-Chinese
+assistance beside immutable English recommendations. Translation cache rows
+are derived evidence keyed by source hash, locale, provider/model, and format
+version. They do not participate in Review decisions, Group closure, or Album
+Promotion; only the original English Recommendation remains selectable.

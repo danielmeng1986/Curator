@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`BT-067` — Status: `Ready`
+`BT-067` — Status: `Complete`
 
 ## Title
 
@@ -128,3 +128,19 @@ reuse them on every later read.
   the Chinese text is machine translation for comprehension only.
 - Never expose the API key to `apps.web`; all provider traffic originates in
   Backend.
+
+## Completion Record
+
+- Added ordered migration `0025_ai_review_translation_cache`, defensive
+  repository persistence, cache identity, and canonical schema documentation.
+- Added an owner-only repository `.env` loader with process-environment
+  precedence, literal parsing, plan validation, and fail-closed diagnostics.
+- Added the bounded Backend-only DeepL adapter for Developer/Growth endpoints,
+  stable redacted provider errors, and no browser credential exposure.
+- Added Admin-only GET/POST Review-translation APIs and cache data in Review
+  detail; ordinary reads never invoke DeepL and repeated POSTs are cache-only.
+- Preserved immutable Writer recommendations and Review/Promotion state, and
+  recorded external cache-miss requests as bounded Operations.
+- Verified migration/configuration, fake-provider batching, cached replay,
+  unavailable configuration, immutable source data, and real HTTP routing;
+  the complete Backend regression passed `804/804` without contacting DeepL.

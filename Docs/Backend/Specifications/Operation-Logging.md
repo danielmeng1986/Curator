@@ -141,3 +141,9 @@ Changing filters while reusing a cursor is invalid. The endpoint returns the
 standard collection envelope with total, active filters, sort description,
 `has_more`, and `next_cursor` metadata. Role-based field projection applies
 before every page is serialized.
+## AI Review translation
+
+An external cache-miss request records an `ai_review_translation` Operation
+against the Work Item. The summary may contain only bounded counts and outcome;
+it must not contain source text, translated text, provider headers, or API
+credentials. Cache-only reads and replays do not create an Operation.

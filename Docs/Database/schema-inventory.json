@@ -25,7 +25,8 @@
     "0021_natural_writer_titles",
     "0022_ai_vision_regeneration",
     "0023_digital_asset_trash",
-    "0024_digital_asset_purge"
+    "0024_digital_asset_purge",
+    "0025_ai_review_translation_cache"
   ],
   "excluded_tables": [
     "sqlite_sequence"
@@ -770,6 +771,131 @@
           ],
           "unique": true,
           "origin": "u",
+          "partial": false
+        }
+      ]
+    },
+    "ai_review_translation_cache": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 1
+        },
+        {
+          "name": "uuid",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "source_text",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "source_sha256",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "target_locale",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "translated_text",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "provider_model",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "format_version",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "1",
+          "primary_key_position": 0
+        },
+        {
+          "name": "detected_source_language",
+          "type": "TEXT",
+          "not_null": false,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true,
+          "default": null,
+          "primary_key_position": 0
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "name": null,
+          "columns": [
+            "source_sha256",
+            "target_locale",
+            "provider",
+            "provider_model",
+            "format_version"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": null,
+          "columns": [
+            "uuid"
+          ],
+          "unique": true,
+          "origin": "u",
+          "partial": false
+        },
+        {
+          "name": "idx_ai_review_translation_lookup",
+          "columns": [
+            "target_locale",
+            "provider",
+            "provider_model",
+            "source_sha256"
+          ],
+          "unique": false,
+          "origin": "c",
           "partial": false
         }
       ]

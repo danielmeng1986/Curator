@@ -3086,6 +3086,67 @@ class AIReviewService:
             raise ServiceConflict(code,"AI review transition conflicts with current state.",exc.details) from exc
 
 
+class AIReviewTranslationService:
+    """On-demand, cache-first machine translation for Review recommendations."""
+
+    TARGET_LOCALE="zh-CN"; PROVIDER="deepl"; MODEL="text-v2"; FORMAT_VERSION=1
+
+    def __init__(self, translation_repo, adapter=None, configuration_error=None,
+                 operation_service=None, now_fn=None):
+        self._repo,self._adapter=translation_repo,adapter
+        self._configuration_error=configuration_error
+        self._operations=operation_service
+        self._now=now_fn or (lambda:datetime.now(timezone.utc))
+
+    def _source(self,item_uuid):
+        names=self._repo.writer_recommendations(item_uuid)
+        if names is None: raise ServiceNotFound("AI Writer result not found.")
+        if not isinstance(names,list) or any(not isinstance(name,str) or not name.strip() for name in names):
+            raise ServiceConflict("TRANSLATION_SOURCE_INVALID","AI recommendations are not translatable.")
+        return list(dict.fromkeys(name.strip() for name in names))
+
+    def read(self,item_uuid):
+        texts=self._source(item_uuid)
+        rows=self._repo.find(texts,self.TARGET_LOCALE,self.PROVIDER,self.MODEL,self.FORMAT_VERSION)
+        by_text={row["source_text"]:row for row in rows}
+        items=[]
+        for text in texts:
+            row=by_text.get(text)
+            items.append({"source_text":text,"translated_text":row["translated_text"] if row else None,
+                "cached":bool(row),"created_at":row["created_at"] if row else None})
+        configured=self._adapter is not None and self._configuration_error is None
+        reason=None if configured else (self._configuration_error or "CURATOR_DEEPL_API_KEY is not configured.")
+        return {"work_item_uuid":item_uuid,"target_locale":self.TARGET_LOCALE,"provider":self.PROVIDER,
+            "configured":configured,"readiness_reason":reason,"items":items,
+            "cached_count":sum(item["cached"] for item in items),"missing_count":sum(not item["cached"] for item in items)}
+
+    def translate(self,item_uuid,actor):
+        current=self.read(item_uuid)
+        missing=[item["source_text"] for item in current["items"] if not item["cached"]]
+        if not missing: return current
+        if not current["configured"]:
+            raise ServiceConflict("TRANSLATION_NOT_CONFIGURED","AI Review translation is not configured.",
+                {"reason":current["readiness_reason"]})
+        operation=self._operations.begin("ai_review_translation",OP_INITIATOR_WEB_UI,
+            entity_uuid=item_uuid,summary=f"Translate {len(missing)} AI Review recommendations") if self._operations else None
+        try:
+            translated=self._adapter.translate(missing,"ZH-HANS")
+            now=self._now().isoformat()
+            for source,result in zip(missing,translated):
+                self._repo.store({"uuid":str(_uuid_mod.uuid4()),"source_text":source,
+                    "source_sha256":hashlib.sha256(source.encode()).hexdigest(),"target_locale":self.TARGET_LOCALE,
+                    "translated_text":result["text"],"provider":self.PROVIDER,"provider_model":self.MODEL,
+                    "format_version":self.FORMAT_VERSION,"detected_source_language":result.get("detected_source_language"),
+                    "created_at":now,"updated_at":now})
+        except Exception as exc:
+            code=getattr(exc,"code","TRANSLATION_PROVIDER_UNAVAILABLE")
+            if operation: self._operations.fail(operation["uuid"],"external_service",code,
+                summary="AI Review translation failed")
+            raise ServiceConflict(code,"AI Review translation could not be completed.") from None
+        if operation: self._operations.succeed(operation["uuid"],summary=f"Cached {len(missing)} AI Review translations")
+        return self.read(item_uuid)
+
+
 class AIAlbumNamePromotionService:
     """Signed preview and single-winner Album-name Promotion."""
 

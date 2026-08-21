@@ -20,10 +20,12 @@ try:  # Package execution: python3 -m apps.backend
     from . import api_contract
     from . import repositories as repo
     from . import services as svc
+    from .translation import DeepLTranslationAdapter, TranslationConfigurationError, load_translation_config
 except ImportError:  # Focused test discovery still loads sibling modules directly.
     import api_contract
     import repositories as repo
     import services as svc
+    from translation import DeepLTranslationAdapter, TranslationConfigurationError, load_translation_config
 
 # ---------------------------------------------------------------------------
 # Path constants
@@ -78,6 +80,12 @@ def load_app_config() -> dict:
 
 
 APP_CONFIG = load_app_config()
+try:
+    TRANSLATION_CONFIG = load_translation_config(REPO_ROOT)
+    TRANSLATION_CONFIG_ERROR = None
+except TranslationConfigurationError as exc:
+    TRANSLATION_CONFIG = {"api_key":"","plan":"developer","configured":False}
+    TRANSLATION_CONFIG_ERROR = str(exc)
 AUTH_REGISTRATION_SECRET = os.environ.get("CURATOR_REGISTRATION_SECRET", "")
 ALBUM_BATCH_PREVIEW_SECRET = secrets.token_bytes(32)
 IMPORT_PREVIEW_SECRET = secrets.token_bytes(32)
@@ -807,7 +815,11 @@ class AppHandler(SimpleHTTPRequestHandler):
                 item_uuid=path.split("/")[3]; detail=self._ai_review_service().detail(item_uuid)
                 try: detail["evidence_history"]=self._ai_photo_evidence_service().historical(item_uuid)
                 except svc.ServiceNotFound: detail["evidence_history"]=None
+                detail["translations"]=self._ai_review_translation_service().read(item_uuid)
                 self._send_success(200,{"review":detail})
+            elif re.match(r"^/api/ai-work-items/[^/]+/review-translations$", path):
+                if not self._require_admin_principal(): return
+                self._send_success(200,{"translations":self._ai_review_translation_service().read(path.split("/")[3])})
             elif re.match(r"^/api/ai-work-items/[^/]+/promotion$", path):
                 if not self._require_admin_principal(): return
                 self._send_success(200,{"promotion_history":self._ai_promotion_service().history(path.split("/")[3])})
@@ -1072,6 +1084,12 @@ class AppHandler(SimpleHTTPRequestHandler):
 
     def _ai_review_service(self):
         return svc.AIReviewService(repo.AIReviewRepository(open_db))
+
+    def _ai_review_translation_service(self):
+        adapter=DeepLTranslationAdapter(TRANSLATION_CONFIG["api_key"],TRANSLATION_CONFIG["plan"]) \
+            if TRANSLATION_CONFIG.get("configured") and not TRANSLATION_CONFIG_ERROR else None
+        return svc.AIReviewTranslationService(repo.AIReviewTranslationRepository(open_db),adapter,
+            TRANSLATION_CONFIG_ERROR,svc.OperationService(repo.OperationRepository(open_db)))
 
     def _ai_promotion_service(self):
         return svc.AIAlbumNamePromotionService(repo.AIAlbumNamePromotionRepository(open_db),
@@ -1397,6 +1415,10 @@ class AppHandler(SimpleHTTPRequestHandler):
                 review=self._ai_review_service().decide(path.split("/")[3],body.get("expected_version"),
                     body.get("action"),self._principal["token_uuid"],body)
                 self._send_success(200,{"review":review})
+            elif re.match(r"^/api/ai-work-items/[^/]+/review-translations$", path):
+                if not self._require_admin_principal(): return
+                result=self._ai_review_translation_service().translate(path.split("/")[3],self._principal["token_uuid"])
+                self._send_success(200,{"translations":result})
             elif re.match(r"^/api/ai-work-items/[^/]+/promotion/preview$", path):
                 if not self._require_admin_principal(): return
                 preview=self._ai_promotion_service().preview(path.split("/")[3],self._principal["token_uuid"])

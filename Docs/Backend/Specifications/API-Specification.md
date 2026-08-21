@@ -376,3 +376,18 @@ SSE endpoint.
 
 - Route/resource catalogs can be added without changing the shared contract.
 - Stronger transport protections may be required if deployment expands beyond the trusted LAN assumptions.
+
+### AI Review machine-translation assistance
+
+`GET /api/v1/ai-work-items/{uuid}/review-translations` is Admin-only and reads
+the persistent Simplified-Chinese cache for the immutable Writer
+`suggested_names`. It never invokes an external provider. The same bounded
+translation read model is included in the AI Review detail response.
+
+`POST /api/v1/ai-work-items/{uuid}/review-translations` is Admin-only and
+idempotent. It batches only missing unique titles through the Backend-owned
+provider and persists complete, non-empty results before returning them.
+`TRANSLATION_NOT_CONFIGURED`, `TRANSLATION_PROVIDER_AUTH`,
+`TRANSLATION_PROVIDER_QUOTA`, `TRANSLATION_PROVIDER_UNAVAILABLE`, and
+`TRANSLATION_PROVIDER_INVALID_RESPONSE` are stable conflict codes. Translation
+never modifies Review state, Writer evidence, or Promotion candidates.

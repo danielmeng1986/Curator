@@ -3481,6 +3481,7 @@ class AIReviewRepository:
             "promotions":promotions,"operations":operations,"issues":issues}
         return result
 
+
     def transition(self,item_uuid,expected_version,to_state,actor,evidence,now):
         operation_uuid,decision_uuid=str(uuid.uuid4()),str(uuid.uuid4())
         with self._db() as conn:
@@ -3528,6 +3529,59 @@ class AIReviewRepository:
                 conn.commit()
             except Exception: conn.rollback(); raise
         result=self.detail(item_uuid); result["successor_work_item_uuid"]=successor_uuid or result["successor_work_item_uuid"]; return result
+
+
+class AIReviewTranslationRepository:
+    """Persistent derived translations, independent from immutable AI output."""
+
+    def __init__(self, db_factory): self._db = db_factory
+
+    @staticmethod
+    def _ensure_schema(conn):
+        conn.executescript("""CREATE TABLE IF NOT EXISTS ai_review_translation_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,uuid TEXT NOT NULL UNIQUE,
+            source_text TEXT NOT NULL,source_sha256 TEXT NOT NULL,target_locale TEXT NOT NULL,
+            translated_text TEXT NOT NULL,provider TEXT NOT NULL,provider_model TEXT NOT NULL,
+            format_version INTEGER NOT NULL DEFAULT 1,detected_source_language TEXT,
+            created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+            UNIQUE(source_sha256,target_locale,provider,provider_model,format_version));
+            CREATE INDEX IF NOT EXISTS idx_ai_review_translation_lookup
+            ON ai_review_translation_cache(target_locale,provider,provider_model,source_sha256);""")
+
+    def writer_recommendations(self, item_uuid):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute("SELECT payload_json FROM ai_work_item_result_stage WHERE work_item_uuid=? AND stage='Writer'", (item_uuid,)).fetchone()
+        if not row: return None
+        return json.loads(row[0]).get("suggested_names")
+
+    def find(self, texts, target_locale, provider, provider_model, format_version):
+        if not texts: return []
+        hashes = [hashlib.sha256(text.encode()).hexdigest() for text in texts]
+        placeholders = ",".join("?" for _ in hashes)
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            rows = conn.execute(f"""SELECT * FROM ai_review_translation_cache
+                WHERE source_sha256 IN ({placeholders}) AND target_locale=? AND provider=?
+                AND provider_model=? AND format_version=?""",
+                hashes + [target_locale,provider,provider_model,format_version]).fetchall()
+        return [dict(row) for row in rows]
+
+    def store(self, item):
+        with self._db() as conn:
+            self._ensure_schema(conn)
+            conn.execute("""INSERT OR IGNORE INTO ai_review_translation_cache
+                (uuid,source_text,source_sha256,target_locale,translated_text,provider,provider_model,
+                 format_version,detected_source_language,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",(item["uuid"],item["source_text"],item["source_sha256"],
+                item["target_locale"],item["translated_text"],item["provider"],item["provider_model"],
+                item["format_version"],item.get("detected_source_language"),item["created_at"],item["updated_at"]))
+            row=conn.execute("""SELECT * FROM ai_review_translation_cache WHERE source_sha256=?
+                AND target_locale=? AND provider=? AND provider_model=? AND format_version=?""",
+                (item["source_sha256"],item["target_locale"],item["provider"],item["provider_model"],item["format_version"])).fetchone()
+        if row and row["source_text"] != item["source_text"]:
+            raise PersistenceConflict({"code":"TRANSLATION_HASH_COLLISION"})
+        return dict(row)
 
 
 class AIAlbumNamePromotionRepository:

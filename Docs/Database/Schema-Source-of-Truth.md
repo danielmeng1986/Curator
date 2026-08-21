@@ -75,6 +75,7 @@ of the default runner.
 | `0013` | `ai_workspace_retention` |
 | `0017` | `ai_instruction_profile`, `ai_instruction_profile_version`; Profile binding on `ai_model_configuration` |
 | `0018` | Normalize the default AI Instruction Profile Dataset identity to `album_analysis` |
+| `0025` | `ai_review_translation_cache` derived Review-assistance cache |
 
 Repositories contain matching defensive DDL for several of these tables. The
 versioned SQL migration is the declared design authority where it exists; the

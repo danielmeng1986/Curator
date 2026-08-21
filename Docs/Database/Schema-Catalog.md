@@ -110,6 +110,7 @@ Snapshot table. Their listing and validation are Backend-controlled.
 | `workspace_album_ai_worker_photo` | Immutable selected Photo evidence | integer `id`, unique UUID; Manifest/Item/Album, ordinal, relative path, size/mtime/hash/MIME | FK → Manifest, Work Item, Album; unique ordinal and relative path within Manifest | migration `0008`; BT-047/048 |
 | `ai_work_item_result_state` | Current result-stage projection | Work Item UUID PK; stage state, Vision/Writer result UUIDs, version/time | FK → Work Item; AwaitingVision → AwaitingWriter → ReadyForReview | migration `0009`; BT-049 |
 | `ai_work_item_result_stage` | Immutable stage result | integer `id`, unique UUID; Work Item, Vision/Writer stage, schema and Manifest versions, payload/runtime hashes and JSON | unique `(work_item_uuid, stage)`; FK → Work Item/Manifest | migration `0009`; BT-049 |
+| `ai_review_translation_cache` | Derived machine-translation cache | integer `id`, unique UUID; exact source/hash, locale, translation, provider/model/format, detected language and timestamps | unique source hash + locale + provider/model/format; independent from immutable result and Review state | migration `0025`; BT-067 |
 
 ## Human Review, Rework, and Promotion
 

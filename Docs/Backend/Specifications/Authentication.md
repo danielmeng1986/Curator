@@ -58,6 +58,17 @@ returned only by the successful generate/rotate response; later reads expose saf
 metadata only. Environment-provided registration secrets remain an operator fallback
 during migration, but a managed active proof is the normal interactive workflow.
 
+## External translation credential
+
+DeepL access is Backend-only. `CURATOR_DEEPL_API_KEY` and
+`CURATOR_DEEPL_API_PLAN` are read from the process environment or, secondarily,
+an owner-only (`0600`) repository-root `.env`. Process values win. The loader
+accepts literal assignments only and fails translation closed for symlinks,
+unsafe permissions, duplicates, malformed input, or unsupported plan values.
+The credential is never accepted by an HTTP request, stored in SQLite, exposed
+to the Web client, or written to logs. `.env.example` contains empty values;
+the real `.env` remains ignored.
+
 For browser enrollment, the requesting Client generates the Device Token locally and
 submits only its hash. It also generates an independent enrollment proof whose hash is
 persisted. Before approval the candidate Token cannot authenticate. Approval atomically
