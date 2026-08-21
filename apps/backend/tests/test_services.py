@@ -636,6 +636,16 @@ class TestAlbumServiceReadiness(unittest.TestCase):
         ratings = self.conn.execute("SELECT rating FROM album ORDER BY id").fetchall()
         self.assertEqual([row[0] for row in ratings], [None, None])
 
+    def test_trashed_album_rejects_batch_and_relationship_target(self):
+        self.conn.execute("UPDATE album SET catalog_state='TRASHED' WHERE id=2");self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict) as batch:
+            self.service.preview_batch([1,2],{"rating":5})
+        self.assertEqual("ALBUM_NOT_ACTIVE",batch.exception.code)
+        with self.assertRaises(svc.ServiceConflict) as relation:
+            self.service.update(1,{"title":"One"},[],[{"related_album_id":2}])
+        self.assertEqual("ALBUM_NOT_ACTIVE",relation.exception.code)
+        self.assertIsNone(self.conn.execute("SELECT rating FROM album WHERE id=1").fetchone()[0])
+
 
 # ---------------------------------------------------------------------------
 # WorkspaceAlbumService
@@ -1557,6 +1567,22 @@ class TestWorkDispatchCandidatePreviewContract(unittest.TestCase):
         self.assertFalse(reserved["can_dispatch"]); self.assertEqual("ALBUM_ALREADY_RESERVED", reserved["eligibility"])
         self.assertIsNotNone(reserved["active_reservation"])
 
+    def test_candidates_exclude_trashed_from_every_availability_mode_and_total(self):
+        self.conn.execute("UPDATE album SET catalog_state='TRASHED' WHERE id=2");self.conn.commit()
+        for availability in ("available","reserved","all"):
+            result=self.service.candidates("album_name_analysis",availability=availability)
+            self.assertNotIn("South Landscape",[item["title"] for item in result["items"]])
+            self.assertEqual(len(result["items"]),result["total"])
+        self.conn.execute("UPDATE album SET catalog_state='ACTIVE',asset_state='PRESENT' WHERE id=2");self.conn.commit()
+        restored=self.service.candidates("album_name_analysis",availability="all")
+        self.assertIn("South Landscape",[item["title"] for item in restored["items"]])
+
+    def test_explicit_trashed_album_preview_is_rejected(self):
+        self.conn.execute("UPDATE album SET catalog_state='TRASHED' WHERE id=1");self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict) as rejected:
+            self.service.preview("album_name_analysis",self.workspace["uuid"],[self.config["uuid"]],album_ids=[1])
+        self.assertEqual("ALBUM_NOT_ACTIVE",rejected.exception.code)
+
     def test_preview_binds_versions_and_is_zero_write(self):
         self.dispatch_repo.prepare()
         before = {table:self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -1665,6 +1691,16 @@ class TestAtomicAlbumAIWorkDispatchContract(unittest.TestCase):
         for table in ("work_dispatch_batch","work_dispatch_group","album_work_reservation",
                       "workspace_album_ai_worker","work_dispatch_preview_claim"):
             self.assertEqual(0, self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+
+    def test_album_trashed_after_preview_leaves_no_partial_dispatch(self):
+        preview=self._preview()
+        self.conn.execute("UPDATE album SET catalog_state='TRASHED',asset_state='TRASHED' WHERE id=2");self.conn.commit()
+        with self.assertRaises(svc.ServiceConflict) as stale:
+            self.service.execute(preview["preview_token"],"admin-one")
+        self.assertEqual("DISPATCH_PREVIEW_STALE",stale.exception.code)
+        for table in ("work_dispatch_batch","work_dispatch_group","album_work_reservation",
+                      "workspace_album_ai_worker","work_dispatch_preview_claim","operation"):
+            self.assertEqual(0,self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
 
 
     def test_concurrent_execution_has_one_winner_and_failure_rolls_back(self):
@@ -2040,6 +2076,18 @@ class TestWorkDispatchReleaseSafety(unittest.TestCase):
         self.assertFalse(closed["idempotent"]); self.assertTrue(replay["idempotent"])
         self.assertIsNone(self.dispatch_repo.active_reservation(self.item["album_id"]))
         self.assertEqual(before_status,self.conn.execute("SELECT status_id FROM album WHERE id=?",(self.item["album_id"],)).fetchone()[0])
+
+    def test_trashed_album_is_hidden_from_current_groups_but_retained_in_history(self):
+        album_id=self.item["album_id"]
+        self.conn.execute("UPDATE album SET catalog_state='TRASHED',asset_state='TRASHED' WHERE id=?",(album_id,))
+        self.conn.commit()
+        for view in ("active","review","closure"):
+            self.assertEqual([],self.dispatch.groups(view)["items"])
+        self.conn.execute("UPDATE work_dispatch_group SET group_state='Released' WHERE uuid='group-close'")
+        self.conn.execute("DELETE FROM album_work_reservation WHERE album_id=?",(album_id,));self.conn.commit()
+        history=self.dispatch.groups("history")["items"]
+        self.assertEqual(["group-close"],[item["uuid"] for item in history])
+        self.assertEqual("TRASHED",history[0]["catalog_state"])
 
     def test_claimed_work_blocks_abandon_and_explicit_abandon_retains_evidence(self):
         self.conn.execute("UPDATE workspace_album_ai_worker SET run_state='Claimed' WHERE uuid=?",(self.item["uuid"],)); self.conn.commit()

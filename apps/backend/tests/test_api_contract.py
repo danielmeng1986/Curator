@@ -771,6 +771,23 @@ class TestVersionedApiAuthorization(_TestServerBase):
         self.assertEqual(409,status); self.assertEqual("ALBUM_HARD_DELETE_UNAVAILABLE",body["error"]["code"])
         self.assertIsNotNone(self._db.execute("SELECT id FROM album WHERE id=?",(album_id,)).fetchone())
 
+    def test_trashed_album_is_rejected_by_operational_id_routes(self):
+        writer=self._bearer(self._issue(role="writer"));admin=self._bearer(self._issue(role="admin"))
+        marker=self._db.execute("SELECT COUNT(*) FROM album").fetchone()[0]
+        self._db.execute("INSERT INTO album(uuid,title,created_at,updated_at) VALUES (?,?,?,?)",
+            (f"active-boundary-{marker}","Boundary Active","v1","v1"))
+        active_id=self._db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        self._db.execute("INSERT INTO album(uuid,title,catalog_state,asset_state,created_at,updated_at) VALUES (?,?, 'TRASHED','TRASHED',?,?)",
+            (f"trash-boundary-{marker}","Boundary Trashed","v1","v1"))
+        trashed_id=self._db.execute("SELECT last_insert_rowid()").fetchone()[0];self._db.commit()
+        status,body=self._post("/api/v1/albums/batch/preview",{"ids":[trashed_id],"changes":{"rating":5}},writer)
+        self.assertEqual(409,status);self.assertEqual("ALBUM_NOT_ACTIVE",body["error"]["code"])
+        status,body=self._post(f"/api/v1/albums/{active_id}/relations",{"related_album_id":trashed_id,"relation_type":"BELONGS_TO"},writer)
+        self.assertEqual(409,status);self.assertEqual("ALBUM_NOT_ACTIVE",body["error"]["code"])
+        status,body=self._get("/api/v1/work-dispatch/candidates?worker_kind=album_name_analysis&availability=all&limit=100",admin)
+        self.assertEqual(200,status);self.assertNotIn(trashed_id,[item["id"] for item in body["data"]])
+        self.assertEqual(0,self._db.execute("SELECT COUNT(*) FROM album_relation WHERE album_id=?",(active_id,)).fetchone()[0])
+
     def test_historical_workspace_active_client_api_is_retired(self):
         reader, writer = self._bearer(self._issue(role="reader")), self._bearer(self._issue(role="writer"))
         status, body = self._get("/api/v1/workspace/albums", reader)

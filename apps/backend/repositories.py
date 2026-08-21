@@ -831,7 +831,8 @@ class StatusRepository:
             rows = conn.execute(
                 """
                 SELECT s.id, s.name, s.description,
-                    (SELECT COUNT(*) FROM album a WHERE a.status_id = s.id)
+                    (SELECT COUNT(*) FROM album a
+                        WHERE a.status_id = s.id AND a.catalog_state = 'ACTIVE')
                         AS album_count,
                     (SELECT COUNT(*) FROM workspace_album wa WHERE wa.status_id = s.id)
                         AS workspace_album_count
@@ -938,7 +939,7 @@ class ModelRepository:
                 FROM album_model am
                 JOIN album a ON a.id = am.album_id
                 LEFT JOIN studio s ON s.id = a.studio_id
-                WHERE am.model_id = ?
+                WHERE am.model_id = ? AND a.catalog_state = 'ACTIVE'
                 ORDER BY a.capture_date DESC
                 """,
                 (model_id,),
@@ -1101,7 +1102,7 @@ class StudioRepository:
                     st.name AS status_name
                 FROM album a
                 LEFT JOIN status st ON st.id = a.status_id
-                WHERE a.studio_id = ?
+                WHERE a.studio_id = ? AND a.catalog_state = 'ACTIVE'
                 ORDER BY a.publish_date DESC
                 """,
                 (studio_id,),
@@ -1225,6 +1226,16 @@ class AlbumRepository:
     def __init__(self, db_factory):
         self._db = db_factory
 
+    @staticmethod
+    def _require_active_relation_targets(conn, relations: list[dict]) -> None:
+        ids=sorted({item.get("related_album_id") for item in relations if isinstance(item.get("related_album_id"),int)})
+        if not ids: return
+        marks=",".join("?" for _ in ids)
+        active={row[0] for row in conn.execute(
+            f"SELECT id FROM album WHERE id IN ({marks}) AND catalog_state='ACTIVE'",ids)}
+        if active != set(ids):
+            raise PersistenceConflict({"code":"ALBUM_NOT_ACTIVE","album_ids":sorted(set(ids)-active)})
+
     def search(
         self,
         q: str = "",
@@ -1336,7 +1347,7 @@ class AlbumRepository:
         return [_norm_album_list(dict(r)) for r in rows], total
 
     def get_batch_state(self, album_ids: list[int]) -> list[dict]:
-        """Return stable fields used by Album batch preview and stale checks."""
+        """Return Active Album fields used by operational preview/stale checks."""
         if not album_ids:
             return []
         placeholders = ",".join("?" for _ in album_ids)
@@ -1344,8 +1355,21 @@ class AlbumRepository:
             rows = conn.execute(
                 f"SELECT id, uuid, title, studio_id, status_id, rating, description,"
                 f" scene, location, capture_date, publish_date, remark, updated_at"
-                f" FROM album WHERE id IN ({placeholders}) ORDER BY id",
+                f" FROM album WHERE id IN ({placeholders})"
+                f" AND catalog_state = 'ACTIVE' ORDER BY id",
                 album_ids,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_lifecycle_states(self, album_ids: list[int]) -> list[dict]:
+        """Return lifecycle state without making the rows operationally selectable."""
+        if not album_ids:
+            return []
+        placeholders = ",".join("?" for _ in album_ids)
+        with self._db() as conn:
+            rows = conn.execute(
+                f"SELECT id,uuid,catalog_state,asset_state,lifecycle_version"
+                f" FROM album WHERE id IN ({placeholders}) ORDER BY id", album_ids
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -1367,7 +1391,8 @@ class AlbumRepository:
                 marks = ",".join("?" for _ in related_album_ids)
                 found_albums = {
                     int(row[0]) for row in conn.execute(
-                        f"SELECT id FROM album WHERE id IN ({marks})", sorted(related_album_ids)
+                        f"SELECT id FROM album WHERE id IN ({marks})"
+                        f" AND catalog_state = 'ACTIVE'", sorted(related_album_ids)
                     )
                 }
         return found_models, found_albums
@@ -1383,13 +1408,14 @@ class AlbumRepository:
                 conn.execute("BEGIN")
                 for album_id in album_ids:
                     current = conn.execute(
-                        "SELECT updated_at FROM album WHERE id = ?", (album_id,)
+                        "SELECT updated_at FROM album WHERE id = ? AND catalog_state = 'ACTIVE'", (album_id,)
                     ).fetchone()
                     if current is None or current[0] != expected_versions[album_id]:
                         raise PersistenceConflict({"album_id": album_id, "reason": "stale"})
                 for album_id in album_ids:
                     conn.execute(
-                        f"UPDATE album SET {assignments}, updated_at = ? WHERE id = ?",
+                        f"UPDATE album SET {assignments}, updated_at = ?"
+                        f" WHERE id = ? AND catalog_state = 'ACTIVE'",
                         [changes[column] for column in columns] + [now, album_id],
                     )
                 conn.commit()
@@ -1430,7 +1456,7 @@ class AlbumRepository:
                 FROM album_relation ar
                 JOIN album a2 ON a2.id = ar.related_album_id
                 LEFT JOIN studio s2 ON s2.id = a2.studio_id
-                WHERE ar.album_id = ?
+                WHERE ar.album_id = ? AND a2.catalog_state = 'ACTIVE'
                 """,
                 (album_id,),
             ).fetchall()
@@ -1461,6 +1487,7 @@ class AlbumRepository:
         with self._db() as conn:
             try:
                 conn.execute("BEGIN")
+                self._require_active_relation_targets(conn,relations)
                 cur = conn.execute(
                     """
                     INSERT INTO album
@@ -1529,14 +1556,15 @@ class AlbumRepository:
         with self._db() as conn:
             try:
                 conn.execute("BEGIN")
-                conn.execute(
+                self._require_active_relation_targets(conn,relations)
+                changed=conn.execute(
                     """
                     UPDATE album SET
                         studio_id = ?, status_id = ?, title = ?,
                         description = ?, scene = ?, location = ?,
                         capture_date = ?, publish_date = ?,
                         rating = ?, path = ?, remark = ?, updated_at = ?
-                    WHERE id = ?
+                    WHERE id = ? AND catalog_state = 'ACTIVE'
                     """,
                     (
                         data.get("studio_id"),
@@ -1554,6 +1582,8 @@ class AlbumRepository:
                         album_id,
                     ),
                 )
+                if changed.rowcount != 1:
+                    raise PersistenceConflict({"code":"ALBUM_NOT_ACTIVE","album_id":album_id})
                 conn.execute(
                     "DELETE FROM album_model WHERE album_id = ?", (album_id,)
                 )
@@ -2860,9 +2890,9 @@ class WorkDispatchRepository:
         review_work="""EXISTS (SELECT 1 FROM work_dispatch_group_item rgi
             JOIN ai_work_item_review rv ON rv.work_item_uuid=rgi.item_uuid
             WHERE rgi.group_uuid=g.uuid AND rv.state IN ('ReadyForReview','InReview','ReworkRequested'))"""
-        if view=="active": conditions.extend(["g.group_state='Active'",worker_work])
-        elif view=="review": conditions.extend(["g.group_state='Active'",f"NOT {worker_work}",review_work])
-        elif view=="closure": conditions.extend(["g.group_state='Active'",f"NOT {worker_work}",f"NOT {review_work}"])
+        if view=="active": conditions.extend(["g.group_state='Active'","a.catalog_state='ACTIVE'",worker_work])
+        elif view=="review": conditions.extend(["g.group_state='Active'","a.catalog_state='ACTIVE'",f"NOT {worker_work}",review_work])
+        elif view=="closure": conditions.extend(["g.group_state='Active'","a.catalog_state='ACTIVE'",f"NOT {worker_work}",f"NOT {review_work}"])
         elif view=="history": conditions.append("g.group_state='Released'")
         if workspace_uuid: conditions.append("b.workspace_uuid=?"); params.append(workspace_uuid)
         if worker_kind: conditions.append("g.worker_kind=?"); params.append(worker_kind)
@@ -2876,7 +2906,7 @@ class WorkDispatchRepository:
             query=f"""SELECT g.uuid,g.batch_uuid,g.album_id,g.worker_kind,g.dataset_type,g.schema_version,
                 g.group_state,g.version,g.created_at,g.updated_at,g.released_at,g.release_reason,
                 b.workspace_uuid,b.batch_state,b.created_by_token_uuid,a.uuid album_uuid,a.title album_title,
-                a.status_id,s.name status_name,r.reserved_at,c.disposition,c.operation_uuid closure_operation_uuid,
+                a.status_id,a.catalog_state,a.asset_state,s.name status_name,r.reserved_at,c.disposition,c.operation_uuid closure_operation_uuid,
                 (SELECT COUNT(*) FROM work_dispatch_group_item gi WHERE gi.group_uuid=g.uuid) item_count,
                 (SELECT COUNT(*) FROM work_dispatch_group_item gi JOIN workspace_album_ai_worker i ON i.uuid=gi.item_uuid
                     WHERE gi.group_uuid=g.uuid AND i.run_state IN ('Pending','Claimed','Failed')) active_item_count,
@@ -2891,7 +2921,7 @@ class WorkDispatchRepository:
                 {where} ORDER BY g.created_at DESC,g.id DESC LIMIT ? OFFSET ?"""
             rows=conn.execute(query,params+[limit,offset]).fetchall()
             total=conn.execute(f"""SELECT COUNT(*) FROM work_dispatch_group g JOIN work_dispatch_batch b
-                ON b.uuid=g.batch_uuid {where}""",params).fetchone()[0]
+                ON b.uuid=g.batch_uuid JOIN album a ON a.id=g.album_id {where}""",params).fetchone()[0]
         return [dict(row) for row in rows],total
 
     def workspace_summary(self,workspace_uuid):
@@ -3032,7 +3062,8 @@ class AlbumAIWorkDispatchRepository(WorkDispatchRepository):
                     configurations.append(row)
                 albums = []
                 for expected in payload["albums"]:
-                    row = conn.execute("SELECT id,uuid,title,status_id,updated_at FROM album WHERE id=?", (expected["id"],)).fetchone()
+                    row = conn.execute("SELECT id,uuid,title,status_id,updated_at FROM album"
+                        " WHERE id=? AND catalog_state='ACTIVE'", (expected["id"],)).fetchone()
                     if not row or row["uuid"] != expected["uuid"] or row["updated_at"] != expected["updated_at"]:
                         raise PersistenceConflict({"code":"DISPATCH_PREVIEW_STALE", "resource":"album",
                             "album_id":expected["id"]})
@@ -3319,7 +3350,7 @@ class AIReviewRepository:
     def _review(row): return dict(row) if row else None
 
     def queue(self, state=None, workspace_uuid=None, limit=50, offset=0,album_id=None,configuration_uuid=None,group_uuid=None,q=None):
-        conditions=[]; params=[]
+        conditions=["a.catalog_state='ACTIVE'"]; params=[]
         if state: conditions.append("r.state=?"); params.append(state)
         if workspace_uuid: conditions.append("i.workspace_uuid=?"); params.append(workspace_uuid)
         if album_id: conditions.append("i.album_id=?"); params.append(album_id)
@@ -3330,7 +3361,7 @@ class AIReviewRepository:
         with self._db() as conn:
             self._ensure_schema(conn)
             rows=conn.execute(f"""SELECT r.*,i.workspace_uuid,i.album_id,i.ai_model_configuration_uuid,
-                a.uuid AS album_uuid,a.title AS album_title,c.name AS configuration_name
+                a.uuid AS album_uuid,a.title AS album_title,a.catalog_state,a.asset_state,c.name AS configuration_name
                 FROM ai_work_item_review r JOIN workspace_album_ai_worker i ON i.uuid=r.work_item_uuid
                 JOIN album a ON a.id=i.album_id JOIN ai_model_configuration c ON c.uuid=i.ai_model_configuration_uuid
                 LEFT JOIN work_dispatch_group_item gi ON gi.item_uuid=i.uuid
@@ -3347,6 +3378,7 @@ class AIReviewRepository:
             review=conn.execute("SELECT * FROM ai_work_item_review WHERE work_item_uuid=?",(item_uuid,)).fetchone()
             if not review: return None
             item=conn.execute("""SELECT i.*,a.uuid album_uuid,a.title album_title,a.status_id,a.updated_at album_updated_at,
+                a.catalog_state,a.asset_state,
                 c.name configuration_name FROM workspace_album_ai_worker i JOIN album a ON a.id=i.album_id
                 JOIN ai_model_configuration c ON c.uuid=i.ai_model_configuration_uuid WHERE i.uuid=?""",(item_uuid,)).fetchone()
             stages=conn.execute("SELECT * FROM ai_work_item_result_stage WHERE work_item_uuid=? ORDER BY id",(item_uuid,)).fetchall()

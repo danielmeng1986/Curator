@@ -108,12 +108,19 @@ are independent dimensions. The recommended cross-stack delivery order is:
 2. [BT-034](BT-034-implement-digital-asset-trash.md) adds migration-safe
    lifecycle persistence, Backend-owned readiness, Trash/Restore, filesystem
    verification, and workflow acceptance.
-3. [UI-010E](../../UI/Tasks/UI-010E-administer-digital-asset-trash.md) phase 1
-   delivers Album Trash readiness plus Administrator Trash/Restore and its
-   isolated browser/filesystem acceptance.
-4. [BT-035](BT-035-implement-digital-asset-purge.md) adds Admin-only permanent
+3. [UI-037](../../UI/Tasks/UI-037-move-albums-to-digital-asset-trash.md)
+   delivers Album Trash readiness, reviewed execution, and isolated
+   browser/filesystem acceptance.
+4. [BT-066](BT-066-exclude-trashed-albums-from-operational-read-models.md)
+   enforces the Active-Album boundary across ordinary associations, selectors,
+   counts, explicit-ID writes, and current Work Dispatch projections while
+   preserving historical evidence.
+5. [UI-010E](../../UI/Tasks/UI-010E-administer-digital-asset-trash.md) phase 1
+   delivers Administrator Trash/Restore and its isolated browser/filesystem
+   acceptance.
+6. [BT-035](BT-035-implement-digital-asset-purge.md) adds Admin-only permanent
    digital-asset deletion while retaining catalog tombstone evidence.
-5. `UI-010E` phase 2 delivers purge, empty-Trash, deleted-asset history, and
+7. `UI-010E` phase 2 delivers purge, empty-Trash, deleted-asset history, and
    final destructive-path acceptance.
 
 Do not begin steps 2–5 by interpreting the task documents as controlling

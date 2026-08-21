@@ -216,6 +216,12 @@ class TestStatusRepositoryListWithCounts(unittest.TestCase):
         self.assertEqual(rows[0]["album_count"], 1)
         self.assertEqual(rows[0]["workspace_album_count"], 1)
 
+    def test_album_count_excludes_trashed_but_reference_remains(self):
+        self.conn.execute("UPDATE album SET catalog_state='TRASHED' WHERE id=1")
+        self.conn.commit()
+        self.assertEqual(0,self.repo.list_with_counts()[0]["album_count"])
+        with self.assertRaises(repo.PersistenceConflict): self.repo.delete(1)
+
     def test_zero_counts_when_unreferenced(self):
         self.conn.execute("INSERT INTO status (name) VALUES ('Unused')")
         self.conn.commit()
@@ -1311,6 +1317,10 @@ class TestModelDetailAlbumAssocShape(unittest.TestCase):
         result = self.repo.get_by_id(1)
         self.assertIsNone(result["albums"][0]["remarks"])
 
+    def test_album_assoc_excludes_trashed_album(self):
+        self.conn.execute("UPDATE album SET catalog_state='TRASHED' WHERE id=1");self.conn.commit()
+        self.assertEqual([],self.repo.get_by_id(1)["albums"])
+
 
 class TestAlbumListReadModelShape(unittest.TestCase):
     """Album list read model has stable fields and ``model_names`` as a list."""
@@ -1468,6 +1478,11 @@ class TestAlbumDetailReadModelShape(unittest.TestCase):
         }
         for r in result["relations"]:
             self.assertEqual(set(r.keys()), expected_keys)
+
+    def test_relation_list_retains_row_but_excludes_trashed_target(self):
+        self.conn.execute("UPDATE album SET catalog_state='TRASHED' WHERE id=2");self.conn.commit()
+        self.assertEqual([],self.repo.get_by_id(1)["relations"])
+        self.assertEqual(1,self.conn.execute("SELECT COUNT(*) FROM album_relation").fetchone()[0])
 
     def test_photo_does_not_include_hash_field(self):
         result = self.repo.get_by_id(1)
@@ -1633,6 +1648,11 @@ class TestStudioReadModelShape(unittest.TestCase):
         expected_album_keys = {"id", "title", "capture_date", "publish_date", "rating", "status_name"}
         for album in result["albums"]:
             self.assertEqual(set(album.keys()), expected_album_keys)
+
+    def test_studio_album_assoc_excludes_trashed_album(self):
+        self.conn.execute("INSERT INTO album(uuid,studio_id,title,catalog_state) VALUES ('trash',1,'Trash','TRASHED')")
+        self.conn.commit()
+        self.assertNotIn('Trash',[item["title"] for item in self.repo.get_by_id(1)["albums"]])
 
 
 # ---------------------------------------------------------------------------

@@ -1691,16 +1691,22 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, {"result": self._album_service().execute_batch(token)})
 
     def _post_album_model(self, album_id: int, body: dict):
+        self._require_active_album(album_id)
         am_repo = repo.AlbumModelRepository(open_db)
         new_id = am_repo.add(album_id, body)
         self._send_success(201, {"id": new_id})
 
     def _post_album_relation(self, album_id: int, body: dict):
+        self._require_active_album(album_id)
+        related_id = body.get("related_album_id")
+        if not isinstance(related_id, int): raise ValueError("related_album_id must be an integer.")
+        self._require_active_album(related_id)
         ar_repo = repo.AlbumRelationRepository(open_db)
         new_id = ar_repo.add(album_id, body)
         self._send_success(201, {"id": new_id})
 
     def _post_album_photo(self, album_id: int, body: dict):
+        self._require_active_album(album_id)
         photo_repo = repo.PhotoRepository(open_db)
         new_id = photo_repo.add(album_id, body)
         self._send_success(201, {"id": new_id})
@@ -1917,11 +1923,13 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, None)
 
     def _put_album_model(self, album_id: int, am_id: int, body: dict):
+        self._require_active_album(album_id)
         am_repo = repo.AlbumModelRepository(open_db)
         am_repo.update(album_id, am_id, body)
         self._send_success(200, None)
 
     def _put_album_relation(self, album_id: int, relation_id: int, body: dict):
+        self._require_active_album(album_id)
         ar_repo = repo.AlbumRelationRepository(open_db)
         ar_repo.update(album_id, relation_id, body)
         self._send_success(200, None)
@@ -1978,6 +1986,12 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self._delete_photo(photo_id)
             else:
                 self._send_error(404, "NOT_FOUND", "The requested resource was not found.")
+        except svc.ServiceNotFound as exc:
+            self._send_error(404,"NOT_FOUND",str(exc))
+        except svc.ServiceConflict as exc:
+            self._send_error(409,exc.code,str(exc),details=exc.details)
+        except ValueError as exc:
+            self._send_error(400,"REQUEST_INVALID",str(exc))
         except Exception:
             self._send_error(500, "INTERNAL_ERROR", "An unexpected server error occurred.")
 
@@ -2018,14 +2032,23 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._send_success(200, None)
 
     def _delete_album_model(self, album_id: int, am_id: int):
+        self._require_active_album(album_id)
         am_repo = repo.AlbumModelRepository(open_db)
         am_repo.delete(album_id, am_id)
         self._send_success(200, None)
 
     def _delete_album_relation(self, album_id: int, relation_id: int):
+        self._require_active_album(album_id)
         ar_repo = repo.AlbumRelationRepository(open_db)
         ar_repo.delete(album_id, relation_id)
         self._send_success(200, None)
+
+    @staticmethod
+    def _require_active_album(album_id: int):
+        rows=repo.AlbumRepository(open_db).get_lifecycle_states([album_id])
+        if not rows: raise svc.ServiceNotFound("Album not found.")
+        if rows[0]["catalog_state"]!="ACTIVE":
+            raise svc.ServiceConflict("ALBUM_NOT_ACTIVE","The Album is not active.",{"album_id":album_id})
 
     def _delete_photo(self, photo_id: int):
         photo_repo = repo.PhotoRepository(open_db)

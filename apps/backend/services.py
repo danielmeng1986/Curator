@@ -730,6 +730,10 @@ class AlbumService:
         )
         missing_models = sorted(set(model_ids) - found_models)
         missing_albums = sorted(set(related_ids) - found_albums)
+        lifecycle = {row["id"]:row for row in self._repo.get_lifecycle_states(missing_albums)}
+        inactive = sorted(album_id for album_id,row in lifecycle.items() if row["catalog_state"] != "ACTIVE")
+        if inactive:
+            raise ServiceConflict("ALBUM_NOT_ACTIVE", "A related Album is not active.", {"album_ids":inactive})
         if missing_models or missing_albums:
             raise ValueError(
                 f"Relationship targets do not exist: models={missing_models}, albums={missing_albums}."
@@ -745,7 +749,12 @@ class AlbumService:
             raise ValueError("Album title is required.")
         self._validate_relationships(None, models, relations)
         now = _utc_now_iso()
-        album_id = self._repo.create(data, models, relations, now)
+        try:
+            album_id = self._repo.create(data, models, relations, now)
+        except repo.PersistenceConflict as exc:
+            if exc.details.get("code")=="ALBUM_NOT_ACTIVE":
+                raise ServiceConflict("ALBUM_NOT_ACTIVE","A related Album is not active.",exc.details) from exc
+            raise
         self._log(
             {"timestamp": now, "action": "create_album", "album_id": album_id, "success": True}
         )
@@ -761,7 +770,12 @@ class AlbumService:
             raise ServiceNotFound("Album not found.")
         self._validate_relationships(album_id, models, relations)
         now = _utc_now_iso()
-        self._repo.update(album_id, data, models, relations, now)
+        try:
+            self._repo.update(album_id, data, models, relations, now)
+        except repo.PersistenceConflict as exc:
+            if exc.details.get("code")=="ALBUM_NOT_ACTIVE":
+                raise ServiceConflict("ALBUM_NOT_ACTIVE","The Album or a related Album is not active.",exc.details) from exc
+            raise
         self._log(
             {"timestamp": now, "action": "update_album", "album_id": album_id, "success": True}
         )
@@ -812,7 +826,12 @@ class AlbumService:
         rows = self._repo.get_batch_state(ids)
         if len(rows) != len(ids):
             found = {row["id"] for row in rows}
-            raise ValueError(f"Albums do not exist: {sorted(set(ids) - found)}.")
+            unavailable = sorted(set(ids) - found)
+            lifecycle = {row["id"]:row for row in self._repo.get_lifecycle_states(unavailable)}
+            inactive = sorted(album_id for album_id,row in lifecycle.items() if row["catalog_state"] != "ACTIVE")
+            if inactive:
+                raise ServiceConflict("ALBUM_NOT_ACTIVE", "One or more Albums are not active.", {"album_ids":inactive})
+            raise ValueError(f"Albums do not exist: {sorted(set(unavailable) - set(lifecycle))}.")
         items = []
         for row in rows:
             conflicts = [
@@ -2396,7 +2415,12 @@ class WorkDispatchService:
             if len(set(album_ids)) != len(album_ids) or len(album_ids) > self.MAX_PREVIEW_ALBUMS:
                 raise ValueError("album_ids must be unique and contain at most 100 Albums.")
             states = self._albums.get_batch_state(sorted(album_ids))
-            if len(states) != len(album_ids): raise ValueError("One or more Albums do not exist.")
+            if len(states) != len(album_ids):
+                found={row["id"] for row in states}; unavailable=sorted(set(album_ids)-found)
+                lifecycle={row["id"]:row for row in self._albums.get_lifecycle_states(unavailable)}
+                inactive=sorted(album_id for album_id,row in lifecycle.items() if row["catalog_state"]!="ACTIVE")
+                if inactive: raise ServiceConflict("ALBUM_NOT_ACTIVE","One or more Albums are not active.",{"album_ids":inactive})
+                raise ValueError("One or more Albums do not exist.")
             selection = {"mode":"ids", "album_ids":sorted(album_ids)}
         else:
             if not isinstance(first_n, int) or not 1 <= first_n <= self.MAX_PREVIEW_ALBUMS:
