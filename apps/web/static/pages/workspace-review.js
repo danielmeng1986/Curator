@@ -14,6 +14,10 @@ const WorkspaceReviewPage = {
   _evidenceActive: 0,
   _evidenceUrls: new Map(),
   _previewUrl: null,
+  _translationItemUuid: null,
+  _translationsVisible: false,
+  _translationLoading: false,
+  _translationError: null,
 
   async renderWorkspaces() {
     this._stopRuntime();
@@ -100,7 +104,8 @@ const WorkspaceReviewPage = {
     this._stopRuntime();
     const el = document.getElementById('page-content'); el.innerHTML = '<div class="loading">Loading review evidence…</div>';
     if(this._promotionSuccess?.completedUuid!==uuid)this._promotionSuccess=null;
-    try { const result = await api.get(`/ai-work-items/${encodeURIComponent(uuid)}/review`); this._detail = result.review; this._renderDetail(); }
+    try { const result = await api.get(`/ai-work-items/${encodeURIComponent(uuid)}/review`); this._detail = result.review;
+      this._translationItemUuid=uuid;this._translationsVisible=(this._detail.translations?.cached_count||0)>0;this._translationLoading=false;this._translationError=null;this._renderDetail(); }
     catch (error) { ui.renderPageError(el,error,'AI review'); }
   },
 
@@ -115,11 +120,19 @@ const WorkspaceReviewPage = {
   _queueRowsHtml(rows){return rows.map(item => `<tr><td><a href="#/albums/${item.album_id}">${esc(item.album_title)}</a></td><td>${esc(item.configuration_name)}</td>
     <td><span class="chip ${item.state === 'Approved' ? 'chip-ok' : item.state === 'Rejected' ? 'chip-error' : 'chip-warn'}">${esc(item.state)}</span></td><td>${esc(item.updated_at)}</td>
     <td><a class="btn btn-sm btn-primary" href="#/ai-work-items/${esc(item.work_item_uuid)}/review">Review details</a></td></tr>`).join('')||'<tr><td colspan="5">No reviews match these filters.</td></tr>';},
+  _translationBySource(){return new Map((this._detail?.translations?.items||[]).map(item=>[item.source_text,item]));},
+  _translationControlsHtml(){
+    const translations=this._detail?.translations; if(!translations)return '';
+    if(this._translationLoading)return '<button type="button" class="btn btn-sm btn-secondary" disabled aria-busy="true">Translating…</button>';
+    if(this._translationsVisible)return '<button type="button" class="btn btn-sm btn-secondary" onclick="WorkspaceReviewPage.hideChineseTranslations()">Hide Chinese translations</button>';
+    const label=this._translationError?'Retry Chinese translations':'Show Chinese translations';
+    return `<button type="button" class="btn btn-sm btn-secondary" onclick="WorkspaceReviewPage.showChineseTranslations(this)">${label}</button>`;
+  },
   _renderDetail() {
     this._stopRuntime();
     const d = this._detail; const review = d.review; const writer = this._writer(); const vision = this._vision();
     const instructionProfile=this._configurationSnapshot(d.item).instruction_profile;
-    const recommendations = writer?.payload?.suggested_names || [];
+    const recommendations = writer?.payload?.suggested_names || [];const translationBySource=this._translationBySource();
     const evidence = d.evidence_history?.evidence || [];
     const key=this._draftKey(review.work_item_uuid); const saved=ui.loadDraft(key);
     if(!this._draft[review.work_item_uuid]&&saved){this._draft[review.work_item_uuid]=saved.data;this._draftStale=saved.metadata?.reviewVersion!==review.version;ui.markDirty(key,'this AI Review',()=>ui.clearDraft(key));toast(this._draftStale?'Restored an AI Review draft created before the current review state changed.':'Restored the AI Review draft saved in this browser.','warning');}
@@ -136,7 +149,10 @@ const WorkspaceReviewPage = {
         <p><strong>Configuration:</strong> ${esc(d.item.configuration_name)}</p><p><strong>Scene:</strong> ${esc(vision?.payload?.scene || '—')}</p>
         <p><strong>People:</strong> ${esc(JSON.stringify(vision?.payload?.people || {}))}</p><p><strong>Location:</strong> ${esc(vision?.payload?.location_environment || '—')}</p>
         <p><strong>Summary:</strong> ${esc(writer?.payload?.album_summary || '—')}</p><p><strong>Description:</strong> ${esc(writer?.payload?.description || '—')}</p>
-        <div><strong>AI recommendations:</strong>${recommendations.map(name => `<label class="recommendation"><input type="radio" name="recommendedName" value="${esc(name)}" ${draft.selected_name === name ? 'checked' : ''} onchange="WorkspaceReviewPage.chooseRecommendation(this.value)"> ${esc(name)}</label>`).join('')}</div></section>
+        <div class="recommendation-heading"><strong>AI recommendations:</strong>${this._translationControlsHtml()}</div>
+        ${this._translationsVisible?'<p class="translation-assistance-note">Machine-generated Chinese translations are for review assistance only. The English title remains authoritative.</p>':''}
+        ${this._translationError?`<div class="translation-local-error" role="alert">${esc(this._translationError)}</div>`:''}
+        <div class="recommendation-list">${recommendations.map(name => {const translated=translationBySource.get(name)?.translated_text;return `<label class="recommendation"><input type="radio" name="recommendedName" value="${esc(name)}" ${draft.selected_name === name ? 'checked' : ''} onchange="WorkspaceReviewPage.chooseRecommendation(this.value)"><span class="recommendation-copy"><span class="recommendation-source">${esc(name)}</span>${this._translationsVisible&&translated?`<span class="recommendation-translation" lang="zh-Hans">${esc(translated)}</span>`:''}</span></label>`;}).join('')}</div></section>
       <section class="card review-panel human-decision"><div class="form-section-title">Human review · editable draft</div>
         ${this._draftStale?'<div class="alert alert-warning">This local draft predates the current Backend review state. Rebase it deliberately before submitting.<div class="detail-actions"><button class="btn btn-secondary" onclick="WorkspaceReviewPage.discardDraft()">Discard local draft</button><button class="btn btn-primary" onclick="WorkspaceReviewPage.rebaseDraft()">Keep text and rebase</button></div></div>':''}
         <div class="form-field"><label for="reviewSelectedName">Final Album name</label><input id="reviewSelectedName" value="${esc(draft.selected_name)}" oninput="WorkspaceReviewPage.saveDraft()"></div>
@@ -159,6 +175,15 @@ const WorkspaceReviewPage = {
   },
 
   chooseRecommendation(value) { const input = document.getElementById('reviewSelectedName'); input.value = value; document.getElementById('reviewSelectionSource').value = 'Recommendation'; this.saveDraft(); },
+  async showChineseTranslations(){
+    if(!this._detail||this._translationLoading)return;this.saveDraft();this._translationsVisible=true;this._translationError=null;
+    if((this._detail.translations?.missing_count||0)===0){this._renderDetail();return;}
+    this._translationLoading=true;this._renderDetail();const uuid=this._detail.review.work_item_uuid;
+    try{const result=await api.post(`/ai-work-items/${encodeURIComponent(uuid)}/review-translations`,{});if(this._detail?.review.work_item_uuid!==uuid)return;this._detail.translations=result.translations;}
+    catch(error){if(this._detail?.review.work_item_uuid!==uuid)return;this._translationError=error.message||'Chinese translations are temporarily unavailable. You can continue the review and retry later.';}
+    finally{if(this._detail?.review.work_item_uuid===uuid){this._translationLoading=false;this._renderDetail();}}
+  },
+  hideChineseTranslations(){this.saveDraft();this._translationsVisible=false;this._translationError=null;this._renderDetail();},
   _draftKey(uuid){return `ai-review.${uuid}`;},
   saveDraft() {
     if (!this._detail) return; const uuid = this._detail.review.work_item_uuid;

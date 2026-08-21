@@ -2,7 +2,7 @@
 
 ## Task ID
 
-`UI-038` — Status: `Ready`
+`UI-038` — Status: `Complete`
 
 ## Title
 
@@ -61,3 +61,17 @@ second line beneath its unchanged English title.
 - Disposable browser journey with a fake provider: opt-in, cache reuse after
   refresh, selection/approval unchanged, and provider failure isolation.
 - AI Review draft, Promotion, permission, and live-navigation regressions.
+
+## Completion Record
+
+- Added accessible Show/Hide/Retry controls beside AI Recommendations; only an
+  explicit Show action sends a request to the Curator Backend.
+- Added two-line English/Simplified-Chinese rendering with machine-assistance
+  labelling while preserving the English radio value and Promotion authority.
+- Cached translations automatically reappear on revisit; hiding is local UI
+  state and does not delete persisted data.
+- Kept configuration/provider failures local to the Recommendation panel and
+  preserved Review drafts, decisions, navigation, and stale-version behavior.
+- Added UI contract coverage proving no browser DeepL integration and fake-
+  provider browser acceptance proving first request, cache-only show/revisit,
+  refresh recovery, and unchanged English selection.

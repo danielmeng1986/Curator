@@ -407,7 +407,15 @@ code {
 .ai-output { border-left:4px solid var(--primary); }
 .human-decision { border-left:4px solid var(--accent); }
 .system-evidence { border-left:4px solid var(--ink-soft); }
-.recommendation { display:block; padding:7px 0; }
+.recommendation-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:8px; }
+.recommendation-list { display:grid; }
+.recommendation { display:flex; align-items:flex-start; gap:8px; padding:7px 0; cursor:pointer; }
+.recommendation > input { margin-top:.25rem; flex:0 0 auto; }
+.recommendation-copy { display:grid; gap:2px; min-width:0; }
+.recommendation-source { line-height:1.35; }
+.recommendation-translation { color:var(--ink-soft); font-size:.9rem; line-height:1.35; }
+.translation-assistance-note { margin:.55rem 0 .15rem; color:var(--ink-soft); font-size:.82rem; }
+.translation-local-error { margin:.55rem 0 .15rem; padding:8px 10px; border-left:3px solid var(--danger); background:var(--danger-soft,#fff0f0); color:var(--danger); font-size:.85rem; }
 .evidence-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px; margin:12px 0; max-height:70vh; overflow:auto; align-items:start; }
 .evidence-card { display:grid; gap:5px; padding:10px; border:1px solid var(--line); border-radius:8px; background:#fff; color:inherit; text-align:left; font:inherit; min-width:0; }
 .evidence-preview:not(:disabled) { cursor:zoom-in; }

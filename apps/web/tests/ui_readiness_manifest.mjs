@@ -95,9 +95,9 @@ export const UI_READINESS_SUITES = Object.freeze([
     command:process.execPath,args:['apps/web/tests/work_dispatch_pagination_browser_acceptance.mjs'],timeoutMs:120_000,
   },
   {
-    id: 'workspace-review', task: 'UI-011A-D',
+    id: 'workspace-review', task: 'UI-011A-D/UI-038',
     specification: 'AI Collection Workspace; Workspace Review state machine',
-    backendEvidence: 'BT-043 through BT-053/BT-057; test_ai_workspace_workflow_acceptance',
+    backendEvidence: 'BT-043 through BT-053/BT-057/BT-067; AI Workspace and translation-cache acceptance',
     interruptions: dimensions({modalClose:covered('UI-026 Promotion review'),navigation:covered('UI-027 per-item draft'),refresh:covered('UI-027 draft restore'),browserRestart:covered('versioned review draft'),backendRestart:covered('durable version reconciliation'),delayedAction:covered('stale draft rebase'),retry:covered('validation/network/stale retention'),cancellation:covered('explicit draft discard')}),
     command: process.execPath, args: ['apps/web/tests/workspace_review_browser_acceptance.mjs'], timeoutMs: 180_000,
   },

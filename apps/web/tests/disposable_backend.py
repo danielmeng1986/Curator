@@ -248,6 +248,15 @@ def main() -> None:
 
         server.svc.WorkDispatchAdapterRegistry = FixtureWorkerRegistry
 
+        class FixtureTranslationAdapter:
+            def __init__(self, *_args, **_kwargs): pass
+            def translate(self, texts, target_lang="ZH-HANS"):
+                return [{"text": f"测试译文：{text}", "detected_source_language": "EN"} for text in texts]
+
+        server.DeepLTranslationAdapter = FixtureTranslationAdapter
+        server.TRANSLATION_CONFIG = {"api_key": "fixture-only", "plan": "developer", "configured": True}
+        server.TRANSLATION_CONFIG_ERROR = None
+
     httpd = HTTPServer(("127.0.0.1", args.port), server.AppHandler)
     manifest = {
         "fixture_id": str(uuid.uuid4()),

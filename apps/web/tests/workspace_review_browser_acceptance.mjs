@@ -18,7 +18,7 @@ async function submitResult(itemUuid,index){
   const writer=await fixture.request(`/ai-work-items/${itemUuid}/results/writer`,{method:'POST',role:'writer',body:{schema_version:'curator://album-analysis/writer/v1',payload:{album_summary:`Friends explore a forest lakeside ${index}.`,description:'A calm outdoor journey with friends among trees and water.',suggested_names:names}}});assert.equal(writer.status,200);return names;
 }
 async function openReview(page,itemUuid){await page.goto(`${fixture.origin}/#/ai-work-items/${itemUuid}/review`);await page.locator('h1.page-title').waitFor();}
-async function releaseGroup(page,groupUuid){await page.goto(`${fixture.origin}/#/work-dispatch/groups/${groupUuid}`);await page.getByRole('heading',{name:'Dispatch Group'}).waitFor();page.once('dialog',dialog=>dialog.accept('All review obligations are terminal'));await page.getByRole('button',{name:'release',exact:true}).click();await page.getByText('Released').waitFor();}
+async function releaseGroup(page,groupUuid){await page.goto(`${fixture.origin}/#/work-dispatch/groups/${groupUuid}`);await page.getByRole('heading',{name:'Dispatch Group'}).waitFor();page.once('dialog',dialog=>dialog.accept('All review obligations are terminal'));await page.getByRole('button',{name:'Release Group',exact:true}).click();await page.getByText('Released').waitFor();}
 
 try{
   const config=await configuration();const workspaceResponse=await admin({path:'/ai-workspaces',method:'POST',body:{title:'Browser Review Workspace'}});const workspace=workspaceResponse.payload.data.workspace;
@@ -31,6 +31,12 @@ try{
   const liveRow=page.locator('tr',{has:page.locator(`a[href="#/ai-work-items/${items[2]}/review"]`)});await liveRow.getByText('InReview',{exact:true}).waitFor({timeout:10000});
 
   await openReview(page,items[0]);await page.getByText('AI analysis · immutable').waitFor();await page.getByText('Human review · editable draft').waitFor();await page.getByText('System evidence and provenance').waitFor();assert.equal(await page.locator('.evidence-card').count(),8);
+  await page.getByRole('button',{name:'Show Chinese translations'}).click();await page.getByText('测试译文：Golden Forest Morning').waitFor();
+  assert.equal(await page.locator('input[name="recommendedName"]').first().getAttribute('value'),'Golden Forest Morning');
+  await page.getByRole('button',{name:'Hide Chinese translations'}).click();assert.equal(await page.getByText('测试译文：Golden Forest Morning').count(),0);
+  await page.getByRole('button',{name:'Show Chinese translations'}).click();await page.getByText('测试译文：Golden Forest Morning').waitFor();
+  page.once('dialog',dialog=>dialog.accept());await page.reload();await page.getByText('测试译文：Golden Forest Morning').waitFor();
+  const translationOperations=await admin({path:'/operations?operation_type=ai_review_translation'});assert.equal(translationOperations.payload.data.length,1);
   await page.locator('.evidence-preview').first().scrollIntoViewIfNeeded();await page.locator('.evidence-preview img').first().waitFor({timeout:10000});await page.locator('.evidence-preview').first().click();await page.locator('.evidence-full-preview img').waitFor();await page.getByRole('button',{name:'Close preview'}).click();
   await page.getByRole('button',{name:'Begin review'}).click();await page.getByRole('button',{name:'Approve selection'}).waitFor();
   await page.getByLabel('Final Album name').fill('invalid name');await page.getByLabel('Selection source').selectOption('HumanRevision');await page.getByRole('button',{name:'Approve selection'}).click();await page.getByText(/Check the highlighted information/).waitFor();assert.equal(await page.getByLabel('Final Album name').inputValue(),'invalid name');
@@ -53,7 +59,7 @@ try{
   const rework=await admin({path:`/ai-work-items/${items[2]}/review`});const successor=rework.payload.data.review.successor_work_item_uuid;assert.ok(successor);
   const cancelled=await admin({path:`/ai-work-items/${successor}/cancel`,method:'POST',body:{expected_version:1}});assert.equal(cancelled.status,200);
 
-  for(const group of groups)await releaseGroup(page,group.group_uuid);
+  for(const group of groups){const state=await admin({path:`/work-dispatch/groups/${group.group_uuid}`});assert.ok(state.payload.data.group.allowed_actions.includes('release'),JSON.stringify(state.payload.data.group));await releaseGroup(page,group.group_uuid);}
   await page.goto(`${fixture.origin}/#/ai-workspaces/${workspace.uuid}`);await page.getByRole('heading',{name:'Browser Review Workspace'}).waitFor();
   page.once('dialog',dialog=>dialog.accept('Completed browser review acceptance'));await page.getByRole('button',{name:'Close Workspace'}).click();await page.getByText('Closed',{exact:true}).waitFor();
   page.once('dialog',dialog=>dialog.accept('Archive completed audit record'));await page.getByRole('button',{name:'Archive Workspace'}).click();await page.getByText('Archived',{exact:true}).waitFor();

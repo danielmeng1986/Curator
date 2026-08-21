@@ -94,6 +94,19 @@ The stable Review state machine is:
 
 `ReadyForReview → InReview → Approved | Rejected | ReworkRequested`
 
+AI Recommendation titles may show Backend-cached Simplified-Chinese machine
+translations as a second, visually subordinate line. The Admin explicitly
+requests missing translations with **Show Chinese translations**; an ordinary
+page load never invokes the external provider. Existing cached translations
+appear on later visits even when the provider is unavailable. **Hide Chinese
+translations** changes only presentation and never deletes cache data.
+
+The English title remains the radio value, final Recommendation, and Promotion
+authority. Translation loading or failure stays inside the Recommendation
+panel and cannot disable, clear, or alter Review drafts, decisions, navigation,
+or Promotion. The UI labels the Chinese text as machine-generated review
+assistance and never contains provider credentials or calls DeepL directly.
+
 Approval freezes one recommendation or a validated human revision. Rating is
 optional from 1–5; Reject and Rework require a reason. Rework creates a linked
 successor Work Item in the same Group and preserves prior results and decisions.
