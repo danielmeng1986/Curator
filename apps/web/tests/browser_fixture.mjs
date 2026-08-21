@@ -23,6 +23,7 @@ export const SCENARIOS = Object.freeze({
     readiness: 'Ready',
     dependency: 'BT-055 and UI-032',
   }),
+  'digital-asset-trash': Object.freeze({ readiness: 'Ready', dependency: 'BT-034 and UI-037' }),
 });
 
 const ROLE_SCOPES = Object.freeze({

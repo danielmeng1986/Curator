@@ -79,6 +79,7 @@ snapshot, archive, and output resources.
 | [UI-034](UI-034-live-review-and-ephemeral-evidence-preview.md) | Live AI Review state and ephemeral lazy-loaded evidence preview | Complete |
 | [UI-035](UI-035-separate-work-queue-review-and-item-cancellation.md) | Work queue/review/closure workflow, per-item cancellation, and dual pagination | Complete |
 | [UI-036](UI-036-guide-cancelled-work-item-closure.md) | Explain Album reservation and Group closure after Work Item cancellation | Complete |
+| [UI-037](UI-037-move-albums-to-digital-asset-trash.md) | Reviewed Album move-to-Trash workflow | Complete |
 
 ## Dependency outline
 
@@ -119,3 +120,8 @@ UI-033 optimizes the completed end-to-end workflow for a large Review Queue. It
 keeps one-Album audit and Promotion boundaries, replaces repeated name entry
 only after the Backend confirmation contract is amended, adds stable next-review
 navigation, and uses bounded native-JavaScript polling for live Dispatch progress.
+
+UI-037 consumes the completed BT-034 lifecycle to add the Writer/Admin Album
+detail action, readiness blockers, zero-write Preview, and confirmed move to
+Digital Asset Trash. It precedes UI-010E's restore administration and does not
+wait for BT-035 permanent purge.

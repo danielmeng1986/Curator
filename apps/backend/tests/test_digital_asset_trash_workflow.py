@@ -39,6 +39,8 @@ class DigitalAssetTrashWorkflowTests(unittest.TestCase):
     def test_trash_hides_album_preserves_rows_and_restore_returns_same_identity(self):
         preview=self.service.preview_trash(1,"writer-token")
         self.assertEqual(3,preview["photo_count"])
+        self.assertEqual("Studio/Three Photos",preview["path"])
+        self.assertEqual("2026-09-19T00:00:00+00:00",preview["retention_until"])
         result=self.service.execute_trash(preview["preview_token"],"writer-token")
         self.assertFalse((self.archive/"Studio"/"Three Photos").exists())
         self.assertEqual([],self.albums.search()[0])

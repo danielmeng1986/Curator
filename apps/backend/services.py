@@ -934,7 +934,9 @@ class DigitalAssetTrashService:
     def readiness(self,album_id):
         result=self._repo.trash_readiness(album_id)
         if not result: raise ServiceNotFound("Album not found.")
-        return {k:v for k,v in result.items() if k!="album"} | {"album_uuid":result["album"]["uuid"],"title":result["album"]["title"],"lifecycle_version":result["album"]["lifecycle_version"]}
+        return {k:v for k,v in result.items() if k!="album"} | {"album_uuid":result["album"]["uuid"],
+            "title":result["album"]["title"],"path":result["album"]["path"],
+            "lifecycle_version":result["album"]["lifecycle_version"]}
 
     def preview_trash(self,album_id,actor):
         state=self._repo.trash_readiness(album_id)
@@ -946,7 +948,8 @@ class DigitalAssetTrashService:
             "path":album["path"],"trash_uuid":trash_uuid,"trash_path":f"albums/{trash_uuid}","photo_count":state["photo_count"],
             "file_count":files,"byte_count":byte_count,"digest":digest,"actor":actor,
             "expires_at":(self._now()+timedelta(minutes=10)).isoformat()}
-        return self.readiness(album_id) | {"file_count":files,"byte_count":byte_count,"inventory_digest":digest,"preview_token":self._sign(payload)}
+        return self.readiness(album_id) | {"file_count":files,"byte_count":byte_count,"inventory_digest":digest,
+            "retention_until":(self._now()+timedelta(days=30)).isoformat(),"preview_token":self._sign(payload)}
 
     def execute_trash(self,token,actor):
         payload=self._read(token,"trash")

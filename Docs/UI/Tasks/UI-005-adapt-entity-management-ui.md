@@ -36,7 +36,8 @@ minimum routine digital-asset management unit.
 
 - UI-001 and UI-002.
 - `BT-032` for Album query, batch mutation, and relationship validation contracts.
-- `BT-033`, `BT-034`, `BT-035`, and `UI-010E` before enabling Album Trash or permanent purge actions.
+- `BT-033`, `BT-034`, and `UI-037` before enabling Album Trash. Permanent
+  purge remains gated separately by `BT-035` and `UI-010E`.
 - Supported canonical read/write models for each exposed entity surface.
 
 ## Implementation Steps

@@ -30,6 +30,7 @@ SCENARIOS = {
     "filesystem": "Disposable Import source, Archive, Snapshot, and Quarantine roots.",
     "future-ai-workspace": "Albums ready for AI Workspace dispatch and review.",
     "work-dispatch-pagination": "More than one page of filterable AI dispatch candidates.",
+    "digital-asset-trash": "Eligible and AI-Work-blocked Albums with disposable assets.",
 }
 
 
@@ -44,6 +45,10 @@ def _initialize_database(database_path: Path, scenario: str) -> None:
     connection = _connect(database_path)
     try:
         connection.executescript(_WORKFLOW_SCHEMA_SQL)
+        server.repo.AIWorkspaceRepository._ensure_schema(connection)
+        server.repo.WorkDispatchRepository._ensure_schema(connection)
+        server.repo.AIWorkItemRepository._ensure_schema(connection)
+        server.repo.AIReviewRepository._ensure_schema(connection)
         connection.execute(
             "INSERT INTO status (name, description) VALUES (?, ?)",
             ("Active", "Active albums"),
@@ -51,7 +56,7 @@ def _initialize_database(database_path: Path, scenario: str) -> None:
         if scenario in {"future-ai-workspace", "work-dispatch-pagination"}:
             connection.execute("INSERT INTO status (name, description) VALUES ('TEMPORARY', 'Awaiting curated name')")
             connection.execute("INSERT INTO status (name, description) VALUES ('NAME_GENERATED', 'AI name promoted')")
-        if scenario in {"entities", "future-ai-workspace", "work-dispatch-pagination"}:
+        if scenario in {"entities", "future-ai-workspace", "work-dispatch-pagination", "digital-asset-trash"}:
             connection.execute(
                 "INSERT INTO studio (uuid, name, website) VALUES (?, ?, ?)",
                 ("studio-ui-fixture", "Fixture Studio", "https://example.invalid"),
@@ -76,6 +81,27 @@ def _initialize_database(database_path: Path, scenario: str) -> None:
                    VALUES (?, 1, ?, ?)""",
                 ("photo-ui-fixture", "cover.jpg", "cover.jpg"),
             )
+            if scenario == "digital-asset-trash":
+                for index in (2, 3):
+                    connection.execute(
+                        "INSERT INTO photo (uuid, album_id, filename, relative_path) VALUES (?, 1, ?, ?)",
+                        (f"photo-ui-fixture-{index}", f"photo-{index}.jpg", f"photo-{index}.jpg"),
+                    )
+                connection.execute(
+                    "INSERT INTO album (uuid, studio_id, status_id, title, path) VALUES ('album-trash-blocked', 1, 1, 'Blocked Album', 'Fixture Studio/Blocked Album')"
+                )
+                connection.execute(
+                    "INSERT INTO photo (uuid, album_id, filename, relative_path) VALUES ('photo-trash-blocked', 2, 'blocked.jpg', 'blocked.jpg')"
+                )
+                connection.execute(
+                    "INSERT INTO work_dispatch_batch(uuid,worker_kind,dataset_type,schema_version,batch_state,created_at,updated_at) VALUES ('trash-batch','fixture','album',1,'Active','2026-08-21','2026-08-21')"
+                )
+                connection.execute(
+                    "INSERT INTO work_dispatch_group(uuid,batch_uuid,album_id,worker_kind,dataset_type,schema_version,group_state,created_at,updated_at) VALUES ('trash-group','trash-batch',2,'fixture','album',1,'Active','2026-08-21','2026-08-21')"
+                )
+                connection.execute(
+                    "INSERT INTO album_work_reservation(album_id,group_uuid,batch_uuid,worker_kind,reserved_at) VALUES (2,'trash-group','trash-batch','fixture','2026-08-21')"
+                )
             if scenario in {"future-ai-workspace", "work-dispatch-pagination"}:
                 connection.execute("UPDATE album SET status_id=2 WHERE id=1")
                 upper_bound = 56 if scenario == "work-dispatch-pagination" else 4
@@ -141,6 +167,7 @@ def main() -> None:
         "archive": root / "archive",
         "snapshots": root / "snapshots",
         "quarantine": root / "quarantine",
+        "trash": root / "trash",
         "backups": root / "backups",
         "logs": root / "logs",
         "outputs": root / "outputs",
@@ -164,6 +191,15 @@ def main() -> None:
             album_root.mkdir(parents=True)
             for index in range(8):
                 (album_root / f"evidence-{index + 1:02d}.png").write_bytes(pixel_png)
+    if args.scenario == "digital-asset-trash":
+        eligible = resources["archive"] / "Fixture Studio" / "Fixture Album"
+        eligible.mkdir(parents=True)
+        (eligible / "cover.jpg").write_bytes(b"cover")
+        (eligible / "photo-2.jpg").write_bytes(b"photo-two")
+        (eligible / "photo-3.jpg").write_bytes(b"photo-three")
+        blocked = resources["archive"] / "Fixture Studio" / "Blocked Album"
+        blocked.mkdir(parents=True)
+        (blocked / "blocked.jpg").write_bytes(b"blocked")
 
     _initialize_database(resources["database"], args.scenario)
     config_path = root / "backend.json"
@@ -172,6 +208,7 @@ def main() -> None:
             "import_source_root": str(resources["source"]),
             "archive_root": str(resources["archive"]),
             "quarantine_root": str(resources["quarantine"]),
+            "trash_root": str(resources["trash"]),
             "default_import_studio": "Fixture Studio",
         }),
         encoding="utf-8",

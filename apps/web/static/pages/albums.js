@@ -5,6 +5,7 @@ const AlbumsPage = {
   _selectedIds: new Set(),
   _searchDebounce: null,
   _listRequestId: 0,
+  _trashPreviewToken: null,
 
   async renderList(params) {
     const el = document.getElementById('page-content');
@@ -249,6 +250,7 @@ const AlbumsPage = {
       this._editModels = [...models];
       this._editRelations = [...relations];
       this._currentId = id;
+      this._currentAlbum = album;
       this._allModels = allModels;
       this._allAlbums = (albumsData.albums || []).filter(item => String(item.id) !== String(id));
       this._statuses = statuses;
@@ -327,6 +329,11 @@ const AlbumsPage = {
           </div>
 
           ${!isNew ? `
+          <div class="form-section" id="digitalAssetLifecycle">
+            <div class="form-section-title">Digital Asset Lifecycle</div>
+            <div id="albumTrashReadiness" class="loading">Checking whether this Album can be moved to Trash…</div>
+          </div>
+
           <details style="margin-bottom:16px">
             <summary style="cursor:pointer;font-size:.85rem;color:var(--ink-soft);margin-bottom:8px">Record Details</summary>
             <div class="record-details">
@@ -339,7 +346,6 @@ const AlbumsPage = {
 
           <div class="detail-actions">
             <button class="btn btn-primary" data-required-scope="write" onclick="AlbumsPage._save()">Save</button>
-            ${!isNew ? '<span class="feedback-reference">Album removal will be available through Digital Asset Trash.</span>' : ''}
           </div>
         </div>
       `;
@@ -348,10 +354,129 @@ const AlbumsPage = {
 
       this._renderModelsSection();
       this._renderRelationsSection();
+      if (!isNew) await this._loadTrashReadiness();
 
     } catch (e) {
       ui.renderPageError(el, e, 'this Album');
     }
+  },
+
+  _trashBlocker(blocker) {
+    const labels = {
+      ALBUM_NOT_ACTIVE: 'This Album is no longer active in the normal catalog.',
+      ASSETS_NOT_PRESENT: 'The Album assets are not currently available to move.',
+      ACTIVE_WORK_RESERVATION: 'An active AI Work reservation still owns this Album.',
+      WORK_GROUP_NOT_RELEASED: 'An AI Work Group has not been released.',
+      WORK_ITEM_NOT_TERMINAL: `${blocker.count || 'One or more'} AI Work Item(s) are not terminal.`,
+      REVIEW_NOT_FINAL: `${blocker.count || 'One or more'} AI Review(s) are not final.`,
+      WORKSPACE_NOT_CLOSED: `${blocker.count || 'One or more'} AI Workspace(s) are not closed.`,
+      ACTIVE_OPERATION: `${blocker.count || 'One or more'} Operation(s) are still active.`,
+    };
+    const message = labels[blocker.code] || `The Backend blocked this action (${blocker.code || 'unknown reason'}).`;
+    if (blocker.group_uuid && window.curatorPrincipal?.role === 'admin') {
+      return `${esc(message)} <a href="#/work-dispatch/groups/${encodeURIComponent(blocker.group_uuid)}">Open Work Group</a>`;
+    }
+    return `${esc(message)}${blocker.group_uuid ? ` <span class="feedback-reference">Group ${esc(blocker.group_uuid)}</span>` : ''}`;
+  },
+
+  async _loadTrashReadiness() {
+    const target = document.getElementById('albumTrashReadiness');
+    if (!target || !this._currentId) return;
+    target.className = 'loading';
+    target.textContent = 'Checking whether this Album can be moved to Trash…';
+    try {
+      const data = await api.get(`/albums/${this._currentId}/trash-readiness`);
+      if (!target.isConnected) return;
+      const readiness = data.readiness;
+      this._trashReadiness = readiness;
+      const blockers = readiness.blockers || [];
+      const canWrite = ui.can(window.curatorPrincipal?.role, 'write');
+      target.className = '';
+      target.innerHTML = `
+        <div class="record-details">
+          <span class="record-detail-label">Catalog</span><span>Visible in Albums</span>
+          <span class="record-detail-label">Assets</span><span>Present</span>
+          <span class="record-detail-label">Business Status</span><span>Unchanged by Trash</span>
+          <span class="record-detail-label">Contained Photos</span><span>${Number(readiness.photo_count || 0)}</span>
+        </div>
+        ${blockers.length ? `<section class="feedback feedback-conflict" role="status"><strong>Move to Trash is unavailable</strong><ul>${blockers.map(item => `<li>${this._trashBlocker(item)}</li>`).join('')}</ul></section>` :
+          '<p class="feedback-reference">Moving this Album to Trash hides it from Albums and moves its complete asset directory. Album and Photo database records remain.</p>'}
+        ${canWrite ? `<button id="albumTrashBtn" class="btn btn-danger" data-required-scope="write" ${blockers.length ? 'disabled' : ''} onclick="AlbumsPage._previewTrash(this)">Move to Trash</button>` :
+          '<p class="feedback-reference">Read-only access: a Writer or Administrator is required to move this Album.</p>'}
+      `;
+      ui.applyPermissions(target, window.curatorPrincipal);
+    } catch (error) {
+      target.className = '';
+      target.innerHTML = `${ui.errorHtml(error, 'check Album Trash readiness')}<button class="btn btn-secondary btn-sm" onclick="AlbumsPage._loadTrashReadiness()">Retry readiness check</button>`;
+    }
+  },
+
+  _formatBytes(value) {
+    const bytes = Number(value || 0);
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  },
+
+  async _previewTrash(trigger) {
+    if (ui.hasUnsavedChanges()) {
+      toast('Save or leave your Album edits before moving its saved record to Trash.', 'warning', 7000);
+      return;
+    }
+    const albumId = this._currentId;
+    const result = await ui.runAction(`album-trash-preview-${albumId}`, () => api.post(`/albums/${albumId}/trash/preview`, {}),
+      { trigger, context: 'preview moving the Album to Trash' });
+    if (!result.ok) return;
+    const preview = result.value.preview;
+    if (!preview.can_trash || !preview.preview_token) { await this._loadTrashReadiness(); return; }
+    this._trashPreviewToken = preview.preview_token;
+    const retention = preview.retention_until ? new Date(preview.retention_until).toLocaleString() : 'Backend retention policy';
+    ui.showReviewedAction(`
+      <h3 id="modal-title" class="modal-title">Move Album to Digital Asset Trash?</h3>
+      <p><strong>${esc(preview.title)}</strong></p>
+      <div class="record-details">
+        <span class="record-detail-label">Asset path</span><span class="path-mono">${esc(preview.path || '—')}</span>
+        <span class="record-detail-label">Photos retained as records</span><span>${Number(preview.photo_count || 0)}</span>
+        <span class="record-detail-label">Files to move</span><span>${Number(preview.file_count || 0)}</span>
+        <span class="record-detail-label">Asset size</span><span>${esc(this._formatBytes(preview.byte_count))}</span>
+        <span class="record-detail-label">Recoverable until</span><span>${esc(retention)}</span>
+      </div>
+      <section class="feedback feedback-warning"><strong>This is not database deletion.</strong><p>The Album and Photo records and the Album business Status remain unchanged. The Album will disappear from normal Albums and its complete asset directory will move to Trash.</p></section>
+      <label class="acknowledgement"><input id="albumTrashAcknowledgement" type="checkbox" onchange="document.getElementById('executeAlbumTrashBtn').disabled=!this.checked"> I understand that the saved Album will be hidden and all of its digital assets will move to Trash.</label>
+      <div class="modal-footer"><button class="btn btn-secondary" onclick="AlbumsPage._cancelTrashReview()">Cancel</button><button id="executeAlbumTrashBtn" class="btn btn-danger" disabled onclick="AlbumsPage._executeTrash(this)">Move reviewed Album to Trash</button></div>
+    `, { key:`album-trash-${albumId}`, label:'Album move-to-Trash review' });
+  },
+
+  _cancelTrashReview() { this._trashPreviewToken = null; closeModal(); },
+
+  _listHash() {
+    const qs = new URLSearchParams();
+    Object.entries(this._listState).forEach(([key, value]) => { if (value !== '' && value !== 0) qs.set(key, value); });
+    return `#/albums${qs.size ? `?${qs}` : ''}`;
+  },
+
+  async _executeTrash(trigger) {
+    const albumId = this._currentId;
+    const token = this._trashPreviewToken;
+    const result = await ui.runAction(`album-trash-execute-${albumId}`, () => api.post('/albums/trash/execute', { preview_token: token }),
+      { trigger, context: 'move the Album to Trash' });
+    if (!result.ok) {
+      if (['ASSET_PREVIEW_EXPIRED','ASSET_LIFECYCLE_STALE','ASSET_SCOPE_CHANGED'].includes(result.error?.code)) {
+        this._trashPreviewToken = null;
+        closeModal();
+        await this._loadTrashReadiness();
+        toast('Album state changed. Review a fresh Trash preview before trying again.', 'warning', 7000);
+      }
+      return;
+    }
+    const outcome = result.value.result;
+    this._trashPreviewToken = null;
+    closeModal();
+    ui.clearDraft(this._draftKey());
+    ui.clearDirty(this._draftKey());
+    this._selectedIds.delete(Number(albumId));
+    toast(`Album moved to Trash. Operation ${outcome.operation_uuid}.`, 'ok', 7000);
+    navigate(this._listHash());
   },
 
   _draftKey() { return `entity.album.${this._currentId || 'new'}`; },

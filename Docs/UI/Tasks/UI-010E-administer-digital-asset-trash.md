@@ -25,8 +25,8 @@ database evidence as deleted when only assets were removed.
 ## Scope
 
 - Admin Center Trash list, filters, lifecycle state, retention/hold, Album/Photo scope, and safe evidence.
-- Album-level Trash readiness, blocker explanation, impact preview, and
-  confirmation initiated from entity management.
+- Administrative visibility into the Album Trash action owned by `UI-037`,
+  without duplicating its entity-management workflow.
 - Normal Albums ReadModel exclusion for Trashed Albums and explicit historical
   presentation for records whose assets are `DELETED`.
 - Restore eligibility, collision/failure presentation, hold/release, individual purge, and reviewed batch empty-Trash flow.
@@ -47,22 +47,23 @@ database evidence as deleted when only assets were removed.
 - `BT-034` — blocks Album Trash/Restore and Admin Trash list/detail delivery.
 - `BT-035` — blocks only permanent purge, empty-Trash, and deleted-asset history
   delivery; it does not block implementation and acceptance of Trash/Restore.
+- `UI-037` — supplies the Album-detail move-to-Trash entry and browser-created
+  recoverable items used by this task's restore journey.
 
 ## Implementation Steps
 
-1. After `BT-034`, add Album-page Trash readiness and action. Disabled actions
-   display Backend blocker reasons and links to relevant Work/Review records.
-2. Build Admin Trash list/detail, filters, safe impact summaries, retention,
+1. Build Admin Trash list/detail, filters, safe impact summaries, retention,
    hold/release, and restore presentation. Verify Trashed Albums disappear from
    normal Albums without changing their displayed historical business status.
-3. Add isolated Trash/Restore browser/filesystem acceptance before enabling any
+2. Integrate with the Album-page Trash action delivered by `UI-037` and add
+   isolated Trash/Restore browser/filesystem acceptance before enabling any
    purge control.
-4. After `BT-035`, add individual purge and reviewed batch empty-Trash
+3. After `BT-035`, add individual purge and reviewed batch empty-Trash
    confirmations driven only by Backend eligibility/read models.
-5. Add deleted-asset history presentation with `assets_available = false`, no
+4. Add deleted-asset history presentation with `assets_available = false`, no
    open-folder/photo affordance, retained Photo count/bytes, and durable
    Operation evidence.
-6. Link durable outcomes and render stale, collision, missing-file, partial,
+5. Link durable outcomes and render stale, collision, missing-file, partial,
    and `NeedsRepair` states truthfully; add destructive-path acceptance.
 
 ## Acceptance Criteria

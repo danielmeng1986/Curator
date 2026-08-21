@@ -29,7 +29,7 @@ try {
   await page.getByRole('heading', { name: 'Fixture Album' }).waitFor();
   assert.equal(await page.getByRole('heading', { name: /Photos/ }).count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Delete Album' }).count(), 0);
-  await page.getByText(/Digital Asset Trash/).waitFor();
+  await page.getByText('Digital Asset Lifecycle', { exact: true }).waitFor();
 
   await page.getByRole('button', { name: '+ Add Model' }).click();
   await page.getByRole('button', { name: 'Create Model' }).click();
