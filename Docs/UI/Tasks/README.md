@@ -80,6 +80,8 @@ snapshot, archive, and output resources.
 | [UI-035](UI-035-separate-work-queue-review-and-item-cancellation.md) | Work queue/review/closure workflow, per-item cancellation, and dual pagination | Complete |
 | [UI-036](UI-036-guide-cancelled-work-item-closure.md) | Explain Album reservation and Group closure after Work Item cancellation | Complete |
 | [UI-037](UI-037-move-albums-to-digital-asset-trash.md) | Reviewed Album move-to-Trash workflow | Complete |
+| [UI-038](UI-038-on-demand-ai-review-translations.md) | On-demand cached Chinese assistance for AI Recommendations | Ready |
+| [UI-039](UI-039-administer-ai-review-translation-backfill.md) | Quality-gated historical translation backfill administration | Blocked |
 
 ## Dependency outline
 
@@ -125,3 +127,7 @@ UI-037 consumes the completed BT-034 lifecycle to add the Writer/Admin Album
 detail action, readiness blockers, zero-write Preview, and confirmed move to
 Digital Asset Trash. It precedes UI-010E's restore administration and does not
 wait for BT-035 permanent purge.
+
+UI-038 consumes BT-067 to add opt-in two-line English/Chinese Recommendation
+display without changing the English Review/Promotion authority. After human
+quality approval, BT-068 and UI-039 may add reviewed historical backfill.

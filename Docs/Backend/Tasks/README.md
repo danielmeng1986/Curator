@@ -79,6 +79,8 @@ are approved.
 | [BT-063](BT-063-capability-aware-long-poll-work-claim.md) | Capability-matched atomic claims with bounded long-poll wake-up and attempt audit snapshots. |
 | [BT-064](BT-064-acknowledged-album-promotion-contract.md) | Acknowledgement-based single-Album Promotion without repeated name entry. |
 | [BT-065](BT-065-retire-promoted-evidence-content.md) | Retire image content after Promotion while retaining Manifest audit data. |
+| [BT-067](BT-067-persist-ai-review-translation-cache.md) | On-demand DeepL translation with immutable-result-safe persistent cache. |
+| [BT-068](BT-068-batch-backfill-ai-review-translations.md) | Quality-gated Administrator historical translation backfill. |
 
 BT identifiers record planning order, not mandatory execution order. Dispatch
 is an entry boundary for AI work, so BT-054 through BT-056 precede BT-047 in
@@ -95,6 +97,14 @@ the Backend contract required by UI-033.
 Recommended implementation order:
 
 `BT-054 → BT-055 → BT-056 → BT-047 → BT-048 → BT-049 → BT-050 → BT-051 → BT-057 → BT-052 → BT-053`.
+
+## AI Review translation sequence
+
+`BT-067 → UI-038 → translation-quality approval → BT-068 → UI-039`.
+
+On-demand translation and persistent cache ship first. Historical batch
+backfill remains blocked until a representative human review confirms that
+creative English Album titles are translated usefully enough for review aid.
 
 ## Digital Asset Trash implementation sequence
 
